@@ -62,6 +62,27 @@ npm run preview    # 本地预览生产构建
 - PWA 安装与 Service Worker 需要 **HTTPS**（localhost 除外）。首次访问后刷新一次即可离线打开。
 - 图标与 manifest 位于 `public/`，已生成 192 / 512 / 180 三种尺寸。
 
+## 下载 APK
+
+由 GitHub Actions（`ubuntu-latest` / x86_64）自动构建，产物见 [Releases · v1.0.0](https://github.com/jijiayi0626/travelog-multiplatform/releases/tag/v1.0.0)：
+
+- [Debug APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v1.0.0/travelog-1.0.0-debug.apk)（4.1 MB，可直接安装）
+- [Release APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v1.0.0/travelog-1.0.0-release.apk)（3.2 MB，CI 临时签名，正式发布请换成自有 keystore）
+
+包名 `com.travellog.app`，minSdk 23 / targetSdk 35。应用为 WebView + Java 实现，**不含 native 库**，单个 APK 兼容 `arm64-v8a` / `armeabi-v7a` / `x86_64`。
+
+### 自动构建
+
+`.github/workflows/android-apk.yml`：
+
+| 触发 | 产物 |
+| --- | --- |
+| push 到 `main` | Debug APK artifact |
+| 手动触发 workflow | 额外构建 Release APK |
+| 推送 `v*` tag | 构建并自动发布 GitHub Release |
+
+> 本机若为 ARM64（Apple Silicon、鲲鹏等），Android SDK 的 `aapt2` / `zipalign` 只有 x86_64 二进制，需在 x86_64 runner 或支持转译的环境构建。
+
 ## 打包 Android
 
 工程已包含 `android/`（Capacitor 7，compileSdk 35，minSdk 23）。

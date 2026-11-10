@@ -30,3 +30,6 @@ android/app/build
 android/local.properties
 android/app/src/main/assets/public
 .capacitor
+
+# Local build artifacts
+artifacts/
