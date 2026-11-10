@@ -1,0 +1,14 @@
+{
+  "appId": "com.travellog.app",
+  "appName": "旅记",
+  "webDir": "dist",
+  "backgroundColor": "#faf9f6",
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "adjustMarginsForEdgeToEdge": "auto"
+  },
+  "ios": {
+    "contentInset": "always"
+  }
+}
