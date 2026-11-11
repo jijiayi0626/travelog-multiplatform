@@ -1,13 +1,28 @@
-import { Capacitor } from '@capacitor/core'
+import { Capacitor, registerPlugin } from '@capacitor/core'
 import { App as CapacitorApp } from '@capacitor/app'
-import { Geolocation } from '@capacitor/geolocation'
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem'
 import { Share } from '@capacitor/share'
 
 /**
  * 原生容器（Android / iOS）内的能力封装。
  * 浏览器 / PWA 走 Web API，调用方用 isNative() 判断走哪条分支。
+ *
+ * 定位使用自研插件 SystemLocation：基于 Android 系统 LocationManager，
+ * 不依赖 Google Play 服务，因此在华为鸿蒙 / 无 GMS 设备上同样可用。
  */
+
+interface SystemLocationPlugin {
+  requestPermission(): Promise<{ granted: boolean }>
+  getCurrent(): Promise<{ latitude: number; longitude: number; accuracy?: number }>
+  watch(): Promise<{ watching: boolean }>
+  clearWatch(): Promise<void>
+  addListener(
+    event: 'locationChange',
+    listener: (data: { latitude: number; longitude: number }) => void,
+  ): Promise<{ remove: () => void }>
+}
+
+const SystemLocation = registerPlugin<SystemLocationPlugin>('SystemLocation')
 
 export function isNative(): boolean {
   return Capacitor.isNativePlatform()
@@ -30,29 +45,39 @@ export interface Fix {
   longitude: number
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('定位超时')), ms)),
+  ])
+}
+
 export async function requestLocationPermission(): Promise<boolean> {
   if (!Capacitor.isNativePlatform()) return true
   try {
-    const status = await Geolocation.requestPermissions()
-    return status.location === 'granted' || status.coarseLocation === 'granted'
+    const result = await SystemLocation.requestPermission()
+    return Boolean(result.granted)
   } catch {
     return false
   }
 }
 
-export async function getCurrentFix(): Promise<Fix | null> {
+export async function getBestFix(): Promise<Fix | null> {
   if (!Capacitor.isNativePlatform()) return null
   try {
-    const pos = await Geolocation.getCurrentPosition({
-      enableHighAccuracy: true,
-      timeout: 20000,
-      maximumAge: 30000,
-    })
-    return { latitude: pos.coords.latitude, longitude: pos.coords.longitude }
+    const result = await withTimeout(SystemLocation.getCurrent(), 15000)
+    return { latitude: result.latitude, longitude: result.longitude }
   } catch {
     return null
   }
 }
+
+export async function getCurrentFix(): Promise<Fix | null> {
+  return getBestFix()
+}
+
+let watchHandle: { remove: () => void } | null = null
+let watching = false
 
 export async function watchNativeFix(
   onFix: (fix: Fix) => void,
@@ -60,30 +85,33 @@ export async function watchNativeFix(
 ): Promise<string | null> {
   if (!Capacitor.isNativePlatform()) return null
   try {
-    return await Geolocation.watchPosition(
-      { enableHighAccuracy: true, maximumAge: 15000 },
-      (position, error) => {
-        if (error) {
-          onError?.(error.message || '定位失败')
-          return
-        }
-        if (position) {
-          onFix({ latitude: position.coords.latitude, longitude: position.coords.longitude })
-        }
-      },
-    )
+    watchHandle = await SystemLocation.addListener('locationChange', (data) => {
+      onFix({ latitude: data.latitude, longitude: data.longitude })
+    })
+    await SystemLocation.watch()
+    watching = true
+    return 'system-location'
   } catch (error) {
-    onError?.((error as Error).message)
+    onError?.((error as Error).message || '定位失败')
     return null
   }
 }
 
-export async function clearNativeWatch(id: string): Promise<void> {
+export async function clearNativeWatch(_id: string): Promise<void> {
   if (!Capacitor.isNativePlatform()) return
   try {
-    await Geolocation.clearWatch({ id })
+    if (watching) await SystemLocation.clearWatch()
   } catch {
     /* 已停止时忽略 */
+  }
+  watching = false
+  if (watchHandle) {
+    try {
+      watchHandle.remove()
+    } catch {
+      /* 忽略 */
+    }
+    watchHandle = null
   }
 }
 

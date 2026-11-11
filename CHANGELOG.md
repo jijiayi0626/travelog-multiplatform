@@ -2,6 +2,28 @@
 
 本文件用于生成 GitHub Release 说明：每个版本一个 `## [x.y.z]` 段落，发布时自动提取。
 
+## [1.7.0]
+
+### 修复
+
+- **「您的设备不支持 Google Play 服务，因此无法运行旅记」**
+  根因：`@capacitor/geolocation` 7.x 依赖 `com.google.android.gms:play-services-location`，
+  走的是 FusedLocationProvider。没有 GMS 的设备（华为鸿蒙、部分国产 ROM、AOSP）因此无法启动定位。
+
+  现已**彻底移除该依赖**，改为自研插件 `SystemLocation`：
+  - 基于 Android 系统 `LocationManager`，只用 GPS / Wi-Fi / 基站，**不依赖 Google Play 服务**
+  - 优先用最近一次已知位置（10 分钟内），没有就主动请求一次
+  - 持续监听 5 秒 / 10 米更新，打卡场景足够且省电
+  - 未开启系统定位时给出明确提示「系统定位服务未开启，请在设置里打开定位」
+
+- **打卡页在 App 内定位失败**：此前仍用 Web 的 `navigator.geolocation`，
+  在 WebView 里同样依赖 GMS。现在 App 内统一走 `SystemLocation`，浏览器环境才回退 Web API。
+- **定位强依赖 GPS**：改为系统定位优先，GPS 与网络定位同时开启，室内也能拿到街区级位置。
+
+### 说明
+
+- 首次使用时请在系统设置里给「旅记」授予定位权限；鸿蒙 / 无 GMS 设备无需安装任何 Google 服务。
+
 ## [1.6.2]
 
 ### 新增
