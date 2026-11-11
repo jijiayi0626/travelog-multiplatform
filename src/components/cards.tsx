@@ -368,7 +368,13 @@ export function MemberRow({ member, onRemove }: { member: Member; onRemove?: () 
       <Avatar name={member.name} size={38} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-body font-medium text-ink">{member.name}</p>
-        <p className="text-note text-ink-3">{member.role === 'owner' ? tr('创建者') : tr('成员')}</p>
+        <p className="truncate text-note text-ink-3">
+          {member.role === 'owner' ? tr('创建者') : tr('成员')}
+          {member.contact ? ` · ${member.contact}` : ''}
+        </p>
+        {member.note ? (
+          <p className="mt-0.5 truncate text-caption text-ink-3">{member.note}</p>
+        ) : null}
       </div>
       {onRemove ? (
         <button type="button" onClick={onRemove} className="press text-note text-ink-3 hover:text-danger">

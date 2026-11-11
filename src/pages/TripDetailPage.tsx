@@ -117,6 +117,8 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
   const { tr } = useI18n()
   const [newCheck, setNewCheck] = useState('')
   const [newMember, setNewMember] = useState('')
+  const [newMemberContact, setNewMemberContact] = useState('')
+  const [newMemberNote, setNewMemberNote] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [aiPackingBusy, setAiPackingBusy] = useState(false)
@@ -205,8 +207,13 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
       toast(tr('请输入旅伴昵称'))
       return
     }
-    await addMember(tripId, name)
+    await addMember(tripId, name, 'member', {
+      contact: newMemberContact,
+      note: newMemberNote,
+    })
     setNewMember('')
+    setNewMemberContact('')
+    setNewMemberNote('')
     bump()
     toast(tr('已把 {name} 加入旅程', { name }))
   }
@@ -515,6 +522,10 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
                 inviteCode={trip.inviteCode}
                 value={newMember}
                 onChange={setNewMember}
+                contact={newMemberContact}
+                onContactChange={setNewMemberContact}
+                note={newMemberNote}
+                onNoteChange={setNewMemberNote}
                 onAdd={inviteMember}
                 onRemove={async (member) => {
                   await removeMember(member.id)
@@ -1460,6 +1471,10 @@ function MembersTab({
   inviteCode,
   value,
   onChange,
+  contact,
+  onContactChange,
+  note,
+  onNoteChange,
   onAdd,
   onRemove,
   onCopy,
@@ -1468,6 +1483,10 @@ function MembersTab({
   inviteCode: string
   value: string
   onChange: (value: string) => void
+  contact: string
+  onContactChange: (value: string) => void
+  note: string
+  onNoteChange: (value: string) => void
   onAdd: () => void
   onRemove: (member: Member) => void
   onCopy: () => void
@@ -1488,22 +1507,38 @@ function MembersTab({
       </button>
 
       <form
-        className="flex gap-2"
+        className="space-y-2"
         onSubmit={(event) => {
           event.preventDefault()
           onAdd()
         }}
       >
-        <input
-          className="input"
-          placeholder={tr('旅伴昵称')}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
-        <button type="submit" className="btn-primary h-[46px] shrink-0 px-4">
-          <Plus size={15} weight="bold" />
-          {tr('添加')}
-        </button>
+        <div className="flex gap-2">
+          <input
+            className="input"
+            placeholder={tr('旅伴昵称')}
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+          />
+          <button type="submit" className="btn-primary h-[46px] shrink-0 px-4">
+            <Plus size={15} weight="bold" />
+            {tr('添加')}
+          </button>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <input
+            className="input"
+            placeholder={tr('联系方式（可选）')}
+            value={contact}
+            onChange={(event) => onContactChange(event.target.value)}
+          />
+          <input
+            className="input"
+            placeholder={tr('备注：过敏 / 饮食 / 房型')}
+            value={note}
+            onChange={(event) => onNoteChange(event.target.value)}
+          />
+        </div>
       </form>
 
       {members.length === 0 ? (

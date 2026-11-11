@@ -640,4 +640,6 @@ export const EN_TEXT: Record<string, string> = {
   缺少密钥: 'Missing API key',
   新增接口: 'Add endpoint',
   测试全部: 'Test all',
+  '联系方式（可选）': 'Contact (optional)',
+  '备注：过敏 / 饮食 / 房型': 'Notes: allergies / diet / room',
 }

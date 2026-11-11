@@ -574,6 +574,7 @@ export async function addMember(
   tripId: string,
   name: string,
   role: Member['role'] = 'member',
+  extra: { contact?: string; note?: string } = {},
 ): Promise<Member> {
   const member: Member = {
     id: uid(),
@@ -583,6 +584,8 @@ export async function addMember(
     role,
     joinedAt: Date.now(),
     emojiSeed: Math.floor(Math.random() * 1000),
+    contact: extra.contact?.trim() || undefined,
+    note: extra.note?.trim() || undefined,
   }
   await putOne('members', member)
   return member

@@ -113,6 +113,10 @@ export interface Member {
   role: MemberRole
   joinedAt: number
   emojiSeed: number
+  /** 联系方式：手机号 / 微信号 / 邮箱，可留空 */
+  contact?: string
+  /** 备注：过敏、饮食禁忌、房型偏好等 */
+  note?: string
 }
 
 export interface Profile {
