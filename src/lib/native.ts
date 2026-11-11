@@ -61,7 +61,7 @@ export async function watchNativeFix(
   if (!Capacitor.isNativePlatform()) return null
   try {
     return await Geolocation.watchPosition(
-      { enableHighAccuracy: true, timeout: 30000, maximumAge: 30000 },
+      { enableHighAccuracy: true, maximumAge: 15000 },
       (position, error) => {
         if (error) {
           onError?.(error.message || '定位失败')

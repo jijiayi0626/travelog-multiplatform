@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
+  ArrowClockwise,
   ArrowCounterClockwise,
   CaretRight,
   CloudSlash,
@@ -26,6 +27,7 @@ import { shareTextFile } from '../lib/native'
 import { isSignedIn } from '../lib/cloud'
 import {
   getAutoCheckinSettings,
+  getAutoCheckinStatus,
   setAutoCheckinSettings,
   startAutoCheckin,
   stopAutoCheckin,
@@ -66,12 +68,21 @@ export function ProfilePage() {
   const [nickname, setNickname] = useState('')
   const [confirmReset, setConfirmReset] = useState(false)
   const [autoCheckin, setAutoCheckin] = useState(() => getAutoCheckinSettings())
+  const [checkinStatus, setCheckinStatus] = useState(() => getAutoCheckinStatus())
   const signedIn = isSignedIn()
   const [importing, setImporting] = useState(false)
 
   useEffect(() => {
     if (data.profile) setNickname(data.profile.nickname)
   }, [data.profile])
+
+  // 开启后每 2 秒刷新一次诊断信息，方便确认到底卡在定位还是匹配
+  useEffect(() => {
+    setCheckinStatus(getAutoCheckinStatus())
+    if (!autoCheckin.enabled) return
+    const timer = window.setInterval(() => setCheckinStatus(getAutoCheckinStatus()), 2000)
+    return () => window.clearInterval(timer)
+  }, [autoCheckin.enabled])
 
   const toggleAutoCheckin = () => {
     const next = setAutoCheckinSettings({ enabled: !autoCheckin.enabled })
@@ -285,11 +296,41 @@ export function ProfilePage() {
             />
           </button>
         </div>
+        {autoCheckin.enabled ? (
+          <div className="space-y-0.5 px-4 pb-3 text-caption leading-4 text-ink-3">
+            <p>
+              {checkinStatus.running ? '监听中' : '未启动'}
+              {checkinStatus.lastFixAt > 0
+                ? ` · 最近定位 ${new Date(checkinStatus.lastFixAt).toLocaleTimeString()}`
+                : ' · 还没拿到定位（检查系统定位权限 / GPS 是否开启）'}
+            </p>
+            {checkinStatus.lastMatch ? <p>匹配：{checkinStatus.lastMatch}</p> : null}
+            {checkinStatus.lastEvent ? <p>最近：{checkinStatus.lastEvent}</p> : null}
+            <p className="pt-0.5">半径 {autoCheckin.radius}m · 无已知地点时按最近城市（50km 内）补足迹</p>
+          </div>
+        ) : null}
         <SettingRow
           icon={<Sparkle size={17} />}
           title="AI 助手"
           value={signedIn ? '已就绪' : '需登录云同步'}
           onClick={() => nav.navigate({ name: 'sync' })}
+        />
+        <SettingRow
+          icon={<ArrowClockwise size={17} />}
+          title={tr('强制更新')}
+          value={tr('清除缓存并重新加载')}
+          onClick={async () => {
+            try {
+              const regs = navigator.serviceWorker ? await navigator.serviceWorker.getRegistrations() : []
+              await Promise.all(regs.map((item) => item.unregister()))
+              const keys = await caches.keys()
+              await Promise.all(keys.map((key) => caches.delete(key)))
+              toast(tr('缓存已清除，正在重新加载'))
+              window.setTimeout(() => window.location.reload(), 600)
+            } catch {
+              window.location.reload()
+            }
+          }}
         />
         <SettingRow
           icon={<Translate size={17} />}

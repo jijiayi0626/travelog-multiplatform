@@ -126,12 +126,45 @@ async function record(
   cache = null
 }
 
+export interface AutoCheckinStatus {
+  running: boolean
+  lastFixAt: number
+  latitude: number
+  longitude: number
+  lastMatch: string
+  lastEvent: string
+  lastEventAt: number
+}
+
+let status: AutoCheckinStatus = {
+  running: false,
+  lastFixAt: 0,
+  latitude: 0,
+  longitude: 0,
+  lastMatch: '',
+  lastEvent: '',
+  lastEventAt: 0,
+}
+
+export function getAutoCheckinStatus(): AutoCheckinStatus {
+  return { ...status, running: isAutoCheckinRunning() }
+}
+
+function noteEvent(text: string): void {
+  status.lastEvent = text
+  status.lastEventAt = Date.now()
+}
+
 /** 命中已知地点用其名称；否则用最近国内城市识别周边地名 */
 async function handleFix(
   fix: Fix,
   settings: AutoCheckinSettings,
   listener?: (event: AutoCheckinEvent) => void,
 ): Promise<void> {
+  status.lastFixAt = Date.now()
+  status.latitude = fix.latitude
+  status.longitude = fix.longitude
+
   const { footprints, tripId } = await loadCache()
 
   let nearest: { item: FootprintLite; distance: number } | null = null
@@ -141,18 +174,36 @@ async function handleFix(
   }
 
   if (nearest && nearest.distance <= settings.radius) {
-    if (!cooled(nearest.item.placeName, settings.cooldownMs)) return
+    status.lastMatch = `地点：${nearest.item.placeName}（${Math.round(nearest.distance)} 米）`
+    if (!cooled(nearest.item.placeName, settings.cooldownMs)) {
+      noteEvent('命中已知地点，但仍在冷却')
+      return
+    }
     await record(nearest.item.placeName, nearest.item.city, fix, tripId, '自动打卡')
+    noteEvent(`已打卡：${nearest.item.placeName}`)
     listener?.({ type: 'checked', place: nearest.item.placeName, distance: nearest.distance })
     return
   }
 
   const city = nearestCity(fix.latitude, fix.longitude)
-  if (!city || city.distance > 30000) return
+  if (!city) {
+    status.lastMatch = '未匹配到城市'
+    noteEvent('未匹配到城市')
+    return
+  }
+  status.lastMatch = `城市：${city.city}（${(city.distance / 1000).toFixed(1)} 公里）`
+  if (city.distance > 50000) {
+    noteEvent('最近城市超过 50 公里，不打卡')
+    return
+  }
   const key = `city:${city.city}`
-  if (!cooled(key, settings.cooldownMs)) return
+  if (!cooled(key, settings.cooldownMs)) {
+    noteEvent('该城市已打卡，冷却中')
+    return
+  }
   const placeName = `${city.short}附近`
   await record(placeName, city.city, fix, tripId, '自动打卡（周边地名）')
+  noteEvent(`已打卡：${placeName}`)
   listener?.({ type: 'checked', place: placeName, distance: city.distance })
 }
 

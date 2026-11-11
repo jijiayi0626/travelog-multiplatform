@@ -642,4 +642,7 @@ export const EN_TEXT: Record<string, string> = {
   测试全部: 'Test all',
   '联系方式（可选）': 'Contact (optional)',
   '备注：过敏 / 饮食 / 房型': 'Notes: allergies / diet / room',
+  强制更新: 'Force update',
+  清除缓存并重新加载: 'Clear cache and reload',
+  '缓存已清除，正在重新加载': 'Cache cleared, reloading',
 }

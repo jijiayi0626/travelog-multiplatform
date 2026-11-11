@@ -1,4 +1,4 @@
-const CACHE = 'travelog-shell-v2'
+const CACHE = 'travelog-shell-v3'
 const SHELL = ['./', './index.html', './manifest.webmanifest']
 
 self.addEventListener('install', (event) => {
