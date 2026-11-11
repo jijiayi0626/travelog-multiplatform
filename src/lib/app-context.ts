@@ -17,6 +17,10 @@ export interface NavApi {
 
 export const NavContext = createContext<NavApi>({ navigate: () => {}, back: () => {} })
 
+export const SearchContext = createContext<() => void>(() => {})
+
+export const ShortcutsContext = createContext<() => void>(() => {})
+
 export function useToast(): (message: string) => void {
   return useContext(ToastContext)
 }
@@ -27,4 +31,12 @@ export function useRefresh(): RefreshApi {
 
 export function useNav(): NavApi {
   return useContext(NavContext)
+}
+
+export function useSearch(): () => void {
+  return useContext(SearchContext)
+}
+
+export function useShortcuts(): () => void {
+  return useContext(ShortcutsContext)
 }

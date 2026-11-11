@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Trash } from '@phosphor-icons/react'
-import type { Trip } from '../lib/types'
-import { deleteTrip, getProfile, getTrip, saveTrip } from '../lib/repo'
+import type { Currency, Trip, TripTemplate } from '../lib/types'
+import { applyChecklistTemplate, applyPlanTemplate, deleteTrip, getProfile, getTrip, saveTrip } from '../lib/repo'
 import { useNav, useRefresh, useToast } from '../lib/app-context'
 import {
   addDays,
   coverClass,
+  CURRENCY_LABEL,
+  CURRENCY_ORDER,
   formatDate,
   fromDateInputValue,
   todayStart,
@@ -15,7 +17,15 @@ import { cn } from '../lib/cn'
 import { EditorScreen, FormBlock } from '../components/EditorScreen'
 import { ConfirmDialog, Field } from '../components/ui'
 
-export function TripEditor({ id }: { id?: string }) {
+const TEMPLATE_COVER: Record<TripTemplate, number> = {
+  blank: 0,
+  city: 1,
+  beach: 3,
+  road: 2,
+  ski: 4,
+}
+
+export function TripEditor({ id, template }: { id?: string; template?: TripTemplate }) {
   const nav = useNav()
   const toast = useToast()
   const { bump } = useRefresh()
@@ -30,7 +40,9 @@ export function TripEditor({ id }: { id?: string }) {
   const [startDate, setStartDate] = useState(todayStart())
   const [endDate, setEndDate] = useState(addDays(todayStart(), 3))
   const [note, setNote] = useState('')
-  const [cover, setCover] = useState(0)
+  const [cover, setCover] = useState(template ? TEMPLATE_COVER[template] : 0)
+  const [currency, setCurrency] = useState<Currency>('CNY')
+  const [budgetText, setBudgetText] = useState('')
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -46,6 +58,8 @@ export function TripEditor({ id }: { id?: string }) {
         setEndDate(trip.endDate || addDays(trip.startDate || todayStart(), 3))
         setNote(trip.note)
         setCover(trip.cover)
+        setCurrency(trip.currency ?? 'CNY')
+        setBudgetText(trip.budget && trip.budget > 0 ? String(trip.budget) : '')
       }
       setLoading(false)
     })
@@ -63,6 +77,7 @@ export function TripEditor({ id }: { id?: string }) {
     setSaving(true)
     try {
       const profile = await getProfile()
+      const budgetValue = Number.parseFloat(budgetText)
       const start = startDate || todayStart()
       const end = endDate && endDate >= start ? endDate : start
       const saved = await saveTrip({
@@ -78,13 +93,23 @@ export function TripEditor({ id }: { id?: string }) {
         createdAt: original?.createdAt ?? 0,
         updatedAt: 0,
         syncState: 1,
+        budget: Number.isFinite(budgetValue) && budgetValue > 0 ? budgetValue : 0,
+        currency,
+        template: original?.template ?? template ?? 'blank',
       })
+
+      if (!id && template && template !== 'blank') {
+        const days = Math.floor((end - start) / 864e5) + 1
+        await applyPlanTemplate(saved.id, template, days)
+        await applyChecklistTemplate(saved.id, template)
+      }
+
       bump()
       toast('旅程已保存')
       if (id) {
         nav.back()
       } else {
-        nav.navigate({ name: 'trip', id: saved.id, tab: 'timeline' })
+        nav.navigate({ name: 'trip', id: saved.id, tab: 'plan' })
       }
     } finally {
       setSaving(false)
@@ -152,8 +177,38 @@ export function TripEditor({ id }: { id?: string }) {
         </div>
         <p className="text-[11.5px] text-ink-3">
           {startDate > 0 && endDate > 0
-            ? `${formatDate(startDate)} — ${formatDate(endDate)}`
+            ? `${formatDate(startDate)} — ${formatDate(endDate)} · 约 ${Math.max(Math.floor((endDate - startDate) / 864e5) + 1, 1)} 天`
             : '设置日期后，记录会自动按天归组'}
+        </p>
+      </FormBlock>
+
+      <FormBlock title="预算" hint="可选">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="预算金额" hint="按人民币计算">
+            <input
+              className="input"
+              inputMode="decimal"
+              value={budgetText}
+              placeholder="例如 12000"
+              onChange={(event) => setBudgetText(event.target.value.replace(/[^\d.]/g, ''))}
+            />
+          </Field>
+          <Field label="当地货币">
+            <select
+              className="input"
+              value={currency}
+              onChange={(event) => setCurrency(event.target.value as Currency)}
+            >
+              {CURRENCY_ORDER.map((item) => (
+                <option key={item} value={item}>
+                  {item} · {CURRENCY_LABEL[item]}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <p className="text-[11.5px] leading-4 text-ink-3">
+          账目按当地货币录入，会按离线汇率折算成人民币汇总；预算进度会显示在旅程概览里。
         </p>
       </FormBlock>
 
@@ -188,6 +243,15 @@ export function TripEditor({ id }: { id?: string }) {
         </Field>
       </FormBlock>
 
+      {!id && template && template !== 'blank' ? (
+        <div className="rounded-2xl border border-line bg-surface p-3.5">
+          <p className="text-[12px] font-medium text-ink">已选择模板</p>
+          <p className="mt-1 text-[11.5px] leading-4 text-ink-3">
+            保存后会自动排入「{template === 'city' ? '城市漫步' : template === 'beach' ? '海岛度假' : template === 'road' ? '自驾公路' : '滑雪'}」的日程与打包清单，之后都能单独修改。
+          </p>
+        </div>
+      ) : null}
+
       {original ? (
         <button
           type="button"
@@ -202,7 +266,7 @@ export function TripEditor({ id }: { id?: string }) {
       <ConfirmDialog
         open={confirmDelete}
         title="删除这段旅程？"
-        message="旅程下的图文、账目、清单与足迹都会一并删除，且无法恢复。"
+        message="旅程下的日程、图文、账目、清单与足迹都会一并删除，且无法恢复。"
         onClose={() => setConfirmDelete(false)}
         onConfirm={doDelete}
       />

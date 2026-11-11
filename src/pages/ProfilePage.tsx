@@ -1,19 +1,24 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   ArrowCounterClockwise,
   CaretRight,
   CloudSlash,
-  Info,
+  DownloadSimple,
+  Images,
   Moon,
+  PaintBrush,
   PencilSimple,
   Sun,
+  UploadSimple,
 } from '@phosphor-icons/react'
 import type { AppStats, Profile } from '../lib/types'
-import { getProfile, resetAll, saveProfile, stats } from '../lib/repo'
+import { exportAll, getProfile, importAll, resetAll, saveProfile, stats } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
 import { useNav, useRefresh, useToast } from '../lib/app-context'
-import { currentTheme, setThemeMode } from '../lib/theme'
+import { ACCENTS, type AccentName, currentTheme, getAccent, setAccent, setThemeMode } from '../lib/theme'
+import { downloadText, formatCny, readTextFile } from '../lib/utils'
+import { cn } from '../lib/cn'
 import { Avatar, ConfirmDialog, Field, Sheet, StatTile } from '../components/ui'
 
 const EMPTY_STATS: AppStats = {
@@ -23,27 +28,31 @@ const EMPTY_STATS: AppStats = {
   expenseCount: 0,
   cityCount: 0,
   pendingSync: 0,
+  totalCny: 0,
+  totalDays: 0,
+  photoCount: 0,
+  planCount: 0,
+  planDoneCount: 0,
 }
 
 export function ProfilePage() {
   const nav = useNav()
   const toast = useToast()
   const { bump } = useRefresh()
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const loader = useCallback(async () => {
     const [profile, stat] = await Promise.all([getProfile(), stats()])
     return { profile, stats: stat }
   }, [])
-  const { data, loading } = useLoader(
-    loader,
-    { profile: null as Profile | null, stats: EMPTY_STATS },
-    'profile',
-  )
+  const { data, loading } = useLoader(loader, { profile: null as Profile | null, stats: EMPTY_STATS }, 'profile')
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => currentTheme())
+  const [accent, setAccentState] = useState<AccentName>(() => getAccent())
   const [editing, setEditing] = useState(false)
   const [nickname, setNickname] = useState('')
   const [confirmReset, setConfirmReset] = useState(false)
+  const [importing, setImporting] = useState(false)
 
   useEffect(() => {
     if (data.profile) setNickname(data.profile.nickname)
@@ -53,6 +62,11 @@ export function ProfilePage() {
     const next = theme === 'dark' ? 'light' : 'dark'
     setThemeMode(next)
     setTheme(next)
+  }
+
+  const chooseAccent = (value: AccentName) => {
+    setAccent(value)
+    setAccentState(value)
   }
 
   const saveNickname = async () => {
@@ -74,8 +88,32 @@ export function ProfilePage() {
     toast('已恢复示例数据')
   }
 
+  const doExport = async () => {
+    const json = await exportAll()
+    downloadText(`travelog-backup-${new Date().toISOString().slice(0, 10)}.json`, json, 'application/json')
+    toast('备份已导出')
+  }
+
+  const doImport = async (file: File | undefined) => {
+    if (!file) return
+    setImporting(true)
+    try {
+      const text = await readTextFile(file)
+      const summary = await importAll(text)
+      bump()
+      toast(`已导入 ${summary.trips} 段旅程、${summary.moments} 条记录`)
+    } catch {
+      toast('导入失败：不是有效的旅记备份')
+    } finally {
+      setImporting(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
   const profile = data.profile
   const ThemeGlyph = theme === 'dark' ? Moon : Sun
+  const planRatio =
+    data.stats.planCount > 0 ? Math.round((data.stats.planDoneCount / data.stats.planCount) * 100) : 0
 
   return (
     <div className="mx-auto w-full max-w-[820px] space-y-5">
@@ -94,11 +132,7 @@ export function ProfilePage() {
           </p>
           <p className="mt-0.5 text-[11.5px] text-ink-3">本地账号 · 数据保存在这台设备</p>
         </div>
-        <button
-          type="button"
-          className="btn-ghost h-9 shrink-0 px-3 text-[12px]"
-          onClick={() => setEditing(true)}
-        >
+        <button type="button" className="btn-ghost h-9 shrink-0 px-3 text-[12px]" onClick={() => setEditing(true)}>
           <PencilSimple size={14} />
           编辑
         </button>
@@ -119,7 +153,40 @@ export function ProfilePage() {
         </div>
       </div>
 
+      <section className="card p-4">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-[12px] font-semibold tracking-tight text-ink">年度回顾</h2>
+          <span className="text-[10.5px] text-ink-3">全部旅程累计</span>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-4">
+          <StatTile label="在路上" value={`${data.stats.totalDays} 天`} />
+          <StatTile label="照片" value={`${data.stats.photoCount} 张`} />
+          <StatTile label="城市" value={`${data.stats.cityCount} 座`} />
+          <StatTile label="总花费" value={formatCny(data.stats.totalCny)} />
+        </div>
+        <div className="mt-3 border-t border-line pt-3">
+          <div className="flex items-baseline justify-between text-[11.5px]">
+            <span className="text-ink-3">日程完成度</span>
+            <span className="tabular-nums text-ink-2">
+              {data.stats.planDoneCount}/{data.stats.planCount} · {planRatio}%
+            </span>
+          </div>
+          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-paper-2">
+            <div
+              className="h-full rounded-full bg-accent transition-[width] duration-500"
+              style={{ width: `${planRatio}%` }}
+            />
+          </div>
+        </div>
+      </section>
+
       <section className="overflow-hidden rounded-2xl border border-line bg-surface">
+        <SettingRow
+          icon={<Images size={17} />}
+          title="相册"
+          value={`${data.stats.photoCount} 张照片`}
+          onClick={() => nav.navigate({ name: 'album' })}
+        />
         <SettingRow
           icon={<CloudSlash size={17} />}
           title="云同步"
@@ -132,19 +199,49 @@ export function ProfilePage() {
           value={theme === 'dark' ? '深色' : '浅色'}
           onClick={toggleTheme}
         />
+        <div className="flex w-full items-center gap-3 border-b border-line px-4 py-3.5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-ink-2">
+            <PaintBrush size={17} />
+          </span>
+          <span className="min-w-0 flex-1 text-[13.5px] text-ink">主题色</span>
+          <div className="flex shrink-0 gap-2">
+            {ACCENTS.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                aria-label={item.label}
+                onClick={() => chooseAccent(item.value)}
+                className={cn(
+                  'press h-6 w-6 rounded-full ring-2 ring-offset-2 ring-offset-surface transition-all',
+                  accent === item.value ? 'ring-ink/50' : 'ring-transparent',
+                )}
+                style={{ backgroundColor: item.swatch }}
+              />
+            ))}
+          </div>
+        </div>
+        <SettingRow icon={<DownloadSimple size={17} />} title="导出备份" value="JSON" onClick={doExport} />
+        <SettingRow
+          icon={<UploadSimple size={17} />}
+          title={importing ? '导入中…' : '导入备份'}
+          value="JSON"
+          onClick={() => fileRef.current?.click()}
+        />
         <SettingRow
           icon={<ArrowCounterClockwise size={17} />}
           title="恢复示例数据"
           value="清空本地数据"
           onClick={() => setConfirmReset(true)}
         />
-        <SettingRow
-          icon={<Info size={17} />}
-          title="关于旅记"
-          value="v1.0"
-          onClick={() => toast('旅记 v1.0 · 记录旅程、图文时刻与花费')}
-        />
       </section>
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept="application/json,.json"
+        className="hidden"
+        onChange={(event) => doImport(event.target.files?.[0])}
+      />
 
       <p className="pb-2 text-center text-[10.5px] uppercase tracking-[0.18em] text-ink-3">
         Travelog · Web / Android / iOS
@@ -184,7 +281,7 @@ export function ProfilePage() {
       <ConfirmDialog
         open={confirmReset}
         title="恢复示例数据？"
-        message="本机上现有的旅行、记录与账目都会被替换为最初的示例内容。"
+        message="本机上现有的旅行、日程、记录与账目都会被替换为最初的示例内容。建议先导出备份。"
         confirmText="恢复"
         onClose={() => setConfirmReset(false)}
         onConfirm={doReset}

@@ -1,9 +1,18 @@
-import type { ChecklistItem, Expense, Footprint, Member, Moment, Profile, Trip } from './types'
+import type {
+  ChecklistItem,
+  Expense,
+  Footprint,
+  Member,
+  Moment,
+  Plan,
+  Profile,
+  Trip,
+} from './types'
 import { getMeta, putOne, setMeta } from './db'
 import { addDays, assetUrl, todayStart } from './utils'
 
 const SEEDED_KEY = 'seeded'
-const SEED_TAG = 'seed-v2'
+const SEED_TAG = 'seed-v3'
 
 async function alreadySeeded(): Promise<boolean> {
   return (await getMeta(SEEDED_KEY)) === SEED_TAG
@@ -16,6 +25,14 @@ export async function seedIfNeeded(force = false): Promise<void> {
   const start = addDays(todayStart(), -34)
   const tripId = 'trip-hokkaido'
   const secondTripId = 'trip-setouchi'
+  const memoryTripId = 'trip-kyoto'
+  // 精确到「去年的今天」，用于命中首页的往年回忆
+  const oneYearAgo = (() => {
+    const date = new Date()
+    date.setFullYear(date.getFullYear() - 1)
+    date.setHours(9, 0, 0, 0)
+    return date.getTime()
+  })()
 
   const profile: Profile = {
     id: 'local-user',
@@ -39,6 +56,9 @@ export async function seedIfNeeded(force = false): Promise<void> {
       createdAt: now - 40 * 864e5,
       updatedAt: now - 3 * 864e5,
       syncState: 0,
+      budget: 20000,
+      currency: 'JPY',
+      template: 'city',
     },
     {
       id: secondTripId,
@@ -53,6 +73,26 @@ export async function seedIfNeeded(force = false): Promise<void> {
       createdAt: now - 6 * 864e5,
       updatedAt: now - 2 * 864e5,
       syncState: 1,
+      budget: 12000,
+      currency: 'JPY',
+      template: 'beach',
+    },
+    {
+      id: memoryTripId,
+      title: '京都红叶季',
+      destination: '日本 · 京都',
+      startDate: oneYearAgo,
+      endDate: addDays(oneYearAgo, 3),
+      note: '岚山的竹林、哲学之道的红枫，还有一碗凌晨的乌冬。',
+      cover: 4,
+      ownerId: profile.id,
+      inviteCode: 'KY25R',
+      createdAt: oneYearAgo - 9 * 864e5,
+      updatedAt: oneYearAgo + 3 * 864e5,
+      syncState: 0,
+      budget: 9000,
+      currency: 'JPY',
+      template: 'city',
     },
   ]
   for (const trip of trips) {
@@ -110,6 +150,7 @@ export async function seedIfNeeded(force = false): Promise<void> {
       updatedAt: start + 9 * 36e5,
       syncState: 0,
       photos: [{ id: 'p1', src: coast, caption: '运河边的傍晚' }],
+      tags: ['风景', '散步'],
     },
     {
       id: 'moment-2',
@@ -127,6 +168,7 @@ export async function seedIfNeeded(force = false): Promise<void> {
         { id: 'p2', src: night, caption: '函馆夜景' },
         { id: 'p3', src: street, caption: '山脚的电车街' },
       ],
+      tags: ['风景', '夜生活'],
     },
     {
       id: 'moment-3',
@@ -141,9 +183,44 @@ export async function seedIfNeeded(force = false): Promise<void> {
       updatedAt: addDays(start, 2) + 20 * 36e5,
       syncState: 0,
       photos: [{ id: 'p4', src: street, caption: '巷子里的居酒屋' }],
+      tags: ['美食'],
     },
   ]
-  for (const moment of moments) {
+
+  const kyotoMoments: Moment[] = [
+    {
+      id: 'moment-kyoto-1',
+      tripId: memoryTripId,
+      dayIndex: 1,
+      content:
+        '清晨六点的岚山还没有人。竹林里只有风穿过竹叶的声音，像有人在很远的地方翻书。',
+      locationName: '岚山竹林',
+      latitude: 35.017,
+      longitude: 135.6717,
+      createdAt: oneYearAgo,
+      updatedAt: oneYearAgo,
+      syncState: 0,
+      photos: [{ id: 'pk1', src: coast, caption: '竹林小径' }],
+      tags: ['风景', '散步'],
+    },
+    {
+      id: 'moment-kyoto-2',
+      tripId: memoryTripId,
+      dayIndex: 2,
+      content:
+        '哲学之道的枫叶红得很沉。走了两个小时，在路边买了一杯热甘酒，甜得有点意外。',
+      locationName: '哲学之道',
+      latitude: 35.0247,
+      longitude: 135.7949,
+      createdAt: oneYearAgo + 26 * 36e5,
+      updatedAt: oneYearAgo + 26 * 36e5,
+      syncState: 0,
+      photos: [{ id: 'pk2', src: night, caption: '傍晚的河岸' }],
+      tags: ['风景', '美食'],
+    },
+  ]
+
+  for (const moment of [...moments, ...kyotoMoments]) {
     await putOne('moments', moment)
   }
 
@@ -157,6 +234,8 @@ export async function seedIfNeeded(force = false): Promise<void> {
       spentAt: addDays(start, 1),
       createdAt: now,
       syncState: 0,
+      currency: 'JPY',
+      amountCny: 3860 * 0.048,
     },
     {
       id: 'expense-2',
@@ -167,6 +246,8 @@ export async function seedIfNeeded(force = false): Promise<void> {
       spentAt: addDays(start, 2),
       createdAt: now,
       syncState: 0,
+      currency: 'JPY',
+      amountCny: 1240 * 0.048,
     },
     {
       id: 'expense-3',
@@ -177,6 +258,8 @@ export async function seedIfNeeded(force = false): Promise<void> {
       spentAt: addDays(start, 2),
       createdAt: now,
       syncState: 0,
+      currency: 'JPY',
+      amountCny: 6800 * 0.048,
     },
     {
       id: 'expense-4',
@@ -187,6 +270,8 @@ export async function seedIfNeeded(force = false): Promise<void> {
       spentAt: addDays(start, 1),
       createdAt: now,
       syncState: 0,
+      currency: 'JPY',
+      amountCny: 920 * 0.048,
     },
     {
       id: 'expense-5',
@@ -197,24 +282,72 @@ export async function seedIfNeeded(force = false): Promise<void> {
       spentAt: addDays(start, 3),
       createdAt: now,
       syncState: 0,
+      currency: 'JPY',
+      amountCny: 470 * 0.048,
+    },
+    {
+      id: 'expense-6',
+      tripId: secondTripId,
+      amount: 3200,
+      category: 'stay',
+      note: 'Benesse House 两晚定金',
+      spentAt: now - 5 * 864e5,
+      createdAt: now - 5 * 864e5,
+      syncState: 1,
+      currency: 'CNY',
+      amountCny: 3200,
+    },
+    {
+      id: 'expense-7',
+      tripId: secondTripId,
+      amount: 860,
+      category: 'transport',
+      note: '高松往返机票',
+      spentAt: now - 4 * 864e5,
+      createdAt: now - 4 * 864e5,
+      syncState: 1,
+      currency: 'CNY',
+      amountCny: 860,
     },
   ]
   for (const expense of expenses) {
     await putOne('expenses', expense)
   }
 
-  const checklistFirst: ChecklistItem[] = [
+  const checklist: ChecklistItem[] = [
     { id: 'check-1', tripId, title: '护照与复印件', done: true, createdAt: now - 5 },
     { id: 'check-2', tripId, title: '转换插头', done: true, createdAt: now - 4 },
     { id: 'check-3', tripId, title: '防晒霜与墨镜', done: false, createdAt: now - 3 },
     { id: 'check-4', tripId, title: '提前买好 JR Pass', done: false, createdAt: now - 2 },
-  ]
-  const checklistSecond: ChecklistItem[] = [
     { id: 'check-5', tripId: secondTripId, title: '地中美术馆预约', done: false, createdAt: now - 1 },
     { id: 'check-6', tripId: secondTripId, title: '查好渡轮班次', done: false, createdAt: now },
   ]
-  for (const item of [...checklistFirst, ...checklistSecond]) {
+  for (const item of checklist) {
     await putOne('checklist', item)
+  }
+
+  const plans: Plan[] = [
+    // 北海道（已结束的旅程，日程大多已完成）
+    { id: 'plan-1', tripId, dayIndex: 1, time: '14:30', title: '落地新千岁机场', place: '新千岁机场', kind: 'transport', note: '', done: true, order: 0, createdAt: now - 40 * 864e5 },
+    { id: 'plan-2', tripId, dayIndex: 1, time: '17:00', title: '入住小樽运河边的旅馆', place: '小樽', kind: 'stay', note: '', done: true, order: 1, createdAt: now - 40 * 864e5 + 1 },
+    { id: 'plan-3', tripId, dayIndex: 1, time: '19:00', title: '运河边散步 + 晚餐', place: '小樽运河', kind: 'food', note: '', done: true, order: 2, createdAt: now - 40 * 864e5 + 2 },
+    { id: 'plan-4', tripId, dayIndex: 2, time: '09:30', title: 'JR 特急前往函馆', place: '札幌站', kind: 'transport', note: '提前买好指定席', done: true, order: 0, createdAt: now - 39 * 864e5 },
+    { id: 'plan-5', tripId, dayIndex: 2, time: '19:00', title: '函馆山夜景', place: '函馆山', kind: 'activity', note: '缆车排队约 40 分钟', done: true, order: 1, createdAt: now - 39 * 864e5 + 1 },
+    { id: 'plan-6', tripId, dayIndex: 3, time: '12:00', title: '狸小路商店街', place: '札幌', kind: 'shopping', note: '', done: true, order: 0, createdAt: now - 38 * 864e5 },
+    // 濑户内海（计划中，全部未完成）
+    { id: 'plan-7', tripId: secondTripId, dayIndex: 1, time: '10:20', title: '高松机场落地', place: '高松机场', kind: 'transport', note: '', done: false, order: 0, createdAt: now - 6 * 864e5 },
+    { id: 'plan-8', tripId: secondTripId, dayIndex: 1, time: '14:00', title: '渡轮前往直岛', place: '高松港', kind: 'transport', note: '确认班次', done: false, order: 1, createdAt: now - 6 * 864e5 + 1 },
+    { id: 'plan-9', tripId: secondTripId, dayIndex: 1, time: '16:00', title: 'Benesse House 入住', place: '直岛', kind: 'stay', note: '', done: false, order: 2, createdAt: now - 6 * 864e5 + 2 },
+    { id: 'plan-10', tripId: secondTripId, dayIndex: 2, time: '09:00', title: '地中美术馆', place: '直岛', kind: 'activity', note: '需提前预约', done: false, order: 0, createdAt: now - 5 * 864e5 },
+    { id: 'plan-11', tripId: secondTripId, dayIndex: 2, time: '15:30', title: '草间弥生南瓜', place: '直岛', kind: 'activity', note: '', done: false, order: 1, createdAt: now - 5 * 864e5 + 1 },
+    { id: 'plan-12', tripId: secondTripId, dayIndex: 3, time: '11:00', title: '丰岛美术馆', place: '丰岛', kind: 'activity', note: '', done: false, order: 0, createdAt: now - 4 * 864e5 },
+    { id: 'plan-13', tripId: secondTripId, dayIndex: 3, time: '18:00', title: '返回高松', place: '高松港', kind: 'transport', note: '', done: false, order: 1, createdAt: now - 4 * 864e5 + 1 },
+    // 京都（记忆中）
+    { id: 'plan-14', tripId: memoryTripId, dayIndex: 1, time: '06:00', title: '岚山竹林', place: '岚山', kind: 'activity', note: '', done: true, order: 0, createdAt: oneYearAgo + 1 },
+    { id: 'plan-15', tripId: memoryTripId, dayIndex: 2, time: '10:00', title: '哲学之道', place: '京都', kind: 'activity', note: '', done: true, order: 0, createdAt: oneYearAgo + 864e5 },
+  ]
+  for (const plan of plans) {
+    await putOne('plans', plan)
   }
 
   const footprints: Footprint[] = [
@@ -250,6 +383,17 @@ export async function seedIfNeeded(force = false): Promise<void> {
       note: '',
       visitedAt: addDays(start, 2),
       createdAt: now,
+    },
+    {
+      id: 'foot-4',
+      tripId: memoryTripId,
+      placeName: '岚山竹林',
+      city: '京都',
+      latitude: 35.017,
+      longitude: 135.6717,
+      note: '清晨六点最安静',
+      visitedAt: oneYearAgo,
+      createdAt: oneYearAgo,
     },
   ]
   for (const footprint of footprints) {

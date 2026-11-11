@@ -7,18 +7,29 @@ import {
   PencilSimple,
   Trash,
 } from '@phosphor-icons/react'
-import type { ChecklistItem, Expense, Footprint, Member, Moment, Photo, TripView, TripStatus } from '../lib/types'
+import type {
+  ChecklistItem,
+  Expense,
+  Footprint,
+  Member,
+  Moment,
+  Photo,
+  TripStatus,
+  TripView,
+} from '../lib/types'
 import {
   CATEGORY_COLOR,
   CATEGORY_LABEL,
+  CURRENCY_SYMBOL,
+  countdownText,
   coverClass,
   formatDate,
   formatDateCn,
   formatMoney,
   formatTime,
+  STATUS_LABEL,
   tripDayCount,
   tripStatusOf,
-  STATUS_LABEL,
 } from '../lib/utils'
 import { cn } from '../lib/cn'
 import { CategoryGlyph } from './Icons'
@@ -26,8 +37,8 @@ import { Avatar } from './ui'
 
 const STATUS_STYLE: Record<TripStatus, string> = {
   ongoing: 'bg-accent text-white',
-  planned: 'bg-white/16 text-white',
-  finished: 'bg-white/10 text-white/80',
+  planned: 'bg-white/20 text-white',
+  finished: 'bg-white/12 text-white/80',
 }
 
 export function TripCard({
@@ -42,6 +53,7 @@ export function TripCard({
   const status = tripStatusOf(trip.startDate, trip.endDate)
   const days = tripDayCount(trip.startDate, trip.endDate)
   const cover = coverClass(trip.cover)
+  const countdown = status === 'planned' ? countdownText(trip.startDate) : ''
 
   return (
     <button
@@ -95,10 +107,13 @@ export function TripCard({
             </span>
           ) : null}
         </span>
-        <span className="mt-2 flex items-center gap-3 text-[11px] text-white/60 tabular-nums">
+        <span className="mt-2 flex items-center gap-2.5 text-[11px] tabular-nums text-white/60">
+          {countdown ? (
+            <span className="rounded-full bg-white/15 px-2 py-0.5 text-white/90">{countdown}</span>
+          ) : null}
           <span>{trip.momentCount} 条记录</span>
           <span className="h-3 w-px bg-white/20" />
-          <span>¥ {formatMoney(trip.expenseTotal)}</span>
+          <span>¥ {formatMoney(trip.expenseTotalCny)}</span>
         </span>
       </span>
     </button>
@@ -108,30 +123,32 @@ export function TripCard({
 export function MomentCard({
   moment,
   onOpen,
+  onPhoto,
 }: {
   moment: Moment
   onOpen: () => void
+  onPhoto?: (index: number) => void
 }) {
   const photos = moment.photos ?? []
   return (
     <article className="card press group cursor-pointer overflow-hidden" onClick={onOpen}>
       {photos.length > 0 ? (
-        <div
-          className={cn(
-            'grid gap-px bg-line',
-            photos.length === 1 ? 'grid-cols-1' : 'grid-cols-2',
-          )}
-        >
-          {photos.slice(0, 4).map((photo) => (
+        <div className={cn('grid gap-px bg-line', photos.length === 1 ? 'grid-cols-1' : 'grid-cols-2')}>
+          {photos.slice(0, 4).map((photo, index) => (
             <img
               key={photo.id}
               src={photo.src}
               alt={photo.caption ?? moment.locationName}
               className={cn(
-                'w-full object-cover',
+                'w-full cursor-zoom-in object-cover transition-transform duration-500 group-hover:scale-[1.02]',
                 photos.length === 1 ? 'aspect-[3/2]' : 'aspect-square',
               )}
               loading="lazy"
+              onClick={(event) => {
+                if (!onPhoto) return
+                event.stopPropagation()
+                onPhoto(index)
+              }}
             />
           ))}
         </div>
@@ -142,7 +159,7 @@ export function MomentCard({
           {moment.locationName ? (
             <>
               <span className="h-3 w-px bg-line" />
-              <span className="inline-flex items-center gap-1 truncate text-accent">
+              <span className="inline-flex min-w-0 items-center gap-1 truncate text-accent">
                 <MapPin size={11} />
                 {moment.locationName}
               </span>
@@ -150,22 +167,26 @@ export function MomentCard({
           ) : null}
           <PencilSimple
             size={13}
-            className="ml-auto text-ink-3 opacity-0 transition-opacity group-hover:opacity-100"
+            className="ml-auto shrink-0 text-ink-3 opacity-0 transition-opacity group-hover:opacity-100"
           />
         </div>
         <p className="text-[14.5px] leading-6 text-ink">{moment.content}</p>
+        {(moment.tags ?? []).length > 0 ? (
+          <div className="flex flex-wrap gap-1.5 pt-0.5">
+            {(moment.tags ?? []).map((tag) => (
+              <span key={tag} className="rounded-full bg-paper-2 px-2 py-0.5 text-[10.5px] text-ink-3">
+                #{tag}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
     </article>
   )
 }
 
-export function ExpenseRow({
-  expense,
-  onOpen,
-}: {
-  expense: Expense
-  onOpen?: () => void
-}) {
+export function ExpenseRow({ expense, onOpen }: { expense: Expense; onOpen?: () => void }) {
+  const foreign = expense.currency && expense.currency !== 'CNY'
   return (
     <button
       type="button"
@@ -175,7 +196,10 @@ export function ExpenseRow({
     >
       <span
         className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
-        style={{ backgroundColor: `${CATEGORY_COLOR[expense.category]}14`, color: CATEGORY_COLOR[expense.category] }}
+        style={{
+          backgroundColor: `${CATEGORY_COLOR[expense.category]}18`,
+          color: CATEGORY_COLOR[expense.category],
+        }}
       >
         <CategoryGlyph category={expense.category} size={18} />
       </span>
@@ -187,8 +211,17 @@ export function ExpenseRow({
           {expense.note || formatDateCn(expense.spentAt)}
         </span>
       </span>
-      <span className="shrink-0 text-[14px] font-medium tabular-nums text-ink">
-        ¥ {formatMoney(expense.amount)}
+      <span className="shrink-0 text-right">
+        <span className="block text-[14px] font-medium tabular-nums text-ink">
+          {foreign
+            ? `${CURRENCY_SYMBOL[expense.currency as keyof typeof CURRENCY_SYMBOL]}${formatMoney(expense.amount)}`
+            : `¥ ${formatMoney(expense.amount)}`}
+        </span>
+        {foreign ? (
+          <span className="block text-[10px] tabular-nums text-ink-3">
+            {expense.currency} · ≈ ¥{formatMoney(expense.amountCny ?? 0)}
+          </span>
+        ) : null}
       </span>
     </button>
   )
@@ -209,14 +242,14 @@ export function CategoryBar({
 }) {
   return (
     <div className="flex items-center gap-3">
-      <span className="w-[68px] shrink-0 text-[12.5px] text-ink-2">{label}</span>
+      <span className="w-[60px] shrink-0 text-[12.5px] text-ink-2">{label}</span>
       <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-paper-2">
         <span
           className="block h-full rounded-full transition-[width] duration-500"
           style={{ width: `${Math.max(ratio * 100, 3)}%`, backgroundColor: color }}
         />
       </span>
-      <span className="w-[86px] shrink-0 text-right text-[12px] tabular-nums text-ink-3">
+      <span className="w-[92px] shrink-0 text-right text-[11.5px] tabular-nums text-ink-3">
         {count} 笔 · ¥{formatMoney(amount)}
       </span>
     </div>
@@ -288,7 +321,7 @@ export function FootprintRow({
           {footprint.city ? <span>{footprint.city}</span> : null}
           <span>{formatDateCn(footprint.visitedAt)}</span>
           {hasCoord ? (
-            <span className="tabular-nums">
+            <span className="hidden tabular-nums sm:inline">
               {footprint.latitude.toFixed(2)}, {footprint.longitude.toFixed(2)}
             </span>
           ) : null}
@@ -299,7 +332,7 @@ export function FootprintRow({
           type="button"
           aria-label="在地图中查看"
           onClick={onOpenMap}
-          className="press flex h-9 w-9 items-center justify-center rounded-full border border-line text-ink-2"
+          className="press flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line text-ink-2"
         >
           <NavigationArrow size={15} />
         </button>
@@ -309,7 +342,7 @@ export function FootprintRow({
           type="button"
           aria-label="删除足迹"
           onClick={onDelete}
-          className="press flex h-9 w-9 items-center justify-center rounded-full text-ink-3 hover:text-danger"
+          className="press flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-3 hover:text-danger"
         >
           <Trash size={15} />
         </button>
@@ -327,11 +360,7 @@ export function MemberRow({ member, onRemove }: { member: Member; onRemove?: () 
         <p className="text-[11.5px] text-ink-3">{member.role === 'owner' ? '创建者' : '成员'}</p>
       </div>
       {onRemove ? (
-        <button
-          type="button"
-          onClick={onRemove}
-          className="press text-[12px] text-ink-3 hover:text-danger"
-        >
+        <button type="button" onClick={onRemove} className="press text-[12px] text-ink-3 hover:text-danger">
           移除
         </button>
       ) : null}
@@ -355,7 +384,7 @@ export function PhotoStrip({ photos, onRemove }: { photos: Photo[]; onRemove?: (
               type="button"
               aria-label="移除照片"
               onClick={() => onRemove(photo.id)}
-              className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/50 text-white text-[12px]"
+              className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-[12px] text-white"
             >
               ×
             </button>

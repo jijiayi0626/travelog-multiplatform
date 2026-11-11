@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
+  Images,
+  Keyboard,
+  MagnifyingGlass,
   MapPinLine,
   MapTrifold,
-  Monitor,
   Moon,
   Sun,
   UserCircle,
@@ -13,9 +15,11 @@ import type { View } from '../lib/types'
 import { cn } from '../lib/cn'
 import { useIsDesktop } from '../lib/hooks'
 import { currentTheme, setThemeMode, subscribeSystemTheme } from '../lib/theme'
+import { useSearch, useShortcuts } from '../lib/app-context'
 
 const TABS = [
   { key: 'trips', label: '行程', Icon: MapTrifold },
+  { key: 'album', label: '相册', Icon: Images },
   { key: 'footprints', label: '足迹', Icon: MapPinLine },
   { key: 'expenses', label: '账本', Icon: Wallet },
   { key: 'profile', label: '我的', Icon: UserCircle },
@@ -25,6 +29,8 @@ type RootKey = (typeof TABS)[number]['key']
 
 function rootOf(view: View): RootKey {
   switch (view.name) {
+    case 'album':
+      return 'album'
     case 'footprints':
     case 'footprintEditor':
       return 'footprints'
@@ -40,7 +46,13 @@ function rootOf(view: View): RootKey {
 }
 
 function isRoot(view: View): boolean {
-  return view.name === 'trips' || view.name === 'footprints' || view.name === 'expenses' || view.name === 'profile'
+  return (
+    view.name === 'trips' ||
+    view.name === 'album' ||
+    view.name === 'footprints' ||
+    view.name === 'expenses' ||
+    view.name === 'profile'
+  )
 }
 
 export function AppShell({
@@ -53,12 +65,12 @@ export function AppShell({
   children: ReactNode
 }) {
   const isDesktop = useIsDesktop()
+  const openSearch = useSearch()
+  const openShortcuts = useShortcuts()
   const active = rootOf(view)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => currentTheme())
 
-  useEffect(() => {
-    return subscribeSystemTheme(() => setTheme(currentTheme()))
-  }, [])
+  useEffect(() => subscribeSystemTheme(() => setTheme(currentTheme())), [])
 
   const toggleTheme = () => {
     const next = theme === 'dark' ? 'light' : 'dark'
@@ -77,16 +89,22 @@ export function AppShell({
               <MapTrifold size={19} weight="fill" />
             </span>
             <span>
-              <span className="block text-[15px] font-semibold leading-tight tracking-tight text-ink">
-                旅记
-              </span>
-              <span className="block text-[10px] uppercase tracking-[0.18em] text-ink-3">
-                Travelog
-              </span>
+              <span className="block text-[15px] font-semibold leading-tight tracking-tight text-ink">旅记</span>
+              <span className="block text-[10px] uppercase tracking-[0.18em] text-ink-3">Travelog</span>
             </span>
           </div>
 
-          <nav className="mt-8 flex flex-col gap-1">
+          <button
+            type="button"
+            onClick={openSearch}
+            className="press mt-6 flex w-full items-center gap-2 rounded-xl border border-line bg-paper-2/60 px-3 py-2 text-left text-[12.5px] text-ink-3 hover:text-ink"
+          >
+            <MagnifyingGlass size={15} />
+            <span className="flex-1">搜索</span>
+            <kbd className="rounded border border-line px-1 py-0.5 text-[9.5px]">⌘K</kbd>
+          </button>
+
+          <nav className="mt-4 flex flex-col gap-1">
             {TABS.map(({ key, label, Icon }) => {
               const isActive = active === key
               return (
@@ -94,6 +112,7 @@ export function AppShell({
                   key={key}
                   type="button"
                   onClick={() => onRootChange(key)}
+                  aria-current={isActive ? 'page' : undefined}
                   className={cn(
                     'press flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-[13.5px] transition-colors',
                     isActive
@@ -110,12 +129,9 @@ export function AppShell({
 
           <div className="mt-auto space-y-3">
             <div className="rounded-xl border border-line bg-paper-2/60 p-3">
-              <p className="flex items-center gap-1.5 text-[11.5px] font-medium text-ink-2">
-                <Monitor size={13} />
-                本地模式
-              </p>
+              <p className="text-[11.5px] font-medium text-ink-2">本地优先</p>
               <p className="mt-1 text-[11px] leading-4 text-ink-3">
-                数据保存在本机浏览器，接入后端即可多端同步。
+                日程、照片与账目都存在本机。导出 JSON 就能带走全部数据。
               </p>
             </div>
             <button
@@ -126,7 +142,16 @@ export function AppShell({
               <ThemeGlyph size={16} />
               {theme === 'dark' ? '切换到浅色' : '切换到深色'}
             </button>
-            <p className="px-3 text-[10px] uppercase tracking-[0.16em] text-ink-3">v1.0</p>
+            <button
+              type="button"
+              onClick={openShortcuts}
+              className="press flex w-full items-center gap-2 rounded-xl px-3 py-2 text-[12.5px] text-ink-2 hover:bg-paper-2"
+            >
+              <Keyboard size={16} />
+              快捷键
+              <kbd className="ml-auto rounded border border-line px-1 py-0.5 text-[9.5px] text-ink-3">?</kbd>
+            </button>
+            <p className="px-3 text-[10px] uppercase tracking-[0.16em] text-ink-3">v1.1</p>
           </div>
         </aside>
       ) : null}
@@ -135,7 +160,7 @@ export function AppShell({
         <main
           className={cn(
             'safe-top mx-auto w-full max-w-[1180px] px-4',
-            isRoot(view) ? 'pb-[calc(84px+env(safe-area-inset-bottom))] lg:pb-12' : 'pb-10',
+            isRoot(view) ? 'pb-[calc(88px+env(safe-area-inset-bottom))] lg:pb-12' : 'pb-10',
             'sm:px-6',
           )}
         >
@@ -143,8 +168,8 @@ export function AppShell({
         </main>
 
         {!isDesktop && isRoot(view) ? (
-          <nav className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/88 backdrop-blur-xl">
-            <div className="mx-auto grid max-w-[560px] grid-cols-4 px-2 pt-1.5">
+          <nav className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/97 backdrop-blur-2xl shadow-[0_-8px_24px_-24px_rgba(27,27,25,0.6)]">
+            <div className="mx-auto grid max-w-[600px] grid-cols-5 px-1 pt-1.5">
               {TABS.map(({ key, label, Icon }) => {
                 const isActive = active === key
                 return (
@@ -152,13 +177,21 @@ export function AppShell({
                     key={key}
                     type="button"
                     onClick={() => onRootChange(key)}
+                    aria-current={isActive ? 'page' : undefined}
                     className={cn(
-                      'press flex flex-col items-center gap-1 rounded-xl py-1.5',
+                      'press relative flex flex-col items-center gap-1 rounded-xl py-1.5',
                       isActive ? 'text-accent' : 'text-ink-3',
                     )}
                   >
                     <Icon size={20} weight={isActive ? 'fill' : 'regular'} />
                     <span className={cn('text-[10px]', isActive && 'font-medium')}>{label}</span>
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        'absolute bottom-0 h-1 w-1 rounded-full bg-accent transition-opacity duration-200',
+                        isActive ? 'opacity-100' : 'opacity-0',
+                      )}
+                    />
                   </button>
                 )
               })}

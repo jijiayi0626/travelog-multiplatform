@@ -1,4 +1,4 @@
-import type { ExpenseCategory, TripStatus } from './types'
+import type { Currency, ExpenseCategory, PlanKind, TripStatus } from './types'
 
 const DAY = 24 * 60 * 60 * 1000
 
@@ -120,6 +120,55 @@ export const STATUS_LABEL: Record<TripStatus, string> = {
   finished: '已结束',
 }
 
+/* ---------------- 行程计划 ---------------- */
+
+export const PLAN_KIND_ORDER: PlanKind[] = ['transport', 'activity', 'food', 'stay', 'shopping']
+
+export const PLAN_KIND_LABEL: Record<PlanKind, string> = {
+  transport: '交通',
+  activity: '游玩',
+  food: '用餐',
+  stay: '住宿',
+  shopping: '购物',
+}
+
+export const PLAN_KIND_COLOR: Record<PlanKind, string> = {
+  transport: '#0f766e',
+  activity: '#b45309',
+  food: '#9d174d',
+  stay: '#4b5563',
+  shopping: '#15803d',
+}
+
+/** '09:30:00' / '9:30' / '09.30' → '09:30'，非法输入返回空串 */
+export function normalizeClock(value: string): string {
+  const raw = value.trim()
+  if (!raw) return ''
+  const matched = raw.match(/^(\d{1,2})[:：.]?(\d{2})?$/)
+  if (!matched) return ''
+  const hour = Number(matched[1])
+  const minute = matched[2] ? Number(matched[2]) : 0
+  if (hour > 23 || minute > 59) return ''
+  return `${pad2(hour)}:${pad2(minute)}`
+}
+
+export function clockToMinutes(value: string): number {
+  if (!value) return Number.MAX_SAFE_INTEGER
+  const [hour, minute] = value.split(':').map(Number)
+  return (hour || 0) * 60 + (minute || 0)
+}
+
+export function nowClock(): string {
+  const date = new Date()
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+}
+
+/** 今天在旅程中是第几天（1 开始），不在范围内返回 0 或负数 */
+export function dayIndexOfDate(startDate: number, timestamp = Date.now()): number {
+  if (startDate <= 0) return 0
+  return Math.floor((startOfDay(timestamp) - startOfDay(startDate)) / DAY) + 1
+}
+
 export function coverClass(seed: number): string {
   return `cover-${Math.abs(seed) % 5}`
 }
@@ -195,4 +244,110 @@ export async function copyText(text: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+/* ---------------- 货币 ---------------- */
+
+export const CURRENCY_SYMBOL: Record<Currency, string> = {
+  CNY: '¥',
+  JPY: '¥',
+  USD: '$',
+  EUR: '€',
+  THB: '฿',
+}
+
+export const CURRENCY_LABEL: Record<Currency, string> = {
+  CNY: '人民币',
+  JPY: '日元',
+  USD: '美元',
+  EUR: '欧元',
+  THB: '泰铢',
+}
+
+/** 固定的离线汇率（1 单位外币 ≈ N 人民币），仅用于本地统计展示 */
+export const CURRENCY_RATE_TO_CNY: Record<Currency, number> = {
+  CNY: 1,
+  JPY: 0.048,
+  USD: 7.2,
+  EUR: 7.8,
+  THB: 0.2,
+}
+
+export const CURRENCY_ORDER: Currency[] = ['CNY', 'JPY', 'USD', 'EUR', 'THB']
+
+export function toCny(amount: number, currency: Currency = 'CNY'): number {
+  return amount * CURRENCY_RATE_TO_CNY[currency]
+}
+
+export function formatCurrency(amount: number, currency: Currency = 'CNY'): string {
+  return `${CURRENCY_SYMBOL[currency]}${formatMoney(amount)}`
+}
+
+export function formatCny(amount: number): string {
+  return `¥${formatMoney(amount)}`
+}
+
+/* ---------------- 时间聚合 ---------------- */
+
+export function monthKey(timestamp: number): string {
+  const date = new Date(timestamp)
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`
+}
+
+export function monthLabel(key: string): string {
+  const [, month] = key.split('-')
+  return `${Number(month)}月`
+}
+
+export function lastMonths(count: number): string[] {
+  const now = new Date()
+  const keys: string[] = []
+  for (let i = count - 1; i >= 0; i--) {
+    const date = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    keys.push(`${date.getFullYear()}-${pad2(date.getMonth() + 1)}`)
+  }
+  return keys
+}
+
+export function daysUntil(timestamp: number): number {
+  const today = startOfDay(Date.now())
+  return Math.round((startOfDay(timestamp) - today) / DAY)
+}
+
+export function countdownText(startDate: number): string {
+  const days = daysUntil(startDate)
+  if (days > 1) return `还有 ${days} 天出发`
+  if (days === 1) return '明天出发'
+  if (days === 0) return '今天出发'
+  return ''
+}
+
+/* ---------------- 文件 ---------------- */
+
+export function csvEscape(value: string): string {
+  if (/[",\n]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`
+  }
+  return value
+}
+
+export function downloadText(filename: string, content: string, mime = 'text/plain;charset=utf-8'): void {
+  const blob = new Blob([content], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+  window.setTimeout(() => URL.revokeObjectURL(url), 2000)
+}
+
+export function readTextFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsText(file, 'utf-8')
+  })
 }

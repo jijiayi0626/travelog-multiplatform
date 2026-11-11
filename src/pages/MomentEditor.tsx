@@ -4,11 +4,13 @@ import type { Moment, Photo, Trip } from '../lib/types'
 import { deleteMoment, getTrip, listMoments, saveMoment } from '../lib/repo'
 import { useNav, useRefresh, useToast } from '../lib/app-context'
 import { compressImage, dayIndexInTrip, uid } from '../lib/utils'
+import { cn } from '../lib/cn'
 import { EditorScreen, FormBlock } from '../components/EditorScreen'
 import { ConfirmDialog, Field } from '../components/ui'
 import { PhotoStrip } from '../components/cards'
 
 const MAX_PHOTOS = 9
+const TAG_PRESETS = ['美食', '散步', '风景', '住宿', '交通', '购物', '夜生活', '拍照']
 
 export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: string }) {
   const nav = useNav()
@@ -27,6 +29,8 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
   const [locationName, setLocationName] = useState('')
   const [photos, setPhotos] = useState<Photo[]>([])
   const [dayIndex, setDayIndex] = useState(1)
+  const [tags, setTags] = useState<string[]>([])
+  const [customTag, setCustomTag] = useState('')
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -45,6 +49,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
           setLocationName(target.locationName)
           setPhotos(target.photos ?? [])
           setDayIndex(target.dayIndex || 1)
+          setTags(target.tags ?? [])
         }
       } else if (loadedTrip) {
         const day = dayIndexInTrip(loadedTrip.startDate, Date.now())
@@ -96,6 +101,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
         updatedAt: 0,
         syncState: 1,
         photos,
+        tags,
       })
       bump()
       toast('记录已保存')
@@ -149,6 +155,60 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
             onChange={(event) => setLocationName(event.target.value)}
           />
         </Field>
+
+        <div className="space-y-2">
+          <span className="field-label">标签</span>
+          <div className="flex flex-wrap gap-1.5">
+            {TAG_PRESETS.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                onClick={() =>
+                  setTags((previous) =>
+                    previous.includes(tag) ? previous.filter((item) => item !== tag) : [...previous, tag],
+                  )
+                }
+                className={cn('chip px-2.5 py-1 text-[11.5px]', tags.includes(tag) && 'chip-active')}
+              >
+                #{tag}
+              </button>
+            ))}
+          </div>
+          <input
+            className="input h-10 text-[13px]"
+            value={customTag}
+            placeholder="自定义标签，回车添加"
+            onChange={(event) => setCustomTag(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter') return
+              event.preventDefault()
+              const value = customTag.trim().replace(/^#/, '')
+              if (!value) return
+              setTags((previous) => (previous.includes(value) ? previous : [...previous, value]))
+              setCustomTag('')
+            }}
+          />
+          {tags.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[10.5px] text-ink-2"
+                >
+                  #{tag}
+                  <button
+                    type="button"
+                    aria-label={`移除标签 ${tag}`}
+                    onClick={() => setTags((previous) => previous.filter((item) => item !== tag))}
+                    className="text-ink-3 hover:text-danger"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
       </FormBlock>
 
       <FormBlock title="照片" hint={`${photos.length}/${MAX_PHOTOS}`}>

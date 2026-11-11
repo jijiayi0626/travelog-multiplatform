@@ -2,46 +2,79 @@ import { useCallback, useMemo, useState } from 'react'
 import {
   ArrowLeft,
   CalendarBlank,
+  CalendarCheck,
+  CaretDown,
+  CaretUp,
   Copy,
   MapPin,
   PencilSimple,
   Plus,
+  Sparkle,
   Trash,
   UsersThree,
   Wallet,
 } from '@phosphor-icons/react'
-import type { ChecklistItem, Expense, Member, Moment, TabKey, Trip } from '../lib/types'
+import type { ChecklistItem, Expense, Member, Moment, Photo, Plan, TabKey, Trip } from '../lib/types'
 import {
   addMember,
+  applyChecklistTemplate,
+  applyPlanTemplate,
   categoryStats,
   checklistProgress,
   deleteChecklistItem,
+  deletePlan,
   deleteTrip,
+  duplicateTrip,
   getTrip,
   groupMoments,
   listChecklist,
   listExpenses,
   listMembers,
   listMoments,
+  listPlans,
+  movePlan,
+  nextPlanOf,
+  planSummary,
   removeMember,
   saveChecklistItem,
-  sumExpense,
+  sumExpenseCny,
+  togglePlan,
+  CHECKLIST_TEMPLATES,
+  PLAN_TEMPLATES,
 } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
 import { useNav, useRefresh, useToast } from '../lib/app-context'
 import {
+  CATEGORY_COLOR,
+  CATEGORY_LABEL,
+  PLAN_KIND_COLOR,
+  PLAN_KIND_LABEL,
+  STATUS_LABEL,
   copyText,
   coverClass,
+  dayIndexOfDate,
   formatDate,
+  formatDateCn,
   formatMoney,
   tripDayCount,
   tripStatusOf,
-  STATUS_LABEL,
 } from '../lib/utils'
 import { cn } from '../lib/cn'
 import { CategoryBar, ChecklistRow, ExpenseRow, MemberRow, MomentCard } from '../components/cards'
-import { Avatar, ConfirmDialog, EmptyState, IconButton, SegmentedTabs, SkeletonList, StatTile } from '../components/ui'
-import { CATEGORY_LABEL, CATEGORY_COLOR } from '../lib/utils'
+import { BudgetBar, HeatStrip } from '../components/charts'
+import { Lightbox } from '../components/Lightbox'
+import { EmptyArt } from '../components/EmptyArt'
+import { PlanGlyph } from '../components/Icons'
+import {
+  Avatar,
+  ConfirmDialog,
+  EmptyState,
+  IconButton,
+  SegmentedTabs,
+  Sheet,
+  SkeletonList,
+  StatTile,
+} from '../components/ui'
 
 interface DetailData {
   trip: Trip | undefined
@@ -49,6 +82,7 @@ interface DetailData {
   expenses: Expense[]
   checklist: ChecklistItem[]
   members: Member[]
+  plans: Plan[]
 }
 
 const EMPTY: DetailData = {
@@ -57,14 +91,18 @@ const EMPTY: DetailData = {
   expenses: [],
   checklist: [],
   members: [],
+  plans: [],
 }
 
 const TAB_OPTIONS: Array<{ value: TabKey; label: string }> = [
+  { value: 'plan', label: '日程' },
   { value: 'timeline', label: '时间线' },
   { value: 'ledger', label: '账本' },
   { value: 'checklist', label: '清单' },
   { value: 'members', label: '旅伴' },
 ]
+
+const DAY_MS = 864e5
 
 export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey }) {
   const nav = useNav()
@@ -73,25 +111,29 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
   const [newCheck, setNewCheck] = useState('')
   const [newMember, setNewMember] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [checklistTemplateOpen, setChecklistTemplateOpen] = useState(false)
+  const [lightbox, setLightbox] = useState<{ photos: Photo[]; index: number } | null>(null)
 
   const loader = useCallback(async (): Promise<DetailData> => {
-    const [trip, moments, expenses, checklist, members] = await Promise.all([
+    const [trip, moments, expenses, checklist, members, plans] = await Promise.all([
       getTrip(tripId),
       listMoments(tripId),
       listExpenses(tripId),
       listChecklist(tripId),
       listMembers(tripId),
+      listPlans(tripId),
     ])
-    return { trip, moments, expenses, checklist, members }
+    return { trip, moments, expenses, checklist, members, plans }
   }, [tripId])
 
   const { data, loading } = useLoader(loader, EMPTY, tripId)
-  const { trip, moments, expenses, checklist, members } = data
+  const { trip, moments, expenses, checklist, members, plans } = data
 
   const groups = useMemo(() => groupMoments(moments), [moments])
   const progress = checklistProgress(checklist)
+  const planProgress = planSummary(plans)
   const stats = useMemo(() => categoryStats(expenses), [expenses])
-  const total = sumExpense(expenses)
+  const total = sumExpenseCny(expenses)
 
   const switchTab = (next: TabKey) => nav.navigate({ name: 'trip', id: tripId, tab: next })
 
@@ -101,14 +143,7 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
       toast('先写点什么，再添加')
       return
     }
-    const item: ChecklistItem = {
-      id: '',
-      tripId,
-      title,
-      done: false,
-      createdAt: Date.now(),
-    }
-    await saveChecklistItem(item)
+    await saveChecklistItem({ id: '', tripId, title, done: false, createdAt: Date.now() })
     setNewCheck('')
     bump()
   }
@@ -139,6 +174,14 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
     if (!trip) return
     const ok = await copyText(trip.inviteCode)
     toast(ok ? '邀请码已复制' : '复制失败，请手动记录')
+  }
+
+  const copyTrip = async () => {
+    const copy = await duplicateTrip(tripId)
+    if (!copy) return
+    bump()
+    toast('旅程已复制（含清单与日程）')
+    nav.navigate({ name: 'trip', id: copy.id, tab: 'plan' })
   }
 
   const doDeleteTrip = async () => {
@@ -194,14 +237,12 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
           <span
             className={cn(
               'inline-flex items-center rounded-full px-2.5 py-1 text-[10.5px] font-medium tracking-wide',
-              status === 'ongoing' ? 'bg-accent text-white' : 'bg-white/14 text-white/85',
+              status === 'ongoing' ? 'bg-accent text-white' : 'bg-white/15 text-white/85',
             )}
           >
             {STATUS_LABEL[status]}
           </span>
-          {days > 0 ? (
-            <span className="text-[11.5px] text-white/60">共 {days} 天</span>
-          ) : null}
+          {days > 0 ? <span className="text-[11.5px] text-white/60">共 {days} 天</span> : null}
         </div>
         <h1 className="relative mt-8 max-w-[22ch] text-[25px] font-semibold leading-tight tracking-tight sm:text-[30px]">
           {trip.title || '未命名旅程'}
@@ -224,7 +265,7 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
         <button
           type="button"
           onClick={() => nav.navigate({ name: 'tripEditor', id: trip.id })}
-          className="press absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full bg-white/14 px-3 py-1.5 text-[11.5px] text-white backdrop-blur-sm"
+          className="press absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-[11.5px] text-white backdrop-blur-sm"
         >
           <PencilSimple size={13} />
           编辑
@@ -232,22 +273,63 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
       </section>
 
       <div className="mt-4 grid grid-cols-2 gap-4 border-y border-line py-4 lg:hidden">
+        <StatTile
+          label="日程"
+          value={`${planProgress.done}/${planProgress.total}`}
+          sub={planProgress.total > 0 ? '已完成' : '待安排'}
+        />
         <StatTile label="图文记录" value={`${moments.length} 条`} />
         <StatTile label="花费合计" value={`¥${formatMoney(total)}`} />
-        <StatTile label="清单完成" value={`${progress.done}/${progress.total}`} />
         <StatTile label="同行旅伴" value={`${members.length} 人`} />
       </div>
 
+      {trip.budget && trip.budget > 0 ? (
+        <div className="mt-3 lg:hidden">
+          <BudgetBar spent={total} budget={trip.budget} />
+        </div>
+      ) : null}
+
       <div className="mt-4 lg:grid lg:grid-cols-[1.7fr_1fr] lg:gap-6">
         <div className="min-w-0">
-          <SegmentedTabs value={tab} options={TAB_OPTIONS} onChange={switchTab} className="max-w-[420px]" />
+          <SegmentedTabs value={tab} options={TAB_OPTIONS} onChange={switchTab} className="max-w-[480px]" />
 
           <div className="mt-4">
+            {tab === 'plan' ? (
+              <PlanTab
+                plans={plans}
+                startDate={trip.startDate}
+                endDate={trip.endDate}
+                dayCount={days}
+                onAdd={(dayIndex) => nav.navigate({ name: 'planEditor', tripId, dayIndex })}
+                onOpen={(planId) => nav.navigate({ name: 'planEditor', tripId, planId })}
+                onToggle={async (plan, done) => {
+                  await togglePlan(plan, done)
+                  bump()
+                }}
+                onMove={async (planId, delta) => {
+                  await movePlan(tripId, planId, delta)
+                  bump()
+                }}
+                onDelete={async (plan) => {
+                  await deletePlan(plan.id)
+                  bump()
+                  toast('计划已删除')
+                }}
+                onTemplate={async (key) => {
+                  const added = await applyPlanTemplate(tripId, key, days)
+                  bump()
+                  toast(added > 0 ? `已排入 ${added} 条日程` : '模板内容已在日程里')
+                }}
+                onCreateMoment={() => nav.navigate({ name: 'momentEditor', tripId })}
+              />
+            ) : null}
+
             {tab === 'timeline' ? (
               <TimelineTab
                 groups={groups}
                 onAdd={() => nav.navigate({ name: 'momentEditor', tripId })}
                 onOpen={(momentId) => nav.navigate({ name: 'momentEditor', tripId, momentId })}
+                onPhoto={(moment, index) => setLightbox({ photos: moment.photos, index })}
               />
             ) : null}
 
@@ -270,6 +352,7 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
                 onAdd={addChecklist}
                 onToggle={toggleChecklist}
                 onDelete={removeChecklist}
+                onTemplate={() => setChecklistTemplateOpen(true)}
               />
             ) : null}
 
@@ -295,6 +378,12 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
             <h2 className="text-[12px] font-semibold tracking-tight text-ink">旅程概览</h2>
             <dl className="mt-3 space-y-2.5 text-[12.5px]">
               <div className="flex items-center justify-between">
+                <dt className="text-ink-3">日程完成</dt>
+                <dd className="tabular-nums text-ink">
+                  {planProgress.done}/{planProgress.total}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between">
                 <dt className="text-ink-3">图文记录</dt>
                 <dd className="tabular-nums text-ink">{moments.length}</dd>
               </div>
@@ -313,6 +402,11 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
                 <dd className="tabular-nums text-ink">{members.length}</dd>
               </div>
             </dl>
+            {trip.budget && trip.budget > 0 ? (
+              <div className="mt-3 border-t border-line pt-3">
+                <BudgetBar spent={total} budget={trip.budget} />
+              </div>
+            ) : null}
           </div>
 
           <div className="card p-4">
@@ -335,6 +429,15 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
 
           <button
             type="button"
+            onClick={copyTrip}
+            className="press flex w-full items-center justify-center gap-1.5 rounded-full border border-line py-2.5 text-[12.5px] text-ink-2 hover:text-ink"
+          >
+            <Copy size={14} />
+            复制这段旅程
+          </button>
+
+          <button
+            type="button"
             onClick={() => setConfirmDelete(true)}
             className="press flex w-full items-center justify-center gap-1.5 rounded-full border border-line py-2.5 text-[12.5px] text-ink-3 hover:text-danger"
           >
@@ -347,30 +450,418 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
       <ConfirmDialog
         open={confirmDelete}
         title="删除这段旅程？"
-        message="旅程下的图文、账目、清单与足迹都会一并删除，且无法恢复。"
+        message="旅程下的日程、图文、账目、清单与足迹都会一并删除，且无法恢复。"
         onConfirm={doDeleteTrip}
         onClose={() => setConfirmDelete(false)}
       />
+
+      <Sheet
+        open={checklistTemplateOpen}
+        title="套用清单模板"
+        onClose={() => setChecklistTemplateOpen(false)}
+      >
+        <div className="space-y-2">
+          {CHECKLIST_TEMPLATES.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={async () => {
+                const added = await applyChecklistTemplate(tripId, item.key)
+                setChecklistTemplateOpen(false)
+                bump()
+                toast(added > 0 ? `已添加 ${added} 项` : '模板内容已在清单里')
+              }}
+              className="press w-full rounded-2xl border border-line bg-surface p-3 text-left"
+            >
+              <span className="block text-[14px] font-medium text-ink">{item.label}</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-ink-3">{item.items.join(' · ')}</span>
+            </button>
+          ))}
+        </div>
+      </Sheet>
+
+      {lightbox ? (
+        <Lightbox photos={lightbox.photos} startIndex={lightbox.index} onClose={() => setLightbox(null)} />
+      ) : null}
     </div>
   )
 }
+
+/* ---------------- 日程 ---------------- */
+
+function PlanTab({
+  plans,
+  startDate,
+  endDate,
+  dayCount,
+  onAdd,
+  onOpen,
+  onToggle,
+  onMove,
+  onDelete,
+  onTemplate,
+  onCreateMoment,
+}: {
+  plans: Plan[]
+  startDate: number
+  endDate: number
+  dayCount: number
+  onAdd: (dayIndex: number) => void
+  onOpen: (planId: string) => void
+  onToggle: (plan: Plan, done: boolean) => void
+  onMove: (planId: string, delta: number) => void
+  onDelete: (plan: Plan) => void
+  onTemplate: (key: string) => void
+  onCreateMoment: (plan: Plan) => void
+}) {
+  const [templateOpen, setTemplateOpen] = useState(false)
+  const todayIndex = dayIndexOfDate(startDate)
+  const progress = planSummary(plans)
+  const next = nextPlanOf(plans, startDate, endDate)
+  const groups = useMemo(() => {
+    const map = new Map<number, Plan[]>()
+    for (const plan of plans) {
+      const bucket = map.get(plan.dayIndex)
+      if (bucket) bucket.push(plan)
+      else map.set(plan.dayIndex, [plan])
+    }
+    return [...map.entries()].sort((a, b) => a[0] - b[0]).map(([dayIndex, items]) => ({ dayIndex, items }))
+  }, [plans])
+
+  const ratio = progress.total > 0 ? progress.done / progress.total : 0
+  const defaultDay = todayIndex > 0 ? Math.min(todayIndex, Math.max(dayCount, 1)) : 1
+  const heat = Array.from({ length: Math.min(Math.max(dayCount, 1), 14) }).map(
+    (_, index) => plans.filter((plan) => plan.dayIndex === index + 1).length,
+  )
+
+  return (
+    <div className="space-y-3.5">
+      {next ? (
+        <button
+          type="button"
+          onClick={() => onOpen(next.id)}
+          className="press relative w-full overflow-hidden rounded-[1.25rem] border border-accent/25 bg-accent-soft/70 p-4 text-left"
+        >
+          <span className="flex items-center gap-1.5 text-[10.5px] uppercase tracking-[0.16em] text-accent">
+            <Sparkle size={12} weight="fill" />
+            下一步
+          </span>
+          <p className="mt-1.5 flex items-baseline gap-2 text-[16px] font-semibold tracking-tight text-ink">
+            {next.time ? <span className="tabular-nums text-accent">{next.time}</span> : null}
+            <span className="min-w-0 truncate">{next.title}</span>
+          </p>
+          <p className="mt-0.5 truncate text-[11.5px] text-ink-2">
+            第 {next.dayIndex} 天
+            {next.place ? ` · ${next.place}` : ''}
+            {next.note ? ` · ${next.note}` : ''}
+          </p>
+        </button>
+      ) : null}
+
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2 text-[11.5px] text-ink-3">
+          <CalendarCheck size={14} className="shrink-0" />
+          <span className="shrink-0 tabular-nums">
+            {progress.done}/{progress.total} 已完成
+          </span>
+          <span className="h-1 w-16 shrink-0 overflow-hidden rounded-full bg-paper-2">
+            <span
+              className="block h-full rounded-full bg-accent transition-[width] duration-500"
+              style={{ width: `${ratio * 100}%` }}
+            />
+          </span>
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <button
+            type="button"
+            onClick={() => setTemplateOpen(true)}
+            className="press rounded-full border border-line px-2.5 py-1.5 text-[11.5px] text-ink-2 hover:text-ink"
+          >
+            套用模板
+          </button>
+          <button type="button" className="btn-ghost h-8 px-3 text-[12px]" onClick={() => onAdd(defaultDay)}>
+            <Plus size={13} weight="bold" />
+            添加
+          </button>
+        </div>
+      </div>
+
+      {plans.length > 0 ? (
+        <div className="rounded-xl border border-line bg-surface px-3 pb-2 pt-3">
+          <div className="mb-2 flex items-baseline justify-between">
+            <span className="text-[10.5px] tracking-wide text-ink-3">每日安排密度</span>
+            <span className="text-[10px] text-ink-3">{dayCount} 天</span>
+          </div>
+          <HeatStrip
+            values={heat}
+            labels={heat.map((_, index) => `${index + 1}`)}
+            todayIndex={todayIndex}
+          />
+        </div>
+      ) : null}
+
+      {groups.length === 0 ? (
+        <EmptyState
+          icon={<EmptyArt variant="compass" />}
+          title="还没有排日程"
+          hint="按天排好要去的地方、吃的东西和住的地方，出发后一条条勾掉。"
+          action={
+            <div className="mt-1 flex gap-2">
+              <button type="button" className="btn-primary" onClick={() => onAdd(defaultDay)}>
+                <Plus size={15} weight="bold" />
+                添加第一条
+              </button>
+              <button type="button" className="btn-ghost" onClick={() => setTemplateOpen(true)}>
+                套用模板
+              </button>
+            </div>
+          }
+        />
+      ) : (
+        <div className="space-y-5">
+          {groups.map((group) => {
+            const isToday = group.dayIndex === todayIndex
+            const doneCount = group.items.filter((item) => item.done).length
+            return (
+              <section key={group.dayIndex}>
+                <div className="mb-1 flex items-center gap-2">
+                  <h3 className="shrink-0 text-[12.5px] font-semibold text-accent">第 {group.dayIndex} 天</h3>
+                  {isToday ? (
+                    <span className="shrink-0 rounded-full bg-accent px-2 py-0.5 text-[9.5px] font-medium text-white">
+                      今天
+                    </span>
+                  ) : null}
+                  {startDate > 0 ? (
+                    <span className="shrink-0 text-[10.5px] tabular-nums text-ink-3">
+                      {formatDateCn(startDate + (group.dayIndex - 1) * DAY_MS)}
+                    </span>
+                  ) : null}
+                  <span className="h-px flex-1 bg-line" />
+                  <span className="shrink-0 text-[10.5px] tabular-nums text-ink-3">
+                    {doneCount}/{group.items.length}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`给第 ${group.dayIndex} 天添加安排`}
+                    onClick={() => onAdd(group.dayIndex)}
+                    className="press flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-3 hover:text-accent"
+                  >
+                    <Plus size={13} />
+                  </button>
+                </div>
+
+                <ul className="pl-1">
+                  {group.items.map((plan, index) => (
+                    <PlanRow
+                      key={plan.id}
+                      plan={plan}
+                      last={index === group.items.length - 1}
+                      onOpen={() => onOpen(plan.id)}
+                      onToggle={() => onToggle(plan, !plan.done)}
+                      onMoveUp={() => onMove(plan.id, -1)}
+                      onMoveDown={() => onMove(plan.id, 1)}
+                      onDelete={() => onDelete(plan)}
+                      onRecord={() => onCreateMoment(plan)}
+                    />
+                  ))}
+                </ul>
+              </section>
+            )
+          })}
+        </div>
+      )}
+
+      <Sheet open={templateOpen} title="套用日程模板" onClose={() => setTemplateOpen(false)}>
+        <div className="space-y-2">
+          {PLAN_TEMPLATES.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => {
+                setTemplateOpen(false)
+                onTemplate(item.key)
+              }}
+              className="press w-full rounded-2xl border border-line bg-surface p-3 text-left"
+            >
+              <span className="flex items-center justify-between gap-2">
+                <span className="text-[14px] font-medium text-ink">{item.label}</span>
+                <span className="shrink-0 text-[10.5px] text-ink-3">{item.items.length} 条</span>
+              </span>
+              <span className="mt-0.5 block text-[11.5px] text-ink-3">{item.hint}</span>
+            </button>
+          ))}
+          <p className="px-1 pt-1 text-[11px] leading-4 text-ink-3">
+            模板只会补进已有的计划，不会覆盖你手动添加的内容。
+          </p>
+        </div>
+      </Sheet>
+    </div>
+  )
+}
+
+function PlanRow({
+  plan,
+  last,
+  onOpen,
+  onToggle,
+  onMoveUp,
+  onMoveDown,
+  onDelete,
+  onRecord,
+}: {
+  plan: Plan
+  last: boolean
+  onOpen: () => void
+  onToggle: () => void
+  onMoveUp: () => void
+  onMoveDown: () => void
+  onDelete: () => void
+  onRecord: () => void
+}) {
+  const color = PLAN_KIND_COLOR[plan.kind]
+  return (
+    <li className="group relative flex gap-2.5">
+      <div className="flex w-[46px] shrink-0 justify-end pt-1.5">
+        <span className={cn('text-[11px] tabular-nums', plan.done ? 'text-ink-3/70 line-through' : 'text-ink-3')}>
+          {plan.time || '—'}
+        </span>
+      </div>
+
+      <div className="relative flex w-3 shrink-0 flex-col items-center">
+        <span
+          className="mt-2 h-2 w-2 shrink-0 rounded-full ring-2 ring-surface"
+          style={{ backgroundColor: plan.done ? 'var(--color-line)' : color }}
+        />
+        {!last ? <span className="mt-0.5 w-px flex-1 bg-line" /> : null}
+      </div>
+
+      <div className="min-w-0 flex-1 pb-3">
+        <button type="button" onClick={onOpen} className="block w-full text-left">
+          <span
+            className={cn(
+              'block truncate text-[13.5px] font-medium',
+              plan.done ? 'text-ink-3 line-through' : 'text-ink',
+            )}
+          >
+            {plan.title}
+          </span>
+          <span className="mt-0.5 flex items-center gap-1.5 text-[11px]">
+            <span
+              className="inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5"
+              style={{ backgroundColor: `${color}16`, color }}
+            >
+              <PlanGlyph kind={plan.kind} size={11} />
+              {PLAN_KIND_LABEL[plan.kind]}
+            </span>
+            {plan.place ? <span className="truncate text-ink-3">{plan.place}</span> : null}
+          </span>
+          {plan.note ? (
+            <span className="mt-1 block line-clamp-2 text-[11px] leading-4 text-ink-3">{plan.note}</span>
+          ) : null}
+        </button>
+      </div>
+
+      <div className="flex shrink-0 items-start gap-0.5 pt-1">
+        {plan.done ? (
+          <button
+            type="button"
+            aria-label="写一条记录"
+            onClick={onRecord}
+            className="press flex h-7 items-center gap-1 rounded-full border border-line px-2 text-[10.5px] text-ink-2 hover:text-accent"
+          >
+            <PencilSimple size={10} />
+            记录
+          </button>
+        ) : null}
+        <button
+          type="button"
+          aria-label={plan.done ? '标记为未完成' : '标记为完成'}
+          onClick={onToggle}
+          className={cn(
+            'press flex h-7 w-7 items-center justify-center rounded-full border transition-colors',
+            plan.done
+              ? 'border-accent bg-accent text-white'
+              : 'border-line bg-surface text-ink-3 hover:border-accent hover:text-accent',
+          )}
+        >
+          {plan.done ? (
+            <CalendarCheck size={13} weight="bold" />
+          ) : (
+            <span className="h-1.5 w-1.5 rounded-full bg-current" />
+          )}
+        </button>
+        <div className="flex flex-col opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+          <button
+            type="button"
+            aria-label="上移"
+            onClick={onMoveUp}
+            className="flex h-5 w-5 items-center justify-center rounded text-ink-3 hover:text-ink"
+          >
+            <CaretUp size={11} />
+          </button>
+          <button
+            type="button"
+            aria-label="下移"
+            onClick={onMoveDown}
+            className="flex h-5 w-5 items-center justify-center rounded text-ink-3 hover:text-ink"
+          >
+            <CaretDown size={11} />
+          </button>
+        </div>
+        <button
+          type="button"
+          aria-label="删除计划"
+          onClick={onDelete}
+          className="flex h-7 w-6 items-center justify-center rounded text-ink-3 opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
+        >
+          <Trash size={12} />
+        </button>
+      </div>
+    </li>
+  )
+}
+
+/* ---------------- 时间线 ---------------- */
 
 function TimelineTab({
   groups,
   onAdd,
   onOpen,
+  onPhoto,
 }: {
   groups: Array<{ dayIndex: number; moments: Moment[] }>
   onAdd: () => void
   onOpen: (momentId: string) => void
+  onPhoto: (moment: Moment, index: number) => void
 }) {
+  const [collapsed, setCollapsed] = useState<number[]>([])
+  const toggle = (day: number) => {
+    setCollapsed((previous) =>
+      previous.includes(day) ? previous.filter((item) => item !== day) : [...previous, day],
+    )
+  }
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <span className="text-[11.5px] text-ink-3">
-          {groups.length > 0 ? `${groups.length} 天有记录` : '还没有记录'}
-        </span>
-        <button type="button" className="btn-ghost h-8 px-3 text-[12px]" onClick={onAdd}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="shrink-0 text-[11.5px] text-ink-3">
+            {groups.length > 0 ? `${groups.length} 天有记录` : '还没有记录'}
+          </span>
+          {groups.length > 0 ? (
+            <span className="flex items-end gap-[3px]" aria-hidden="true">
+              {groups.map((group) => (
+                <span
+                  key={group.dayIndex}
+                  className="w-1.5 rounded-sm bg-accent/60"
+                  style={{ height: `${Math.min(4 + group.moments.length * 3, 16)}px` }}
+                  title={`第 ${group.dayIndex} 天 · ${group.moments.length} 条`}
+                />
+              ))}
+            </span>
+          ) : null}
+        </div>
+        <button type="button" className="btn-ghost h-8 shrink-0 px-3 text-[12px]" onClick={onAdd}>
           <Plus size={13} weight="bold" />
           添加记录
         </button>
@@ -378,7 +869,7 @@ function TimelineTab({
 
       {groups.length === 0 ? (
         <EmptyState
-          icon={<PencilSimple size={20} />}
+          icon={<EmptyArt variant="notebook" />}
           title="用照片和文字留住这一刻"
           hint="每条记录可以带最多 9 张照片，按天自动归组。"
           action={
@@ -389,25 +880,48 @@ function TimelineTab({
           }
         />
       ) : (
-        groups.map((group) => (
-          <section key={group.dayIndex} className="space-y-2.5">
-            <div className="flex items-center gap-3">
-              <span className="text-[12px] font-medium text-accent">
-                第 {group.dayIndex} 天
-              </span>
-              <span className="h-px flex-1 bg-line" />
-            </div>
-            <div className="space-y-3">
-              {group.moments.map((moment) => (
-                <MomentCard key={moment.id} moment={moment} onOpen={() => onOpen(moment.id)} />
-              ))}
-            </div>
-          </section>
-        ))
+        groups.map((group) => {
+          const isCollapsed = collapsed.includes(group.dayIndex)
+          return (
+            <section key={group.dayIndex} className="space-y-2.5">
+              <button
+                type="button"
+                onClick={() => toggle(group.dayIndex)}
+                className="group flex w-full items-center gap-3 py-0.5 text-left"
+                aria-expanded={!isCollapsed}
+              >
+                <span className="shrink-0 text-[12px] font-medium text-accent">第 {group.dayIndex} 天</span>
+                <span className="shrink-0 text-[10.5px] text-ink-3">{group.moments.length} 条</span>
+                <span className="h-px flex-1 bg-line" />
+                <CaretDown
+                  size={13}
+                  className={cn(
+                    'shrink-0 text-ink-3 transition-transform duration-200',
+                    isCollapsed && '-rotate-90',
+                  )}
+                />
+              </button>
+              {!isCollapsed ? (
+                <div className="space-y-3">
+                  {group.moments.map((moment) => (
+                    <MomentCard
+                      key={moment.id}
+                      moment={moment}
+                      onOpen={() => onOpen(moment.id)}
+                      onPhoto={(index) => onPhoto(moment, index)}
+                    />
+                  ))}
+                </div>
+              ) : null}
+            </section>
+          )
+        })
       )}
     </div>
   )
 }
+
+/* ---------------- 账本 ---------------- */
 
 function LedgerTab({
   expenses,
@@ -455,7 +969,7 @@ function LedgerTab({
 
       {expenses.length === 0 ? (
         <EmptyState
-          icon={<Wallet size={20} />}
+          icon={<EmptyArt variant="wallet" />}
           title="这趟旅程还没有账目"
           hint="记下车票、住宿和一顿夜宵，回程就知道钱花在哪了。"
           action={
@@ -468,17 +982,15 @@ function LedgerTab({
       ) : (
         <div className="divide-y divide-line">
           {expenses.map((expense) => (
-            <ExpenseRow
-              key={expense.id}
-              expense={expense}
-              onOpen={() => onOpen(expense.id)}
-            />
+            <ExpenseRow key={expense.id} expense={expense} onOpen={() => onOpen(expense.id)} />
           ))}
         </div>
       )}
     </div>
   )
 }
+
+/* ---------------- 清单 ---------------- */
 
 function ChecklistTab({
   items,
@@ -488,6 +1000,7 @@ function ChecklistTab({
   onAdd,
   onToggle,
   onDelete,
+  onTemplate,
 }: {
   items: ChecklistItem[]
   progress: { done: number; total: number }
@@ -496,6 +1009,7 @@ function ChecklistTab({
   onAdd: () => void
   onToggle: (item: ChecklistItem, done: boolean) => void
   onDelete: (item: ChecklistItem) => void
+  onTemplate: () => void
 }) {
   return (
     <div className="space-y-3.5">
@@ -503,9 +1017,13 @@ function ChecklistTab({
         <span>
           已完成 {progress.done}/{progress.total}
         </span>
-        {progress.total > 0 ? (
-          <span className="tabular-nums">{Math.round((progress.done / progress.total) * 100)}%</span>
-        ) : null}
+        <button
+          type="button"
+          onClick={onTemplate}
+          className="press rounded-full border border-line px-2.5 py-1 text-[11px] text-ink-2 hover:text-ink"
+        >
+          套用模板
+        </button>
       </div>
 
       <form
@@ -544,6 +1062,8 @@ function ChecklistTab({
     </div>
   )
 }
+
+/* ---------------- 旅伴 ---------------- */
 
 function MembersTab({
   members,
@@ -621,4 +1141,3 @@ function MembersTab({
     </div>
   )
 }
-

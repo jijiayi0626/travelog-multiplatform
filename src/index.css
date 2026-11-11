@@ -260,6 +260,67 @@ html[data-theme='dark'] {
   }
 }
 
+@keyframes view-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.view-enter {
+  animation: view-enter 0.34s var(--ease-out-expo) both;
+}
+
+/* 主题强调色：写在顶层，特异性高于 :root 上的 @theme 变量 */
+html[data-accent='amber'] {
+  --color-accent: #b45309;
+  --color-accent-2: #92400e;
+  --color-accent-soft: #fbf0e3;
+}
+
+html[data-accent='slate'] {
+  --color-accent: #475569;
+  --color-accent-2: #334155;
+  --color-accent-soft: #eef1f5;
+}
+
+html[data-accent='rose'] {
+  --color-accent: #9f1239;
+  --color-accent-2: #881337;
+  --color-accent-soft: #fbe9ee;
+}
+
+html[data-theme='dark'][data-accent='amber'] {
+  --color-accent: #d99a4e;
+  --color-accent-2: #b45309;
+  --color-accent-soft: #2e2113;
+}
+
+html[data-theme='dark'][data-accent='slate'] {
+  --color-accent: #94a3b8;
+  --color-accent-2: #64748b;
+  --color-accent-soft: #1f252c;
+}
+
+html[data-theme='dark'][data-accent='rose'] {
+  --color-accent: #e07a95;
+  --color-accent-2: #be3455;
+  --color-accent-soft: #2f1620;
+}
+
+/* 暗色下的卡片、芯片与骨架屏微调 */
+html[data-theme='dark'] .skeleton::after {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+}
+
+html[data-theme='dark'] .chip-active {
+  color: #08211f;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

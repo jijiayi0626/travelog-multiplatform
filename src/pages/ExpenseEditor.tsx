@@ -1,13 +1,18 @@
 import { useEffect, useState } from 'react'
 import { Trash } from '@phosphor-icons/react'
-import type { Expense, ExpenseCategory, Trip } from '../lib/types'
+import type { Currency, Expense, ExpenseCategory, Trip } from '../lib/types'
 import { deleteExpense, getTrip, listExpenses, saveExpense } from '../lib/repo'
 import { useNav, useRefresh, useToast } from '../lib/app-context'
 import {
   CATEGORY_COLOR,
   CATEGORY_LABEL,
   CATEGORY_ORDER,
+  CURRENCY_LABEL,
+  CURRENCY_ORDER,
+  CURRENCY_RATE_TO_CNY,
+  CURRENCY_SYMBOL,
   formatDate,
+  formatMoney,
   fromDateInputValue,
   todayStart,
   toDateInputValue,
@@ -32,6 +37,7 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
   const [category, setCategory] = useState<ExpenseCategory>('food')
   const [note, setNote] = useState('')
   const [spentAt, setSpentAt] = useState(todayStart())
+  const [currency, setCurrency] = useState<Currency>('CNY')
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -50,6 +56,7 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
           setCategory(target.category)
           setNote(target.note)
           setSpentAt(target.spentAt || todayStart())
+          setCurrency(target.currency ?? 'CNY')
         }
         if (alive) setLoading(false)
       }
@@ -75,6 +82,7 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
         category,
         note: note.trim(),
         spentAt,
+        currency,
         createdAt: original?.createdAt ?? 0,
         syncState: 1,
       })
@@ -105,7 +113,7 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
       <FormBlock title={trip ? trip.title : '全部旅行'}>
         <Field label="金额" error={error}>
           <div className="flex items-end gap-2 border-b border-line pb-2">
-            <span className="pb-1.5 text-[22px] font-normal text-ink-3">¥</span>
+            <span className="pb-1.5 text-[22px] font-normal text-ink-3">{CURRENCY_SYMBOL[currency]}</span>
             <input
               className="w-full bg-transparent text-[38px] font-semibold leading-none tabular-nums tracking-tight text-ink outline-none placeholder:text-ink-3/60"
               inputMode="decimal"
@@ -118,6 +126,25 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
             />
           </div>
         </Field>
+
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          {CURRENCY_ORDER.map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setCurrency(item)}
+              className={cn('chip px-2.5 py-1 text-[11.5px]', currency === item && 'chip-active')}
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+        {currency !== 'CNY' && amountText ? (
+          <p className="text-[11.5px] text-ink-3">
+            约 ¥{formatMoney(Number.parseFloat(amountText || '0') * CURRENCY_RATE_TO_CNY[currency])} ·{' '}
+            {CURRENCY_LABEL[currency]}按离线汇率折算
+          </p>
+        ) : null}
       </FormBlock>
 
       <FormBlock title="分类">

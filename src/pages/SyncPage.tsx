@@ -16,7 +16,19 @@ export function SyncPage() {
   const toast = useToast()
   const { data } = useLoader(
     () => stats(),
-    { tripCount: 0, momentCount: 0, footprintCount: 0, expenseCount: 0, cityCount: 0, pendingSync: 0 },
+    {
+      tripCount: 0,
+      momentCount: 0,
+      footprintCount: 0,
+      expenseCount: 0,
+      cityCount: 0,
+      pendingSync: 0,
+      totalCny: 0,
+      totalDays: 0,
+      photoCount: 0,
+      planCount: 0,
+      planDoneCount: 0,
+    },
     'sync-stats',
   )
 
