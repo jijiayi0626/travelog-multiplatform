@@ -106,20 +106,30 @@ jobs:
           path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
+      - name: Rename APK with version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          mkdir -p release-assets
+          cp android/app/build/outputs/apk/debug/app-debug.apk "release-assets/travelog-${VERSION}-debug.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "release-assets/travelog-${VERSION}-release.apk"
+          ls -lh release-assets
+
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           name: 旅记 ${{ github.ref_name }}
           body: |
-            旅记 Android 安装包。
+            旅记 Android 安装包（v${{ github.ref_name }}）。
 
             - Debug APK：可直接安装调试
             - Release APK：CI 临时签名，正式发布前请替换为你自己的 keystore
 
-            应用无 native 代码，单个 APK 兼容 arm64-v8a / armeabi-v7a / x86_64。
+            本版新增：按天日程与模板、相册页、往年今日回忆、预算进度、全局搜索与快捷键面板、4 套主题色。
+
+            应用无 native 代码，单个 APK 兼容 `arm64-v8a` / `armeabi-v7a` / `x86_64`。
           files: |
-            android/app/build/outputs/apk/debug/*.apk
-            android/app/build/outputs/apk/release/*.apk
+            release-assets/*.apk
           draft: false
           prerelease: false
