@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { DownloadSimple, X } from '@phosphor-icons/react'
+import { useI18n } from '../lib/app-context'
 
 interface InstallPromptEvent extends Event {
   prompt: () => Promise<void>
@@ -7,6 +8,7 @@ interface InstallPromptEvent extends Event {
 }
 
 export function InstallBanner() {
+  const { tr } = useI18n()
   const [promptEvent, setPromptEvent] = useState<InstallPromptEvent | null>(null)
   const [hidden, setHidden] = useState(
     () => sessionStorage.getItem('travelog.install.dismissed') === '1',
@@ -29,8 +31,8 @@ export function InstallBanner() {
         <DownloadSimple size={17} />
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-body-sm font-medium text-ink">安装旅记到桌面</p>
-        <p className="truncate text-caption text-ink-3">离线也能查看过往旅程</p>
+        <p className="text-body-sm font-medium text-ink">{tr('安装旅记到桌面')}</p>
+        <p className="truncate text-caption text-ink-3">{tr('离线也能查看过往旅程')}</p>
       </div>
       <button
         type="button"
@@ -42,11 +44,11 @@ export function InstallBanner() {
           setPromptEvent(null)
         }}
       >
-        安装
+        {tr('安装')}
       </button>
       <button
         type="button"
-        aria-label="不再提示"
+        aria-label={tr('不再提示')}
         className="press shrink-0 text-ink-3"
         onClick={() => {
           sessionStorage.setItem('travelog.install.dismissed', '1')

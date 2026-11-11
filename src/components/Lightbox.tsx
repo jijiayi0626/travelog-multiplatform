@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CaretLeft, CaretRight, DownloadSimple, X } from '@phosphor-icons/react'
 import type { Photo } from '../lib/types'
+import { useI18n } from '../lib/app-context'
 
 export function Lightbox({
   photos,
@@ -11,6 +12,7 @@ export function Lightbox({
   startIndex: number
   onClose: () => void
 }) {
+  const { tr } = useI18n()
   const [index, setIndex] = useState(startIndex)
   const touchStart = useRef<number | null>(null)
   const total = photos.length
@@ -54,14 +56,14 @@ export function Lightbox({
           <a
             href={photo.src}
             download={`travelog-${photo.id}.jpg`}
-            aria-label="保存这张照片"
+            aria-label={tr('保存这张照片')}
             className="press flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white"
           >
             <DownloadSimple size={17} />
           </a>
           <button
             type="button"
-            aria-label="关闭"
+            aria-label={tr('关闭')}
             onClick={onClose}
             className="press flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white"
           >
@@ -94,7 +96,7 @@ export function Lightbox({
           <>
             <button
               type="button"
-              aria-label="上一张"
+              aria-label={tr('上一张')}
               onClick={() => go(-1)}
               className="press absolute left-2 top-1/2 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-white sm:flex"
             >
@@ -102,7 +104,7 @@ export function Lightbox({
             </button>
             <button
               type="button"
-              aria-label="下一张"
+              aria-label={tr('下一张')}
               onClick={() => go(1)}
               className="press absolute right-2 top-1/2 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-white sm:flex"
             >
@@ -122,7 +124,7 @@ export function Lightbox({
               <button
                 key={item.id}
                 type="button"
-                aria-label={`查看第 ${itemIndex + 1} 张`}
+                aria-label={tr('查看第 {n} 张', { n: itemIndex + 1 })}
                 onClick={() => setIndex(itemIndex)}
                 className={
                   itemIndex === index

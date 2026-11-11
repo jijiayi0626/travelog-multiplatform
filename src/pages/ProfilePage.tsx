@@ -6,6 +6,7 @@ import {
   CloudSlash,
   DownloadSimple,
   Images,
+  Translate,
   MapPinLine,
   Sparkle,
   Moon,
@@ -17,7 +18,7 @@ import {
 import type { AppStats, Profile } from '../lib/types'
 import { exportAll, getProfile, importAll, resetAll, saveProfile, stats } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
-import { useNav, useRefresh, useToast } from '../lib/app-context'
+import { useI18n, useNav, useRefresh, useToast } from '../lib/app-context'
 import { ACCENTS, type AccentName, currentTheme, getAccent, setAccent, setThemeMode } from '../lib/theme'
 import { downloadText, formatCny, readTextFile } from '../lib/utils'
 import { isSignedIn } from '../lib/cloud'
@@ -48,6 +49,7 @@ export function ProfilePage() {
   const nav = useNav()
   const toast = useToast()
   const { bump } = useRefresh()
+  const { t, tr, lang, setLang } = useI18n()
   const fileRef = useRef<HTMLInputElement>(null)
 
   const loader = useCallback(async () => {
@@ -157,60 +159,60 @@ export function ProfilePage() {
       <header className="pt-4">
         <p className="text-caption uppercase tracking-[0.22em] text-ink-3">Account</p>
         <h1 className="mt-1.5 text-heading font-semibold leading-none tracking-tight text-ink sm:text-display">
-          我的
+          {t('profile.title')}
         </h1>
       </header>
 
       <section className="flex items-center gap-3.5 border-y border-line py-4">
-        <Avatar name={profile?.nickname ?? '旅人'} size={56} />
+        <Avatar name={profile?.nickname ?? tr('旅人')} size={56} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-title font-semibold tracking-tight text-ink">
-            {loading ? '加载中…' : profile?.nickname}
+            {loading ? tr('加载中…') : profile?.nickname}
           </p>
-          <p className="mt-0.5 text-note text-ink-3">本地账号 · 数据保存在这台设备</p>
+          <p className="mt-0.5 text-note text-ink-3">{tr('本地账号 · 数据保存在这台设备')}</p>
         </div>
         <button type="button" className="btn-ghost h-9 shrink-0 px-3 text-note" onClick={() => setEditing(true)}>
           <PencilSimple size={14} />
-          编辑
+          {tr('编辑')}
         </button>
       </section>
 
       <div className="flex divide-x divide-line pb-1">
         <div className="min-w-0 flex-1 pr-3">
-          <StatTile label="旅行" value={String(data.stats.tripCount)} />
+          <StatTile label={tr('旅行')} value={String(data.stats.tripCount)} />
         </div>
         <div className="min-w-0 flex-1 px-3">
-          <StatTile label="记录" value={String(data.stats.momentCount)} />
+          <StatTile label={tr('记录')} value={String(data.stats.momentCount)} />
         </div>
         <div className="min-w-0 flex-1 px-3">
-          <StatTile label="足迹" value={String(data.stats.footprintCount)} />
+          <StatTile label={tr('足迹')} value={String(data.stats.footprintCount)} />
         </div>
         <div className="min-w-0 flex-1 pl-3">
-          <StatTile label="账目" value={String(data.stats.expenseCount)} />
+          <StatTile label={tr('账目')} value={String(data.stats.expenseCount)} />
         </div>
       </div>
 
       <section className="card p-4">
         <div className="flex items-baseline justify-between">
-          <h2 className="text-note font-semibold tracking-tight text-ink">年度回顾</h2>
+          <h2 className="text-note font-semibold tracking-tight text-ink">{t('profile.recap')}</h2>
           <button
             type="button"
             onClick={() => nav.navigate({ name: 'recap' })}
             className="press inline-flex items-center gap-0.5 text-caption text-accent"
           >
-            查看完整
+            {tr('查看完整')}
             <CaretRight size={12} />
           </button>
         </div>
         <div className="mt-3 grid grid-cols-2 gap-4">
-          <StatTile label="在路上" value={`${data.stats.totalDays} 天`} />
-          <StatTile label="照片" value={`${data.stats.photoCount} 张`} />
-          <StatTile label="城市" value={`${data.stats.cityCount} 座`} />
-          <StatTile label="总花费" value={formatCny(data.stats.totalCny)} />
+          <StatTile label={tr('在路上')} value={tr('{n} 天', { n: data.stats.totalDays })} />
+          <StatTile label={tr('照片')} value={tr('{n} 张', { n: data.stats.photoCount })} />
+          <StatTile label={tr('城市')} value={tr('{n} 座', { n: data.stats.cityCount })} />
+          <StatTile label={tr('总花费')} value={formatCny(data.stats.totalCny)} />
         </div>
         <div className="mt-3 border-t border-line pt-3">
           <div className="flex items-baseline justify-between text-note">
-            <span className="text-ink-3">日程完成度</span>
+            <span className="text-ink-3">{tr('日程完成度')}</span>
             <span className="tabular-nums text-ink-2">
               {data.stats.planDoneCount}/{data.stats.planCount} · {planRatio}%
             </span>
@@ -227,13 +229,13 @@ export function ProfilePage() {
       <section className="overflow-hidden rounded-2xl border border-line bg-surface">
         <SettingRow
           icon={<Images size={17} />}
-          title="相册"
+          title={lang === 'zh' ? '相册' : 'Album'}
           value={`${data.stats.photoCount} 张照片`}
           onClick={() => nav.navigate({ name: 'album' })}
         />
         <SettingRow
           icon={<CloudSlash size={17} />}
-          title="云同步"
+          title={t('profile.sync')}
           value={data.stats.pendingSync > 0 ? `${data.stats.pendingSync} 条待同步` : '未连接云端'}
           onClick={() => nav.navigate({ name: 'sync' })}
         />
@@ -280,8 +282,14 @@ export function ProfilePage() {
           onClick={() => nav.navigate({ name: 'sync' })}
         />
         <SettingRow
+          icon={<Translate size={17} />}
+          title={lang === 'zh' ? '语言' : 'Language'}
+          value={lang === 'zh' ? '中文' : 'English'}
+          onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
+        />
+        <SettingRow
           icon={<ThemeGlyph size={17} />}
-          title="外观"
+          title={t('profile.appearance')}
           value={theme === 'dark' ? '深色' : '浅色'}
           onClick={toggleTheme}
         />
@@ -306,10 +314,10 @@ export function ProfilePage() {
             ))}
           </div>
         </div>
-        <SettingRow icon={<DownloadSimple size={17} />} title="导出备份" value="JSON" onClick={doExport} />
+        <SettingRow icon={<DownloadSimple size={17} />} title={t('profile.export')} value="JSON" onClick={doExport} />
         <SettingRow
           icon={<UploadSimple size={17} />}
-          title={importing ? '导入中…' : '导入备份'}
+          title={importing ? t('common.loading') : t('profile.import')}
           value="JSON"
           onClick={() => fileRef.current?.click()}
         />

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { CalendarCheck, MagnifyingGlass, MapPin, MapTrifold, Notebook, Wallet } from '@phosphor-icons/react'
 import type { SearchResult } from '../lib/types'
 import { searchAll } from '../lib/repo'
-import { useNav } from '../lib/app-context'
+import { useNav, useI18n } from '../lib/app-context'
 import { cn } from '../lib/cn'
 
 const KIND_LABEL: Record<SearchResult['kind'], string> = {
@@ -23,6 +23,7 @@ function ResultIcon({ kind }: { kind: SearchResult['kind'] }) {
 
 export function SearchPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const nav = useNav()
+  const { tr } = useI18n()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [active, setActive] = useState(0)
@@ -81,11 +82,11 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
       className="fixed inset-0 z-[75] flex items-start justify-center px-4 pt-[max(12vh,56px)]"
       role="dialog"
       aria-modal="true"
-      aria-label="搜索"
+      aria-label={tr('搜索')}
     >
       <button
         type="button"
-        aria-label="关闭搜索"
+        aria-label={tr('关闭搜索')}
         onClick={onClose}
         className="fade-in absolute inset-0 bg-[#0b0b0a]/40 backdrop-blur-[3px]"
       />
@@ -113,7 +114,7 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
                 choose(results[active])
               }
             }}
-            placeholder="搜索旅行、日程、记录、账目、足迹…"
+            placeholder={tr('搜索旅行、日程、记录、账目、足迹…')}
             className="min-w-0 flex-1 bg-transparent text-body-lg text-ink outline-none placeholder:text-ink-3"
           />
           <kbd className="hidden shrink-0 rounded border border-line px-1.5 py-0.5 text-caption text-ink-3 sm:block">
@@ -124,11 +125,11 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
         <div className="max-h-[52dvh] overflow-y-auto p-2">
           {!query.trim() ? (
             <div className="px-3 py-7 text-center">
-              <p className="text-body-sm text-ink-3">输入关键词试试</p>
-              <p className="mt-1 text-note text-ink-3/80">「直岛」「拉面」「住宿」「清水寺」</p>
+              <p className="text-body-sm text-ink-3">{tr('输入关键词试试')}</p>
+              <p className="mt-1 text-note text-ink-3/80">{tr('「直岛」「拉面」「住宿」「清水寺」')}</p>
             </div>
           ) : results.length === 0 ? (
-            <div className="px-3 py-7 text-center text-body-sm text-ink-3">没有找到匹配的内容</div>
+            <div className="px-3 py-7 text-center text-body-sm text-ink-3">{tr('没有找到匹配的内容')}</div>
           ) : (
             results.map((item, index) => (
               <button
@@ -149,7 +150,7 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
                   <span className="block truncate text-caption text-ink-3">{item.subtitle}</span>
                 </span>
                 <span className="shrink-0 text-caption uppercase tracking-wide text-ink-3">
-                  {KIND_LABEL[item.kind]}
+                  {tr(KIND_LABEL[item.kind])}
                 </span>
               </button>
             ))
@@ -157,9 +158,9 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
         </div>
 
         <div className="flex items-center gap-4 border-t border-line px-4 py-2 text-caption text-ink-3">
-          <span>↑↓ 选择</span>
-          <span>↵ 打开</span>
-          <span>ESC 关闭</span>
+          <span>{tr('↑↓ 选择')}</span>
+          <span>{tr('↵ 打开')}</span>
+          <span>{tr('ESC 关闭')}</span>
         </div>
       </div>
     </div>

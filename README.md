@@ -11,7 +11,11 @@
 | 回忆 | 首页「往年今日」横滑卡片，不足时用最近 30 天记录补齐 |
 | 时间线 | 按天归组的图文记录，文字 + 最多 9 张照片（本地压缩后保存）、标签、灯箱翻页 |
 | 相册 | 跨旅程照片聚合，按旅程 / 按时间分组，灯箱左右翻页与单张下载 |
-| 足迹 | 地点打卡、浏览器定位、城市统计、星图可视化、**中国省份地图**（本地内置矢量边界，点亮去过的省份，点击省份看该省地点）、点击跳转地图查看坐标、删除 |
+| 足迹 | 地点打卡、浏览器定位、城市统计、星图可视化、**中国地图三层下钻**（全国 → 省 → 市 → 区县，右下角含南海诸岛小图）、**照片 EXIF 自动定位**、**自动打卡**（进入半径内自动补足迹）、点击跳转地图查看坐标、删除 |
+| 云同步 | 同步码注册 / 登录、游标增量拉取、LWW 冲突合并、墓碑删除、写操作后自动同步；配套 Cloudflare Worker + D1 后端（`server/`） |
+| AI | 游记润色、按目的地生成逐日行程、记账自动分类；走服务端代理，支持 Workers AI 或 OpenAI |
+| 提醒 | 日程开始前 5 / 15 / 30 / 60 分钟本地通知（Capacitor Local Notifications，Web 降级） |
+| 多语言 | 中文 / English 一键切换，覆盖导航、页面、空态、表单与提示 |
 | 账本 | 金额 / 分类 / 备注 / 日期 / 币种，分类占比环形图、近 6 个月柱状图、CSV 导出、**「再来一笔」快捷填充** |
 | 清单 | 行前待办、勾选与进度、5 套模板 |
 | 旅伴 | 成员列表、添加与移除、邀请码复制 |
@@ -92,12 +96,12 @@ npm run preview    # 本地预览生产构建
 
 ## 下载 APK
 
-由 GitHub Actions（`ubuntu-latest` / x86_64）自动构建，产物见 [Releases · v1.3.0](https://github.com/jijiayi0626/travelog-multiplatform/releases/tag/v1.3.0)：
+由 GitHub Actions（`ubuntu-latest` / x86_64）自动构建，产物见 [Releases · v1.4.0](https://github.com/jijiayi0626/travelog-multiplatform/releases/tag/v1.4.0)：
 
-- [Debug APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v1.3.0/travelog-1.3.0-debug.apk)（约 4 MB，可直接安装）
-- [Release APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v1.3.0/travelog-1.3.0-release.apk)（约 3 MB，CI 临时签名，正式发布请换成自有 keystore）
+- [Debug APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v1.4.0/travelog-1.4.0-debug.apk)（约 4 MB，可直接安装）
+- [Release APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v1.4.0/travelog-1.4.0-release.apk)（约 3 MB，CI 临时签名，正式发布请换成自有 keystore）
 
-包名 `com.travellog.app`，minSdk 23 / targetSdk 35，versionCode 4 / versionName 1.3。应用为 WebView + Java 实现，**不含 native 库**，单个 APK 兼容 `arm64-v8a` / `armeabi-v7a` / `x86_64`。
+包名 `com.travellog.app`，minSdk 23 / targetSdk 35，versionCode 5 / versionName 1.4。应用为 WebView + Java 实现，**不含 native 库**，单个 APK 兼容 `arm64-v8a` / `armeabi-v7a` / `x86_64`。
 
 ### 自动构建
 

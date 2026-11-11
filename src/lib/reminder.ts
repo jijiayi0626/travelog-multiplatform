@@ -4,6 +4,14 @@ import type { Plan, Trip } from './types'
 
 const native = Capacitor.isNativePlatform()
 
+/** 权限弹窗可能在无用户手势时永远挂起，统一加超时兜底 */
+function withTimeout<T>(promise: Promise<T>, fallback: T, ms = 2500): Promise<T> {
+  return Promise.race([
+    promise.catch(() => fallback),
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ])
+}
+
 export interface ReminderPrefs {
   enabled: boolean
   leadMinutes: number
@@ -37,13 +45,15 @@ export async function ensureNotificationPermission(): Promise<boolean> {
   if (native) {
     const status = await LocalNotifications.checkPermissions()
     if (status.display === 'granted') return true
-    const requested = await LocalNotifications.requestPermissions()
+    const requested = await withTimeout(LocalNotifications.requestPermissions(), {
+      display: 'denied' as const,
+    })
     return requested.display === 'granted'
   }
   if (typeof Notification === 'undefined') return false
   if (Notification.permission === 'granted') return true
   if (Notification.permission === 'denied') return false
-  return (await Notification.requestPermission()) === 'granted'
+  return (await withTimeout(Notification.requestPermission(), 'default')) === 'granted'
 }
 
 function triggerAt(plan: Plan, trip: Trip, leadMinutes: number): number | null {

@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 import { X } from '@phosphor-icons/react'
 import { cn } from '../lib/cn'
 import { initials } from '../lib/utils'
+import { useI18n } from '../lib/app-context'
 
 export function Avatar({
   name,
@@ -62,8 +63,9 @@ export function EmptyState({
 }
 
 export function SkeletonList({ rows = 3 }: { rows?: number }) {
+  const { tr } = useI18n()
   return (
-    <div className="space-y-3" aria-busy="true" aria-label="加载中">
+    <div className="space-y-3" aria-busy="true" aria-label={tr('加载中…')}>
       {Array.from({ length: rows }).map((_, index) => (
         <div key={index} className="card p-4">
           <div className="skeleton h-4 w-2/5" />
@@ -195,6 +197,7 @@ export function Sheet({
   footer?: ReactNode
   wide?: boolean
 }) {
+  const { tr } = useI18n()
   useEffect(() => {
     if (!open) return
     const previous = document.body.style.overflow
@@ -220,7 +223,7 @@ export function Sheet({
     >
       <button
         type="button"
-        aria-label="关闭"
+        aria-label={tr('关闭')}
         onClick={onClose}
         className="fade-in absolute inset-0 bg-[#0b0b0a]/45 backdrop-blur-[3px]"
       />
@@ -236,7 +239,7 @@ export function Sheet({
           <button
             type="button"
             onClick={onClose}
-            aria-label="关闭"
+            aria-label={tr('关闭')}
             className="press -mr-1 flex h-9 w-9 items-center justify-center rounded-full text-ink-2 hover:bg-paper-2"
           >
             <X size={18} />
@@ -257,7 +260,7 @@ export function ConfirmDialog({
   open,
   title,
   message,
-  confirmText = '删除',
+  confirmText,
   tone = 'danger',
   onConfirm,
   onClose,
@@ -270,12 +273,13 @@ export function ConfirmDialog({
   onConfirm: () => void
   onClose: () => void
 }) {
+  const { tr } = useI18n()
   if (!open) return null
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center px-5" role="alertdialog" aria-modal="true">
       <button
         type="button"
-        aria-label="关闭"
+        aria-label={tr('关闭')}
         onClick={onClose}
         className="fade-in absolute inset-0 bg-[#0b0b0a]/45 backdrop-blur-[3px]"
       />
@@ -287,7 +291,7 @@ export function ConfirmDialog({
         <p className="mt-2 text-body-sm leading-5 text-ink-2">{message}</p>
         <div className="mt-5 flex justify-end gap-2">
           <button type="button" className="btn-ghost" onClick={onClose}>
-            取消
+            {tr('取消')}
           </button>
           <button
             type="button"
@@ -300,7 +304,7 @@ export function ConfirmDialog({
               onClose()
             }}
           >
-            {confirmText}
+            {confirmText ?? tr('删除')}
           </button>
         </div>
       </div>

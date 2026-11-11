@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react'
 import type { View } from './types'
+import { translate, type DictKey, type Lang, type Vars } from './i18n'
 
 export const ToastContext = createContext<(message: string) => void>(() => {})
 
@@ -39,4 +40,22 @@ export function useSearch(): () => void {
 
 export function useShortcuts(): () => void {
   return useContext(ShortcutsContext)
+}
+
+export interface I18nApi {
+  lang: Lang
+  setLang: (lang: Lang) => void
+  t: (key: DictKey) => string
+  tr: (zh: string, vars?: Vars) => string
+}
+
+export const I18nContext = createContext<I18nApi>({
+  lang: 'zh',
+  setLang: () => {},
+  t: (key) => translate('zh', key),
+  tr: (zh) => zh,
+})
+
+export function useI18n(): I18nApi {
+  return useContext(I18nContext)
 }

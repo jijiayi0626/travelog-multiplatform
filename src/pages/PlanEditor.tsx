@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { CheckCircle, Trash } from '@phosphor-icons/react'
 import type { Plan, PlanKind, Trip } from '../lib/types'
 import { deletePlan, getTrip, listPlans, savePlan } from '../lib/repo'
-import { useNav, useRefresh, useToast } from '../lib/app-context'
+import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import {
   PLAN_KIND_COLOR,
   PLAN_KIND_LABEL,
@@ -37,6 +37,7 @@ export function PlanEditor({
   const nav = useNav()
   const toast = useToast()
   const { bump } = useRefresh()
+  const { tr } = useI18n()
 
   const [loading, setLoading] = useState(Boolean(planId))
   const [saving, setSaving] = useState(false)
@@ -86,7 +87,7 @@ export function PlanEditor({
 
   const save = async () => {
     if (!title.trim()) {
-      setError('写下这一步要做什么')
+      setError(tr('写下这一步要做什么'))
       return
     }
     setError('')
@@ -105,15 +106,20 @@ export function PlanEditor({
         order: original?.order ?? Number.NaN,
         createdAt: original?.createdAt ?? 0,
       })
-      if (remind && trip) {
-        const allowed = await ensureNotificationPermission()
-        if (allowed) {
-          await schedulePlanReminder(saved, trip, lead)
-        }
-      }
       bump()
-      toast(original ? '计划已更新' : '已加入日程')
+      toast(original ? tr('计划已更新') : tr('已加入日程'))
       nav.back()
+      // 通知属于增强项：放到导航之后异步处理，避免权限弹窗阻塞保存
+      if (remind && trip) {
+        void (async () => {
+          try {
+            const allowed = await ensureNotificationPermission()
+            if (allowed) await schedulePlanReminder(saved, trip, lead)
+          } catch {
+            /* 忽略通知失败 */
+          }
+        })()
+      }
     } finally {
       setSaving(false)
     }
@@ -124,13 +130,13 @@ export function PlanEditor({
     await deletePlan(original.id)
     await cancelPlanReminder(original.id)
     bump()
-    toast('计划已删除')
+    toast(tr('计划已删除'))
     nav.back()
   }
 
   return (
     <EditorScreen
-      title={planId ? '编辑计划' : '添加计划'}
+      title={planId ? tr('编辑计划') : tr('添加计划')}
       onBack={() => nav.back()}
       onSave={save}
       saving={saving}
@@ -138,24 +144,28 @@ export function PlanEditor({
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-note text-ink-3">
         <span className="rounded-full bg-accent-soft px-2.5 py-1 font-medium text-accent">
-          第 {day} 天
+          {tr('第 {n} 天', { n: day })}
         </span>
         {trip ? <span className="truncate">{trip.title}</span> : null}
         {trip && trip.startDate > 0 ? (
           <>
             <span className="h-3 w-px bg-line" />
-            <span>{formatDate(trip.startDate)} 出发</span>
+            <span>{tr('{date} 出发', { date: formatDate(trip.startDate) })}</span>
           </>
         ) : null}
       </div>
 
-      <FormBlock title="安排">
-        <Field label="内容" error={error} hint={error ? undefined : '例如「地中美术馆」'}>
+      <FormBlock title={tr('安排')}>
+        <Field
+          label={tr('内容')}
+          error={error}
+          hint={error ? undefined : tr('例如「地中美术馆」')}
+        >
           <input
             className={cn('input', error && 'border-danger')}
             value={title}
             maxLength={40}
-            placeholder="这一步要做什么"
+            placeholder={tr('这一步要做什么')}
             onChange={(event) => {
               setTitle(event.target.value)
               if (error) setError('')
@@ -164,11 +174,11 @@ export function PlanEditor({
         </Field>
 
         <div className="grid grid-cols-[auto_1fr] gap-3">
-          <Field label="第几天">
+          <Field label={tr('第几天')}>
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                aria-label="前一天"
+                aria-label={tr('前一天')}
                 onClick={() => setDay((value) => Math.max(1, value - 1))}
                 className="press flex h-11 w-9 items-center justify-center rounded-xl border border-line text-ink-2"
               >
@@ -179,7 +189,7 @@ export function PlanEditor({
               </span>
               <button
                 type="button"
-                aria-label="后一天"
+                aria-label={tr('后一天')}
                 onClick={() => setDay((value) => Math.min(maxDay, value + 1))}
                 className="press flex h-11 w-9 items-center justify-center rounded-xl border border-line text-ink-2"
               >
@@ -187,7 +197,7 @@ export function PlanEditor({
               </button>
             </div>
           </Field>
-          <Field label="时间" hint="可留空">
+          <Field label={tr('时间')} hint={tr('可留空')}>
             <input
               type="time"
               className="input tabular-nums"
@@ -232,7 +242,7 @@ export function PlanEditor({
         ) : null}
       </FormBlock>
 
-      <FormBlock title="类型">
+      <FormBlock title={tr('类型')}>
         <div className="flex flex-wrap gap-2">
           {PLAN_KIND_ORDER.map((item) => {
             const active = item === kind
@@ -255,39 +265,42 @@ export function PlanEditor({
         </div>
       </FormBlock>
 
-      <FormBlock title="地点与备注">
-        <Field label="地点" hint="会显示在日程右侧">
+      <FormBlock title={tr('地点与备注')}>
+        <Field label={tr('地点')} hint={tr('会显示在日程右侧')}>
           <input
             className="input"
             value={place}
             maxLength={40}
-            placeholder="例如「直岛 · Benesse House」"
+            placeholder={tr('例如「直岛 · Benesse House」')}
             onChange={(event) => setPlace(event.target.value)}
           />
         </Field>
-        <Field label="备注">
+        <Field label={tr('备注')}>
           <textarea
             className="input-area"
             rows={3}
             value={note}
             maxLength={140}
-            placeholder="预约信息、交通班次、要带的东西…"
+            placeholder={tr('预约信息、交通班次、要带的东西…')}
             onChange={(event) => setNote(event.target.value)}
           />
         </Field>
       </FormBlock>
 
-      <FormBlock title="提醒">
+      <FormBlock title={tr('提醒')}>
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="flex items-center gap-1.5 text-body text-ink">
               <Bell size={14} className="text-ink-3" />
-              出发前提醒
+              {tr('出发前提醒')}
             </p>
             <p className="mt-0.5 text-caption text-ink-3">
               {trip && trip.startDate > 0
-                ? `按第 ${day} 天的 ${time || '设定时间'} 提前提醒`
-                : '先给旅程设置日期，提醒才有意义'}
+                ? tr('按第 {n} 天的 {time} 提前提醒', {
+                    n: day,
+                    time: time || tr('设定时间'),
+                  })
+                : tr('先给旅程设置日期，提醒才有意义')}
             </p>
           </div>
           <button
@@ -316,7 +329,7 @@ export function PlanEditor({
                 onClick={() => setLead(minutes)}
                 className={cn('chip px-2.5 py-1 text-caption', lead === minutes && 'chip-active')}
               >
-                提前 {minutes} 分钟
+                {tr('提前 {n} 分钟', { n: minutes })}
               </button>
             ))}
           </div>
@@ -334,7 +347,7 @@ export function PlanEditor({
             )}
           >
             <CheckCircle size={15} weight={done ? 'fill' : 'regular'} />
-            {done ? '已完成（点按取消）' : '标记为已完成'}
+            {done ? tr('已完成（点按取消）') : tr('标记为已完成')}
           </button>
 
           <button
@@ -343,15 +356,17 @@ export function PlanEditor({
             className="press mx-auto flex items-center gap-1.5 rounded-full border border-line px-4 py-2 text-body-sm text-ink-3 hover:text-danger"
           >
             <Trash size={14} />
-            删除这条计划
+{tr('删除这条计划')}
           </button>
         </>
       ) : null}
 
       <ConfirmDialog
         open={confirmDelete}
-        title="删除这条计划？"
-        message={original ? `「${original.title}」会从日程中移除。` : ''}
+        title={tr('删除这条计划？')}
+        message={
+          original ? tr('「{name}」会从日程中移除。', { name: original.title }) : ''
+        }
         onClose={() => setConfirmDelete(false)}
         onConfirm={doDelete}
       />

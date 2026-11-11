@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Trash } from '@phosphor-icons/react'
 import type { Currency, Trip, TripTemplate } from '../lib/types'
 import { applyChecklistTemplate, applyPlanTemplate, deleteTrip, getProfile, getTrip, saveTrip } from '../lib/repo'
-import { useNav, useRefresh, useToast } from '../lib/app-context'
+import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import {
   addDays,
   coverClass,
@@ -29,6 +29,7 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
   const nav = useNav()
   const toast = useToast()
   const { bump } = useRefresh()
+  const { tr } = useI18n()
 
   const [loading, setLoading] = useState(Boolean(id))
   const [saving, setSaving] = useState(false)
@@ -70,7 +71,7 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
 
   const save = async () => {
     if (!title.trim()) {
-      setError('给这段旅程起个名字')
+      setError(tr('给这段旅程起个名字'))
       return
     }
     setError('')
@@ -105,7 +106,7 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
       }
 
       bump()
-      toast('旅程已保存')
+      toast(tr('旅程已保存'))
       if (id) {
         nav.back()
       } else {
@@ -120,45 +121,49 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
     if (!original) return
     await deleteTrip(original.id)
     bump()
-    toast('旅程已删除')
+    toast(tr('旅程已删除'))
     nav.navigate({ name: 'trips' })
   }
 
   return (
     <EditorScreen
-      title={id ? '编辑旅行' : '新建旅行'}
+      title={id ? tr('编辑旅行') : tr('新建旅行')}
       onBack={() => nav.back()}
       onSave={save}
       saving={saving}
       saveDisabled={loading}
     >
-      <FormBlock title="基本信息">
-        <Field label="旅行名称" error={error} hint={error ? undefined : '例如「北海道夏日纪行」'}>
+      <FormBlock title={tr('基本信息')}>
+        <Field
+          label={tr('旅行名称')}
+          error={error}
+          hint={error ? undefined : tr('例如「北海道夏日纪行」')}
+        >
           <input
             className={cn('input', error && 'border-danger')}
             value={title}
             maxLength={40}
-            placeholder="给这段旅程起个名字"
+            placeholder={tr('给这段旅程起个名字')}
             onChange={(event) => {
               setTitle(event.target.value)
               if (error) setError('')
             }}
           />
         </Field>
-        <Field label="目的地" hint="城市或地区，会显示在封面上">
+        <Field label={tr('目的地')} hint={tr('城市或地区，会显示在封面上')}>
           <input
             className="input"
             value={destination}
             maxLength={40}
-            placeholder="例如「日本 · 北海道」"
+            placeholder={tr('例如「日本 · 北海道」')}
             onChange={(event) => setDestination(event.target.value)}
           />
         </Field>
       </FormBlock>
 
-      <FormBlock title="日期">
+      <FormBlock title={tr('日期')}>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="开始">
+          <Field label={tr('开始')}>
             <input
               type="date"
               className="input"
@@ -166,7 +171,7 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
               onChange={(event) => setStartDate(fromDateInputValue(event.target.value))}
             />
           </Field>
-          <Field label="结束">
+          <Field label={tr('结束')}>
             <input
               type="date"
               className="input"
@@ -177,23 +182,27 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
         </div>
         <p className="text-note text-ink-3">
           {startDate > 0 && endDate > 0
-            ? `${formatDate(startDate)} — ${formatDate(endDate)} · 约 ${Math.max(Math.floor((endDate - startDate) / 864e5) + 1, 1)} 天`
-            : '设置日期后，记录会自动按天归组'}
+            ? tr('{start} — {end} · 约 {n} 天', {
+                start: formatDate(startDate),
+                end: formatDate(endDate),
+                n: Math.max(Math.floor((endDate - startDate) / 864e5) + 1, 1),
+              })
+            : tr('设置日期后，记录会自动按天归组')}
         </p>
       </FormBlock>
 
-      <FormBlock title="预算" hint="可选">
+      <FormBlock title={tr('预算')} hint={tr('可选')}>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="预算金额" hint="按人民币计算">
+          <Field label={tr('预算金额')} hint={tr('按人民币计算')}>
             <input
               className="input"
               inputMode="decimal"
               value={budgetText}
-              placeholder="例如 12000"
+              placeholder={tr('例如 12000')}
               onChange={(event) => setBudgetText(event.target.value.replace(/[^\d.]/g, ''))}
             />
           </Field>
-          <Field label="当地货币">
+          <Field label={tr('当地货币')}>
             <select
               className="input"
               value={currency}
@@ -208,19 +217,19 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
           </Field>
         </div>
         <p className="text-note leading-4 text-ink-3">
-          账目按当地货币录入，会按离线汇率折算成人民币汇总；预算进度会显示在旅程概览里。
+          {tr('账目按当地货币录入，会按离线汇率折算成人民币汇总；预算进度会显示在旅程概览里。')}
         </p>
       </FormBlock>
 
-      <FormBlock title="封面与备注">
+      <FormBlock title={tr('封面与备注')}>
         <div className="space-y-2">
-          <span className="field-label">封面</span>
+          <span className="field-label">{tr('封面')}</span>
           <div className="flex gap-2">
             {[0, 1, 2, 3, 4].map((index) => (
               <button
                 key={index}
                 type="button"
-                aria-label={`封面样式 ${index + 1}`}
+                aria-label={tr('封面样式 {n}', { n: index + 1 })}
                 onClick={() => setCover(index)}
                 className={cn(
                   'press h-12 flex-1 rounded-xl',
@@ -231,13 +240,13 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
             ))}
           </div>
         </div>
-        <Field label="旅行备注" hint="写给这段旅程的一句话">
+        <Field label={tr('旅行备注')} hint={tr('写给这段旅程的一句话')}>
           <textarea
             className="input-area"
             rows={3}
             value={note}
             maxLength={160}
-            placeholder="比如：从札幌一路到函馆，海风、拉面和一整夜的路灯。"
+            placeholder={tr('比如：从札幌一路到函馆，海风、拉面和一整夜的路灯。')}
             onChange={(event) => setNote(event.target.value)}
           />
         </Field>
@@ -245,9 +254,19 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
 
       {!id && template && template !== 'blank' ? (
         <div className="rounded-2xl border border-line bg-surface p-3.5">
-          <p className="text-note font-medium text-ink">已选择模板</p>
+          <p className="text-note font-medium text-ink">{tr('已选择模板')}</p>
           <p className="mt-1 text-note leading-4 text-ink-3">
-            保存后会自动排入「{template === 'city' ? '城市漫步' : template === 'beach' ? '海岛度假' : template === 'road' ? '自驾公路' : '滑雪'}」的日程与打包清单，之后都能单独修改。
+            {tr('保存后会自动排入「{name}」的日程与打包清单，之后都能单独修改。', {
+              name: tr(
+                template === 'city'
+                  ? '城市漫步'
+                  : template === 'beach'
+                    ? '海岛度假'
+                    : template === 'road'
+                      ? '自驾公路'
+                      : '滑雪',
+              ),
+            })}
           </p>
         </div>
       ) : null}
@@ -259,14 +278,14 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
           className="press mx-auto flex items-center gap-1.5 rounded-full border border-line px-4 py-2 text-body-sm text-ink-3 hover:text-danger"
         >
           <Trash size={14} />
-          删除这段旅程
+{tr('删除这段旅程')}
         </button>
       ) : null}
 
       <ConfirmDialog
         open={confirmDelete}
-        title="删除这段旅程？"
-        message="旅程下的日程、图文、账目、清单与足迹都会一并删除，且无法恢复。"
+        title={tr('删除这段旅程？')}
+        message={tr('旅程下的日程、图文、账目、清单与足迹都会一并删除，且无法恢复。')}
         onClose={() => setConfirmDelete(false)}
         onConfirm={doDelete}
       />

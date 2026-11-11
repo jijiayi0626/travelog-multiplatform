@@ -3,7 +3,7 @@ import { ArrowRight, ArrowsDownUp, CalendarBlank, ListBullets, MagnifyingGlass, 
 import type { Moment, Plan, TripStatus, TripTemplate, TripView } from '../lib/types'
 import { listAllMoments, listAllPlans, listTrips, memoriesOf } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
-import { useNav, useSearch } from '../lib/app-context'
+import { useI18n, useNav, useSearch } from '../lib/app-context'
 import {
   daysUntil,
   dayIndexOfDate,
@@ -46,6 +46,7 @@ export function TripsPage() {
   )
   const nav = useNav()
   const openSearch = useSearch()
+  const { t, tr } = useI18n()
 
   const [status, setStatus] = useState<'all' | TripStatus>('all')
   const [sortBy, setSortBy] = useState<'date' | 'spend' | 'title'>('date')
@@ -101,16 +102,16 @@ export function TripsPage() {
         <div className="min-w-0">
           <p className="text-caption uppercase tracking-[0.22em] text-ink-3">Your journeys</p>
           <h1 className="mt-1.5 text-heading font-semibold leading-none tracking-tight text-ink sm:text-display">
-            我的旅行
+            {t('trips.title')}
           </h1>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <IconButton label="搜索" onClick={openSearch}>
+          <IconButton label={tr('搜索')} onClick={openSearch}>
             <MagnifyingGlass size={17} />
           </IconButton>
           <button type="button" className="btn-primary" onClick={() => setTemplateOpen(true)}>
             <Plus size={16} weight="bold" />
-            新建
+            {t('trips.new')}
           </button>
         </div>
       </header>
@@ -125,7 +126,7 @@ export function TripsPage() {
           )}
         >
           <ListBullets size={14} />
-          列表
+          {t('trips.list')}
         </button>
         <button
           type="button"
@@ -136,7 +137,7 @@ export function TripsPage() {
           )}
         >
           <CalendarBlank size={14} />
-          日历
+          {t('trips.calendar')}
         </button>
       </div>
 
@@ -152,21 +153,21 @@ export function TripsPage() {
       {!loading && trips.length > 0 ? (
         <div className="flex divide-x divide-line border-y border-line py-3.5">
           <div className="min-w-0 flex-1 pr-3">
-            <p className="text-caption tracking-wide text-ink-3">旅程</p>
+            <p className="text-caption tracking-wide text-ink-3">{tr('旅程')}</p>
             <p className="mt-1 text-title font-semibold tabular-nums tracking-tight text-ink">
               {trips.length}
-              <span className="ml-0.5 text-caption font-normal text-ink-3">段</span>
+              <span className="ml-0.5 text-caption font-normal text-ink-3">{tr('段')}</span>
             </p>
           </div>
           <div className="min-w-0 flex-1 px-3">
-            <p className="text-caption tracking-wide text-ink-3">在路上</p>
+            <p className="text-caption tracking-wide text-ink-3">{tr('在路上')}</p>
             <p className="mt-1 text-title font-semibold tabular-nums tracking-tight text-ink">
               {totalDays}
-              <span className="ml-0.5 text-caption font-normal text-ink-3">天</span>
+              <span className="ml-0.5 text-caption font-normal text-ink-3">{tr('天')}</span>
             </p>
           </div>
           <div className="min-w-0 flex-1 pl-3">
-            <p className="text-caption tracking-wide text-ink-3">总花费</p>
+            <p className="text-caption tracking-wide text-ink-3">{tr('总花费')}</p>
             <p className="mt-1 truncate text-title font-semibold tabular-nums tracking-tight text-ink">
               {formatCny(totalSpent)}
             </p>
@@ -192,8 +193,10 @@ export function TripsPage() {
               )}
             >
               {contextTrip.kind === 'ongoing'
-                ? `今天 · 第 ${Math.max(dayIndexOfDate(contextTrip.trip.startDate), 1)} 天`
-                : `还有 ${daysUntil(contextTrip.trip.startDate)} 天出发`}
+                ? tr('今天 · 第 {n} 天', {
+                    n: Math.max(dayIndexOfDate(contextTrip.trip.startDate), 1),
+                  })
+                : tr('还有 {n} 天出发', { n: daysUntil(contextTrip.trip.startDate) })}
             </span>
             <span className="min-w-0 flex-1 truncate text-body-sm font-medium text-ink">
               {contextTrip.trip.title}
@@ -226,7 +229,9 @@ export function TripsPage() {
               ))
             ) : (
               <span className="block text-note text-ink-3">
-                {contextTrip.kind === 'ongoing' ? '今天还没有安排，点开补一条' : '还没排日程，点开套用模板'}
+                {contextTrip.kind === 'ongoing'
+                ? tr('今天还没有安排，点开补一条')
+                : tr('还没排日程，点开套用模板')}
               </span>
             )}
           </span>
@@ -238,14 +243,14 @@ export function TripsPage() {
           <div className="flex items-baseline justify-between gap-2">
             <h2 className="flex items-center gap-1.5 text-note font-semibold tracking-tight text-ink">
               <Sparkle size={13} className="text-warn" weight="fill" />
-              {memories[0]?.yearsAgo > 0 ? '往年今日' : '最近的回忆'}
+              {memories[0]?.yearsAgo > 0 ? tr('往年今日') : tr('最近的回忆')}
             </h2>
             <button
               type="button"
               onClick={() => nav.navigate({ name: 'album' })}
               className="press inline-flex items-center gap-0.5 text-caption text-ink-3 hover:text-ink"
             >
-              相册
+              {tr('相册')}
               <ArrowRight size={11} />
             </button>
           </div>
@@ -272,12 +277,14 @@ export function TripsPage() {
                       <span className="cover-texture absolute inset-0 block bg-accent/20" />
                     )}
                     <span className="absolute left-2 top-2 rounded-full bg-black/45 px-2 py-0.5 text-caption text-[var(--on-cover-strong)] backdrop-blur-sm">
-                      {item.yearsAgo > 0 ? `${item.yearsAgo} 年前` : formatDateCn(item.moment.createdAt)}
+                      {item.yearsAgo > 0
+                        ? tr('{n} 年前', { n: item.yearsAgo })
+                        : formatDateCn(item.moment.createdAt)}
                     </span>
                   </span>
                   <span className="block p-3">
                     <span className="block truncate text-body-sm font-medium text-ink">
-                      {item.moment.locationName || item.trip?.title || '一段回忆'}
+                      {item.moment.locationName || item.trip?.title || tr('一段回忆')}
                     </span>
                     <span className="mt-0.5 block truncate text-caption text-ink-3">
                       {item.trip?.destination || item.trip?.title}
@@ -308,12 +315,12 @@ export function TripsPage() {
           <select
             value={sortBy}
             onChange={(event) => setSortBy(event.target.value as 'date' | 'spend' | 'title')}
-            aria-label="排序方式"
+            aria-label={tr('排序方式')}
             className="cursor-pointer appearance-none bg-transparent pr-1 text-note text-ink-3 outline-none"
           >
-            <option value="date">按日期</option>
-            <option value="spend">按花费</option>
-            <option value="title">按名称</option>
+            <option value="date">{tr('按日期')}</option>
+            <option value="spend">{tr('按花费')}</option>
+            <option value="title">{tr('按名称')}</option>
           </select>
         </span>
       </div>
@@ -323,23 +330,23 @@ export function TripsPage() {
       ) : trips.length === 0 ? (
         <EmptyState
           icon={<EmptyArt />}
-          title="还没有旅行记录"
-          hint="新建一段旅程，把日程、照片、地点和花费都收进来。"
+          title={tr('还没有旅行记录')}
+          hint={tr('新建一段旅程，把日程、照片、地点和花费都收进来。')}
           action={
             <button type="button" className="btn-primary mt-1" onClick={() => setTemplateOpen(true)}>
               <Plus size={16} weight="bold" />
-              新建第一段旅程
+              {tr('新建第一段旅程')}
             </button>
           }
         />
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={<X size={20} />}
-          title="这个状态下没有旅程"
-          hint="换个筛选条件，或者新建一段。"
+          title={tr('这个状态下没有旅程')}
+          hint={tr('换个筛选条件，或者新建一段。')}
           action={
             <button type="button" className="btn-ghost mt-1" onClick={() => setStatus('all')}>
-              查看全部
+              {tr('查看全部')}
             </button>
           }
         />
@@ -359,7 +366,7 @@ export function TripsPage() {
       </>
       )}
 
-      <Sheet open={templateOpen} title="从模板开始" onClose={() => setTemplateOpen(false)}>
+      <Sheet open={templateOpen} title={tr('从模板开始')} onClose={() => setTemplateOpen(false)}>
         <div className="space-y-2">
           {TEMPLATES.map((item) => (
             <button
@@ -373,21 +380,21 @@ export function TripsPage() {
             >
               <span className={cn('h-12 w-12 shrink-0 rounded-xl', `cover-${item.cover}`)} aria-hidden="true" />
               <span className="min-w-0 flex-1">
-                <span className="block text-body font-medium text-ink">{item.label}</span>
-                <span className="block text-note text-ink-3">{item.hint}</span>
+                <span className="block text-body font-medium text-ink">{tr(item.label)}</span>
+                <span className="block text-note text-ink-3">{tr(item.hint)}</span>
               </span>
               <Plus size={15} className="shrink-0 text-ink-3" />
             </button>
           ))}
         </div>
         <p className="px-1 pt-3 text-caption leading-4 text-ink-3">
-          选模板会自动套用对应的日程与打包清单，之后都能单独修改。
+          {tr('选模板会自动套用对应的日程与打包清单，之后都能单独修改。')}
         </p>
       </Sheet>
 
       <Sheet
         open={selectedDay !== null}
-        title={selectedDay ? `${formatDateCn(selectedDay.key)} · 当天安排` : ''}
+        title={selectedDay ? tr('{date} · 当天安排', { date: formatDateCn(selectedDay.key) }) : ''}
         onClose={() => setSelectedDay(null)}
       >
         <div className="space-y-3">
@@ -412,7 +419,7 @@ export function TripsPage() {
 
           {selectedDay && selectedDay.plans.length > 0 ? (
             <div className="space-y-1.5">
-              <p className="text-caption uppercase tracking-[0.14em] text-ink-3">日程</p>
+              <p className="text-caption uppercase tracking-[0.14em] text-ink-3">{tr('日程')}</p>
               {selectedDay.plans.map((plan) => (
                 <div key={plan.id} className="flex items-start gap-2.5 rounded-xl bg-paper-2/60 px-3 py-2">
                   <span className="w-10 shrink-0 pt-0.5 text-caption tabular-nums text-ink-3">
@@ -443,7 +450,7 @@ export function TripsPage() {
 
           {selectedDay && selectedDay.moments.length > 0 ? (
             <p className="text-caption text-ink-3">
-              这天写了 {selectedDay.moments.length} 条记录
+              {tr('这天写了 {n} 条记录', { n: selectedDay.moments.length })}
             </p>
           ) : null}
 
@@ -451,7 +458,7 @@ export function TripsPage() {
           selectedDay.trips.length === 0 &&
           selectedDay.plans.length === 0 &&
           selectedDay.moments.length === 0 ? (
-            <p className="py-6 text-center text-note text-ink-3">这天还没有安排</p>
+            <p className="py-6 text-center text-note text-ink-3">{tr('这天还没有安排')}</p>
           ) : null}
         </div>
       </Sheet>

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Trash } from '@phosphor-icons/react'
 import type { Currency, Expense, ExpenseCategory, Trip } from '../lib/types'
 import { deleteExpense, getTrip, listExpenses, saveExpense } from '../lib/repo'
-import { useNav, useRefresh, useToast } from '../lib/app-context'
+import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import {
   CATEGORY_COLOR,
   CATEGORY_LABEL,
@@ -27,6 +27,7 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
   const nav = useNav()
   const toast = useToast()
   const { bump } = useRefresh()
+  const { tr } = useI18n()
 
   const [loading, setLoading] = useState(Boolean(expenseId))
   const [saving, setSaving] = useState(false)
@@ -91,7 +92,7 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
   const save = async () => {
     const amount = Number.parseFloat(amountText)
     if (!Number.isFinite(amount) || amount <= 0) {
-      setError('请输入大于 0 的金额')
+      setError(tr('请输入大于 0 的金额'))
       return
     }
     setError('')
@@ -109,7 +110,7 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
         syncState: 1,
       })
       bump()
-      toast('账目已保存')
+      toast(tr('账目已保存'))
       nav.back()
     } finally {
       setSaving(false)
@@ -120,20 +121,20 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
     if (!original) return
     await deleteExpense(original.id)
     bump()
-    toast('账目已删除')
+    toast(tr('账目已删除'))
     nav.back()
   }
 
   return (
     <EditorScreen
-      title={expenseId ? '编辑账目' : '记一笔'}
+      title={expenseId ? tr('编辑账目') : tr('记一笔')}
       onBack={() => nav.back()}
       onSave={save}
       saving={saving}
       saveDisabled={loading}
     >
-      <FormBlock title={trip ? trip.title : '全部旅行'}>
-        <Field label="金额" error={error}>
+      <FormBlock title={trip ? trip.title : tr('全部旅行')}>
+        <Field label={tr('金额')} error={error}>
           <div className="flex items-end gap-2 border-b border-line pb-2">
             <span className="pb-1.5 text-heading-sm font-normal text-ink-3">{CURRENCY_SYMBOL[currency]}</span>
             <input
@@ -163,14 +164,18 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
         </div>
         {currency !== 'CNY' && amountText ? (
           <p className="text-note text-ink-3">
-            约 ¥{formatMoney(Number.parseFloat(amountText || '0') * CURRENCY_RATE_TO_CNY[currency])} ·{' '}
-            {CURRENCY_LABEL[currency]}按离线汇率折算
+            {tr('约 ¥{amount} · {currency}按离线汇率折算', {
+              amount: formatMoney(
+                Number.parseFloat(amountText || '0') * CURRENCY_RATE_TO_CNY[currency],
+              ),
+              currency: CURRENCY_LABEL[currency],
+            })}
           </p>
         ) : null}
 
         {recent.length > 0 ? (
           <div className="space-y-1.5 border-t border-line pt-2.5">
-            <span className="field-label">再来一笔</span>
+            <span className="field-label">{tr('再来一笔')}</span>
             <div className="flex flex-wrap gap-1.5">
               {recent.map((item) => (
                 <button
@@ -192,7 +197,7 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
         ) : null}
       </FormBlock>
 
-      <FormBlock title="分类">
+      <FormBlock title={tr('分类')}>
         {autoHint ? <p className="text-caption text-accent">{autoHint}</p> : null}
         <div className="flex flex-wrap gap-2">
           {CATEGORY_ORDER.map((item) => {
@@ -220,8 +225,8 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
         </div>
       </FormBlock>
 
-      <FormBlock title="明细">
-        <Field label="日期">
+      <FormBlock title={tr('明细')}>
+        <Field label={tr('日期')}>
           <input
             type="date"
             className="input"
@@ -229,12 +234,15 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
             onChange={(event) => setSpentAt(fromDateInputValue(event.target.value))}
           />
         </Field>
-        <Field label="备注" hint={spentAt > 0 ? `记账日期 ${formatDate(spentAt)}` : undefined}>
+        <Field
+          label={tr('备注')}
+          hint={spentAt > 0 ? tr('记账日期 {date}', { date: formatDate(spentAt) }) : undefined}
+        >
           <input
             className="input"
             value={note}
             maxLength={60}
-            placeholder="例如「海鲜烧烤 · 两人」"
+            placeholder={tr('例如「海鲜烧烤 · 两人」')}
             onChange={(event) => setNote(event.target.value)}
             onBlur={async (event) => {
               const value = event.target.value.trim()
@@ -243,7 +251,7 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
               const hit = await guessCategory(value, parsed > 0 ? parsed : undefined)
               if (hit) {
                 setCategory(hit)
-                setAutoHint(`AI 归类为「${CATEGORY_LABEL[hit]}」，点分类可改`)
+                setAutoHint(tr('AI 归类为「{name}」，点分类可改', { name: CATEGORY_LABEL[hit] }))
               }
             }}
           />
@@ -257,14 +265,14 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
           className="press mx-auto flex items-center gap-1.5 rounded-full border border-line px-4 py-2 text-body-sm text-ink-3 hover:text-danger"
         >
           <Trash size={14} />
-          删除这笔账目
+{tr('删除这笔账目')}
         </button>
       ) : null}
 
       <ConfirmDialog
         open={confirmDelete}
-        title="删除这笔账目？"
-        message="删除后金额统计会立即更新。"
+        title={tr('删除这笔账目？')}
+        message={tr('删除后金额统计会立即更新。')}
         onClose={() => setConfirmDelete(false)}
         onConfirm={doDelete}
       />

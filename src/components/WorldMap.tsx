@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { Footprint } from '../lib/types'
 import { cn } from '../lib/cn'
+import { useI18n } from '../lib/app-context'
 
 interface Projected {
   footprint: Footprint
@@ -20,6 +21,7 @@ export function WorldMap({
   onSelect?: (footprint: Footprint) => void
   className?: string
 }) {
+  const { tr } = useI18n()
   const [hovered, setHovered] = useState<string | null>(null)
 
   const points = useMemo<Projected[]>(
@@ -52,7 +54,7 @@ export function WorldMap({
         className,
       )}
     >
-      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="block w-full" role="img" aria-label="足迹星图">
+      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="block w-full" role="img" aria-label={tr('足迹星图')}>
         <defs>
           <radialGradient id="map-glow">
             <stop offset="0%" stopColor="#1d6f64" stopOpacity="0.55" />
@@ -118,8 +120,8 @@ export function WorldMap({
             {active
               ? `${active.footprint.placeName}${active.footprint.city ? ' · ' + active.footprint.city : ''}`
               : points.length > 0
-                ? `${points.length} 个坐标 · 点击光点查看`
-                : '打卡后，地点会落在星图上'}
+                ? tr('{n} 个坐标 · 点击光点查看', { n: points.length })
+                : tr('打卡后，地点会落在星图上')}
           </p>
         </div>
         <span className="shrink-0 rounded-full bg-white/10 px-2.5 py-1 text-caption tabular-nums text-[var(--on-cover-muted)]">

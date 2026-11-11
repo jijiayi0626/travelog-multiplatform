@@ -5,7 +5,7 @@ import { ListBullets, MagnifyingGlass, MapPin, MapTrifold, Plus } from '@phospho
 import type { Footprint } from '../lib/types'
 import { deleteFootprint, listFootprints } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
-import { useNav, useRefresh, useSearch, useToast } from '../lib/app-context'
+import { useI18n, useNav, useRefresh, useSearch, useToast } from '../lib/app-context'
 import { summarizeVisits, type ProvinceVisit } from '../lib/province'
 import { cn } from '../lib/cn'
 import { FootprintRow } from '../components/cards'
@@ -19,6 +19,7 @@ export function FootprintsPage() {
   const toast = useToast()
   const openSearch = useSearch()
   const { bump } = useRefresh()
+  const { t, tr } = useI18n()
   const { data: footprints, loading } = useLoader(() => listFootprints(), [] as Footprint[], 'footprints')
   const [pendingDelete, setPendingDelete] = useState<Footprint | null>(null)
   const [mode, setMode] = useState<'china' | 'map' | 'list'>('china')
@@ -51,37 +52,37 @@ export function FootprintsPage() {
         <div className="min-w-0">
           <p className="text-caption uppercase tracking-[0.22em] text-ink-3">Footprints</p>
           <h1 className="mt-1.5 text-heading font-semibold leading-none tracking-tight text-ink sm:text-display">
-            我的足迹
+            {t('footprints.title')}
           </h1>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <IconButton label="搜索" onClick={openSearch}>
+          <IconButton label={tr('搜索')} onClick={openSearch}>
             <MagnifyingGlass size={17} />
           </IconButton>
           <button type="button" className="btn-primary" onClick={() => nav.navigate({ name: 'footprintEditor' })}>
             <Plus size={16} weight="bold" />
-            打卡
+            {t('footprints.checkin')}
           </button>
         </div>
       </header>
 
       <div className="flex divide-x divide-line border-y border-line py-3.5">
         <div className="min-w-0 flex-1 pr-3">
-          <p className="text-caption tracking-wide text-ink-3">地点</p>
+          <p className="text-caption tracking-wide text-ink-3">{tr('地点')}</p>
           <p className="mt-1 text-title font-semibold tabular-nums tracking-tight text-ink">
             {footprints.length}
-            <span className="ml-0.5 text-caption font-normal text-ink-3">个</span>
+            <span className="ml-0.5 text-caption font-normal text-ink-3">{tr('个')}</span>
           </p>
         </div>
         <div className="min-w-0 flex-1 px-3">
-          <p className="text-caption tracking-wide text-ink-3">省份</p>
+          <p className="text-caption tracking-wide text-ink-3">{tr('省份')}</p>
           <p className="mt-1 text-title font-semibold tabular-nums tracking-tight text-ink">
             {visitedProvinceCount}
-            <span className="ml-0.5 text-caption font-normal text-ink-3">个</span>
+            <span className="ml-0.5 text-caption font-normal text-ink-3">{tr('个')}</span>
           </p>
         </div>
         <div className="min-w-0 flex-1 pl-3">
-          <p className="text-caption tracking-wide text-ink-3">最近</p>
+          <p className="text-caption tracking-wide text-ink-3">{tr('最近')}</p>
           <p className="mt-1 truncate text-body-sm font-medium text-ink">
             {footprints[0]?.placeName ?? '—'}
           </p>
@@ -99,7 +100,7 @@ export function FootprintsPage() {
             )}
           >
             <MapPin size={14} />
-            中国
+            {t('footprints.china')}
           </button>
           <button
             type="button"
@@ -110,7 +111,7 @@ export function FootprintsPage() {
             )}
           >
             <MapTrifold size={14} />
-            星图
+            {t('footprints.stars')}
           </button>
           <button
             type="button"
@@ -121,7 +122,7 @@ export function FootprintsPage() {
             )}
           >
             <ListBullets size={14} />
-            列表
+            {t('footprints.list')}
           </button>
         </div>
         {cityStats.length > 0 && mode !== 'china' ? (
@@ -143,8 +144,8 @@ export function FootprintsPage() {
       ) : footprints.length === 0 ? (
         <EmptyState
           icon={<EmptyArt variant="pin" />}
-          title="还没有足迹"
-          hint="到过一个地方，就打卡留个坐标。之后可以在地图上回看。"
+          title={tr('还没有足迹')}
+          hint={tr('到过一个地方，就打卡留个坐标。之后可以在地图上回看。')}
           action={
             <button
               type="button"
@@ -152,7 +153,7 @@ export function FootprintsPage() {
               onClick={() => nav.navigate({ name: 'footprintEditor' })}
             >
               <Plus size={15} weight="bold" />
-              打卡第一个地点
+              {tr('打卡第一个地点')}
             </button>
           }
         />
@@ -172,25 +173,25 @@ export function FootprintsPage() {
                   >
                     {visit.short}
                     <span className="ml-0.5 tabular-nums text-ink-3">
-                      {visit.cities.length > 0 ? `${visit.cities.length}市` : visit.places.length}
+                      {visit.cities.length > 0
+                        ? tr('{n} 市', { n: visit.cities.length })
+                        : visit.places.length}
                     </span>
                   </button>
                 ))}
             </div>
           ) : (
             <p className="text-center text-note text-ink-3">
-              给足迹补上城市或坐标，地图会自动点亮去过的省份
+              {tr('给足迹补上城市或坐标，地图会自动点亮去过的省份')}
             </p>
           )}
           {visits.overseas.length > 0 || visits.unknown.length > 0 ? (
             <div className="rounded-xl border border-line bg-surface px-3 py-2.5">
               <p className="text-note text-ink-3">
-                另有
-                {visits.overseas.length > 0 ? ` ${visits.overseas.length} 个境外地点` : ''}
-                {visits.unknown.length > 0
-                  ? `${visits.overseas.length > 0 ? '、' : ''}${visits.unknown.length} 个待归类地点`
-                  : ''}
-                ，不计入中国省份地图。
+                {tr('另有 {overseas} 个境外地点、{unknown} 个待归类地点，不计入中国省份地图。', {
+                  overseas: visits.overseas.length,
+                  unknown: visits.unknown.length,
+                })}
               </p>
             </div>
           ) : null}
@@ -225,7 +226,7 @@ export function FootprintsPage() {
 
       <Sheet
         open={selected !== null}
-        title={selected ? `${selected.name} · ${selected.places.length} 个地点` : ''}
+        title={selected ? tr('{place} · {n} 个地点', { place: selected.name, n: selected.places.length }) : ''}
         onClose={() => setSelected(null)}
       >
         <div className="space-y-3">
@@ -237,7 +238,7 @@ export function FootprintsPage() {
                       {cityVisit.city.name}
                     </p>
                     <span className="shrink-0 text-caption text-ink-3">
-                      {cityVisit.places.length} 个地点
+                      {tr('{n} 个地点', { n: cityVisit.places.length })}
                     </span>
                   </header>
                   {cityVisit.districts.size > 0 ? (
@@ -283,14 +284,14 @@ export function FootprintsPage() {
 
       <ConfirmDialog
         open={pendingDelete !== null}
-        title="删除这个足迹？"
-        message={pendingDelete ? `「${pendingDelete.placeName}」会从足迹中移除。` : ''}
+        title={tr('删除这个足迹？')}
+        message={pendingDelete ? tr('「{name}」会从足迹中移除。', { name: pendingDelete.placeName }) : ''}
         onClose={() => setPendingDelete(null)}
         onConfirm={async () => {
           if (!pendingDelete) return
           await deleteFootprint(pendingDelete.id)
           bump()
-          toast('足迹已删除')
+          toast(tr('足迹已删除'))
         }}
       />
     </div>

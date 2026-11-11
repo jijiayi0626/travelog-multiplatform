@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { ArrowLeft } from '@phosphor-icons/react'
 import { IconButton } from './ui'
+import { useI18n } from '../lib/app-context'
 
 export function EditorScreen({
   title,
@@ -8,7 +9,7 @@ export function EditorScreen({
   onSave,
   saving = false,
   saveDisabled = false,
-  saveLabel = '保存',
+  saveLabel,
   children,
   aside,
 }: {
@@ -21,10 +22,11 @@ export function EditorScreen({
   children: ReactNode
   aside?: ReactNode
 }) {
+  const { tr } = useI18n()
   return (
     <div className="fade-in min-h-[100dvh] pb-10">
       <header className="sticky top-0 z-20 -mx-4 mb-5 flex items-center gap-3 border-b border-line bg-paper/85 px-4 py-3 backdrop-blur-xl sm:-mx-6 sm:px-6">
-        <IconButton label="返回" onClick={onBack}>
+        <IconButton label={tr('返回')} onClick={onBack}>
           <ArrowLeft size={18} />
         </IconButton>
         <h1 className="min-w-0 flex-1 truncate text-title font-semibold tracking-tight text-ink">
@@ -36,7 +38,7 @@ export function EditorScreen({
           disabled={saveDisabled || saving}
           onClick={onSave}
         >
-          {saving ? '保存中…' : saveLabel}
+          {saving ? tr('保存中…') : (saveLabel ?? tr('保存'))}
         </button>
       </header>
 

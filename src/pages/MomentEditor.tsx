@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ImageSquare, Plus, Sparkle, Trash } from '@phosphor-icons/react'
 import type { Moment, Photo, Trip } from '../lib/types'
 import { deleteMoment, getTrip, listMoments, saveMoment } from '../lib/repo'
-import { useNav, useRefresh, useToast } from '../lib/app-context'
+import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import { compressImage, dayIndexInTrip, uid } from '../lib/utils'
 import { polishMoment } from '../lib/ai'
 import { readFileGps } from '../lib/exif'
@@ -20,6 +20,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
   const nav = useNav()
   const toast = useToast()
   const { bump } = useRefresh()
+  const { tr } = useI18n()
   const fileRef = useRef<HTMLInputElement>(null)
 
   const [loading, setLoading] = useState(true)
@@ -96,10 +97,10 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
           const located = locateCity(gpsHit.lat, gpsHit.lng, province?.short)
           if (located?.city) setLocationName(located.city.short)
         }
-        toast('已从照片读取拍摄位置')
+        toast(tr('已从照片读取拍摄位置'))
       }
     } catch {
-      toast('图片处理失败，换一张试试')
+      toast(tr('图片处理失败，换一张试试'))
     } finally {
       setUploading(false)
       if (fileRef.current) fileRef.current.value = ''
@@ -108,7 +109,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
 
   const polish = async () => {
     if (!content.trim()) {
-      toast('先写几句再润色')
+      toast(tr('先写几句再润色'))
       return
     }
     setPolishing(true)
@@ -121,9 +122,9 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
       })
       setPreviousContent(before)
       setContent(text)
-      toast('已润色，可撤销')
+      toast(tr('已润色，可撤销'))
     } catch (error) {
-      toast(error instanceof Error ? error.message : '润色失败')
+      toast(error instanceof Error ? error.message : tr('润色失败'))
     } finally {
       setPolishing(false)
     }
@@ -131,7 +132,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
 
   const save = async () => {
     if (!content.trim() && photos.length === 0) {
-      setError('至少写一句文字或加一张照片')
+      setError(tr('至少写一句文字或加一张照片'))
       return
     }
     setError('')
@@ -152,7 +153,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
         tags,
       })
       bump()
-      toast('记录已保存')
+      toast(tr('记录已保存'))
       nav.back()
     } finally {
       setSaving(false)
@@ -163,13 +164,13 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
     if (!original) return
     await deleteMoment(original.id)
     bump()
-    toast('记录已删除')
+    toast(tr('记录已删除'))
     nav.back()
   }
 
   return (
     <EditorScreen
-      title={momentId ? '编辑记录' : '添加记录'}
+      title={momentId ? tr('编辑记录') : tr('添加记录')}
       onBack={() => nav.back()}
       onSave={save}
       saving={saving}
@@ -177,15 +178,15 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
     >
       <div className="flex items-center gap-2 text-note text-ink-3">
         <span className="rounded-full bg-accent-soft px-2.5 py-1 font-medium text-accent">
-          第 {dayIndex} 天
+          {tr('第 {n} 天', { n: dayIndex })}
         </span>
         {trip ? <span className="truncate">{trip.title}</span> : null}
       </div>
 
-      <FormBlock title="这一刻">
+      <FormBlock title={tr('这一刻')}>
         <div className="space-y-1.5">
           <div className="flex items-center justify-between gap-2">
-            <span className={cn('field-label', error && 'text-danger')}>{error || '文字'}</span>
+            <span className={cn('field-label', error && 'text-danger')}>{error || tr('文字')}</span>
             <span className="flex items-center gap-2">
               {previousContent !== null ? (
                 <button
@@ -193,11 +194,11 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
                   onClick={() => {
                     setContent(previousContent)
                     setPreviousContent(null)
-                    toast('已还原')
+                    toast(tr('已还原'))
                   }}
                   className="press text-caption text-ink-3 hover:text-ink"
                 >
-                  撤销
+{tr('撤销')}
                 </button>
               ) : null}
               <button
@@ -207,7 +208,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
                 className="press inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-caption text-ink-2 disabled:opacity-40 hover:text-accent"
               >
                 <Sparkle size={11} weight="fill" />
-                {polishing ? '润色中…' : 'AI 润色'}
+                {polishing ? tr('润色中…') : tr('AI 润色')}
               </button>
             </span>
           </div>
@@ -215,24 +216,27 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
             className={error ? 'input-area border-danger' : 'input-area'}
             rows={6}
             value={content}
-            placeholder="记录下此刻的心情和故事…"
+            placeholder={tr('记录下此刻的心情和故事…')}
             onChange={(event) => {
               setContent(event.target.value)
               if (error) setError('')
             }}
           />
         </div>
-        <Field label="地点" hint="会显示在记录上方，可用于之后整理足迹">
+        <Field
+          label={tr('地点')}
+          hint={tr('会显示在记录上方，可用于之后整理足迹')}
+        >
           <input
             className="input"
             value={locationName}
-            placeholder="例如「小樽运河」"
+            placeholder={tr('例如「小樽运河」')}
             onChange={(event) => setLocationName(event.target.value)}
           />
         </Field>
 
         <div className="space-y-2">
-          <span className="field-label">标签</span>
+          <span className="field-label">{tr('标签')}</span>
           <div className="flex flex-wrap gap-1.5">
             {TAG_PRESETS.map((tag) => (
               <button
@@ -252,7 +256,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
           <input
             className="input h-10 text-body-sm"
             value={customTag}
-            placeholder="自定义标签，回车添加"
+            placeholder={tr('自定义标签，回车添加')}
             onChange={(event) => setCustomTag(event.target.value)}
             onKeyDown={(event) => {
               if (event.key !== 'Enter') return
@@ -273,7 +277,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
                   #{tag}
                   <button
                     type="button"
-                    aria-label={`移除标签 ${tag}`}
+                    aria-label={tr('移除标签 {tag}', { tag })}
                     onClick={() => setTags((previous) => previous.filter((item) => item !== tag))}
                     className="text-ink-3 hover:text-danger"
                   >
@@ -286,7 +290,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
         </div>
       </FormBlock>
 
-      <FormBlock title="照片" hint={`${photos.length}/${MAX_PHOTOS}`}>
+      <FormBlock title={tr('照片')} hint={`${photos.length}/${MAX_PHOTOS}`}>
         <input
           ref={fileRef}
           type="file"
@@ -310,17 +314,17 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
           {uploading ? (
             <>
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink-3 border-t-transparent" />
-              处理中…
+              {tr('处理中…')}
             </>
           ) : (
             <>
               {photos.length >= MAX_PHOTOS ? <ImageSquare size={16} /> : <Plus size={16} weight="bold" />}
-              {photos.length >= MAX_PHOTOS ? '已达到 9 张上限' : '从相册选择照片'}
+              {photos.length >= MAX_PHOTOS ? tr('已达到 9 张上限') : tr('从相册选择照片')}
             </>
           )}
         </button>
         <p className="text-caption leading-4 text-ink-3">
-          照片会压缩后保存在本地，不会上传到任何服务器。
+          {tr('照片会压缩后保存在本地，不会上传到任何服务器。')}
         </p>
       </FormBlock>
 
@@ -331,14 +335,14 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
           className="press mx-auto flex items-center gap-1.5 rounded-full border border-line px-4 py-2 text-body-sm text-ink-3 hover:text-danger"
         >
           <Trash size={14} />
-          删除这条记录
+{tr('删除这条记录')}
         </button>
       ) : null}
 
       <ConfirmDialog
         open={confirmDelete}
-        title="删除这条记录？"
-        message="记录里的文字和照片都会一并删除。"
+        title={tr('删除这条记录？')}
+        message={tr('记录里的文字和照片都会一并删除。')}
         onClose={() => setConfirmDelete(false)}
         onConfirm={doDelete}
       />

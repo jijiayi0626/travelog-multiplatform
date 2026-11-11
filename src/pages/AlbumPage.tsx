@@ -3,7 +3,7 @@ import { ImageSquare, MapTrifold } from '@phosphor-icons/react'
 import type { Moment, Photo, TripView } from '../lib/types'
 import { listAllMoments, listTrips } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
-import { useNav } from '../lib/app-context'
+import { useI18n, useNav } from '../lib/app-context'
 import { formatDateCn, monthKey } from '../lib/utils'
 import { cn } from '../lib/cn'
 import { Lightbox } from '../components/Lightbox'
@@ -26,12 +26,13 @@ interface AlbumGroup {
 }
 
 const MODES = [
-  { value: 'trip' as const, label: '按旅程' },
-  { value: 'time' as const, label: '按时间' },
+  { value: 'trip' as const, labelKey: 'album.byTrip' as const },
+  { value: 'time' as const, labelKey: 'album.byTime' as const },
 ]
 
 export function AlbumPage() {
   const nav = useNav()
+  const { t, tr } = useI18n()
   const loader = useCallback(async () => {
     const [moments, trips] = await Promise.all([listAllMoments(), listTrips()])
     return { moments, trips }
@@ -59,7 +60,7 @@ export function AlbumPage() {
         list.push({
           ...photo,
           tripId: moment.tripId,
-          tripTitle: trip?.title ?? '未关联旅程',
+          tripTitle: trip?.title ?? tr('未关联旅程'),
           takenAt: moment.createdAt,
           dayIndex: moment.dayIndex,
         })
@@ -81,8 +82,10 @@ export function AlbumPage() {
           const trip = tripMap.get(tripId)
           return {
             key: tripId,
-            title: trip?.title ?? '未关联旅程',
-            subtitle: `${photos.length} 张${trip?.destination ? ` · ${trip.destination}` : ''}`,
+            title: trip?.title ?? tr('未关联旅程'),
+            subtitle: trip?.destination
+              ? tr('{n} 张 · {dest}', { n: photos.length, dest: trip.destination })
+              : tr('{n} 张', { n: photos.length }),
             tripId,
             photos,
           }
@@ -100,8 +103,11 @@ export function AlbumPage() {
     return [...map.entries()]
       .map(([key, photos]) => ({
         key,
-        title: `${key.slice(0, 4)} 年 ${Number(key.slice(5))} 月`,
-        subtitle: `${photos.length} 张`,
+        title: tr('{year} 年 {month} 月', {
+          year: key.slice(0, 4),
+          month: Number(key.slice(5)),
+        }),
+        subtitle: tr('{n} 张', { n: photos.length }),
         photos,
       }))
       .sort((a, b) => b.key.localeCompare(a.key))
@@ -124,7 +130,7 @@ export function AlbumPage() {
         <div className="min-w-0">
           <p className="text-caption uppercase tracking-[0.22em] text-ink-3">Album</p>
           <h1 className="mt-1.5 text-heading font-semibold leading-none tracking-tight text-ink sm:text-display">
-            相册
+            {t('album.title')}
           </h1>
         </div>
         <div className="flex shrink-0 gap-1 rounded-full border border-line bg-paper-2 p-1">
@@ -138,7 +144,7 @@ export function AlbumPage() {
                 mode === item.value ? 'bg-surface text-ink shadow-sm' : 'text-ink-3',
               )}
             >
-              {item.label}
+              {t(item.labelKey)}
             </button>
           ))}
         </div>
@@ -147,21 +153,21 @@ export function AlbumPage() {
       {!loading && allPhotos.length > 0 ? (
         <div className="flex divide-x divide-line border-y border-line py-3.5">
           <div className="min-w-0 flex-1 pr-3">
-            <p className="text-caption tracking-wide text-ink-3">照片</p>
+            <p className="text-caption tracking-wide text-ink-3">{tr('照片')}</p>
             <p className="mt-1 text-title font-semibold tabular-nums tracking-tight text-ink">
               {allPhotos.length}
-              <span className="ml-0.5 text-caption font-normal text-ink-3">张</span>
+              <span className="ml-0.5 text-caption font-normal text-ink-3">{tr('张')}</span>
             </p>
           </div>
           <div className="min-w-0 flex-1 px-3">
-            <p className="text-caption tracking-wide text-ink-3">旅程</p>
+            <p className="text-caption tracking-wide text-ink-3">{tr('旅程')}</p>
             <p className="mt-1 text-title font-semibold tabular-nums tracking-tight text-ink">
               {tripCount}
-              <span className="ml-0.5 text-caption font-normal text-ink-3">段</span>
+              <span className="ml-0.5 text-caption font-normal text-ink-3">{tr('段')}</span>
             </p>
           </div>
           <div className="min-w-0 flex-1 pl-3">
-            <p className="text-caption tracking-wide text-ink-3">最近一张</p>
+            <p className="text-caption tracking-wide text-ink-3">{tr('最近一张')}</p>
             <p className="mt-1 truncate text-body-sm font-medium text-ink">
               {allPhotos[0] ? formatDateCn(allPhotos[0].takenAt) : '—'}
             </p>
@@ -178,12 +184,12 @@ export function AlbumPage() {
       ) : allPhotos.length === 0 ? (
         <EmptyState
           icon={<EmptyArt variant="photo" />}
-          title="相册还是空的"
-          hint="在旅程的记录里加上照片，它们会自动收进这里。"
+          title={tr('相册还是空的')}
+          hint={tr('在旅程的记录里加上照片，它们会自动收进这里。')}
           action={
             <button type="button" className="btn-ghost mt-1" onClick={() => nav.navigate({ name: 'trips' })}>
               <MapTrifold size={15} />
-              去添加记录
+              {tr('去添加记录')}
             </button>
           }
         />

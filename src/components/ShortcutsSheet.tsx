@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Keyboard, X } from '@phosphor-icons/react'
+import { useI18n } from '../lib/app-context'
 
 const GROUPS: Array<{ title: string; items: Array<{ keys: string[]; label: string }> }> = [
   {
@@ -30,6 +31,7 @@ const GROUPS: Array<{ title: string; items: Array<{ keys: string[]; label: strin
 ]
 
 export function ShortcutsSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { tr } = useI18n()
   useEffect(() => {
     if (!open) return
     const onKey = (event: KeyboardEvent) => {
@@ -46,11 +48,11 @@ export function ShortcutsSheet({ open, onClose }: { open: boolean; onClose: () =
       className="fixed inset-0 z-[76] flex items-center justify-center px-4"
       role="dialog"
       aria-modal="true"
-      aria-label="键盘快捷键"
+      aria-label={tr('键盘快捷键')}
     >
       <button
         type="button"
-        aria-label="关闭"
+        aria-label={tr('关闭')}
         onClick={onClose}
         className="fade-in absolute inset-0 bg-[#0b0b0a]/40 backdrop-blur-[3px]"
       />
@@ -60,11 +62,11 @@ export function ShortcutsSheet({ open, onClose }: { open: boolean; onClose: () =
       >
         <header className="flex items-center gap-2 border-b border-line px-5 py-3.5">
           <Keyboard size={17} className="text-accent" />
-          <h2 className="flex-1 text-body-lg font-semibold tracking-tight text-ink">键盘快捷键</h2>
+          <h2 className="flex-1 text-body-lg font-semibold tracking-tight text-ink">{tr('键盘快捷键')}</h2>
           <button
             type="button"
             onClick={onClose}
-            aria-label="关闭"
+            aria-label={tr('关闭')}
             className="press flex h-8 w-8 items-center justify-center rounded-full text-ink-2 hover:bg-paper-2"
           >
             <X size={16} />
@@ -74,7 +76,7 @@ export function ShortcutsSheet({ open, onClose }: { open: boolean; onClose: () =
         <div className="max-h-[60dvh] space-y-4 overflow-y-auto p-5">
           {GROUPS.map((group) => (
             <section key={group.title}>
-              <h3 className="text-caption uppercase tracking-[0.16em] text-ink-3">{group.title}</h3>
+              <h3 className="text-caption uppercase tracking-[0.16em] text-ink-3">{tr(group.title)}</h3>
               <ul className="mt-2 space-y-1.5">
                 {group.items.map((item) => (
                   <li key={item.label} className="flex items-center gap-2 text-body-sm">
@@ -88,7 +90,7 @@ export function ShortcutsSheet({ open, onClose }: { open: boolean; onClose: () =
                         </kbd>
                       ))}
                     </span>
-                    <span className="text-ink-2">{item.label}</span>
+                    <span className="text-ink-2">{tr(item.label)}</span>
                   </li>
                 ))}
               </ul>
@@ -97,7 +99,7 @@ export function ShortcutsSheet({ open, onClose }: { open: boolean; onClose: () =
         </div>
 
         <footer className="border-t border-line px-5 py-2.5 text-caption text-ink-3">
-          桌面端可用；移动端长按 / 点击右上角搜索图标同样能打开搜索。
+          {tr('桌面端可用；移动端长按 / 点击右上角搜索图标同样能打开搜索。')}
         </footer>
       </div>
     </div>

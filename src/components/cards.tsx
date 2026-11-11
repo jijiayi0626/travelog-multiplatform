@@ -32,6 +32,7 @@ import {
   tripStatusOf,
 } from '../lib/utils'
 import { cn } from '../lib/cn'
+import { useI18n } from '../lib/app-context'
 import { CategoryGlyph } from './Icons'
 import { Avatar } from './ui'
 
@@ -50,6 +51,7 @@ export function TripCard({
   onOpen: () => void
   index?: number
 }) {
+  const { tr } = useI18n()
   const status = tripStatusOf(trip.startDate, trip.endDate)
   const days = tripDayCount(trip.startDate, trip.endDate)
   const cover = coverClass(trip.cover)
@@ -92,18 +94,18 @@ export function TripCard({
 
       <span className="relative mt-auto flex flex-col gap-1 p-4 pt-10">
         <span className="text-heading-sm font-semibold leading-snug tracking-tight text-white">
-          {trip.title || '未命名旅程'}
+          {trip.title || tr('未命名旅程')}
         </span>
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-note text-[var(--on-cover-muted)]">
           <span className="inline-flex items-center gap-1">
             <MapPin size={12} />
-            {trip.destination || '目的地待定'}
+            {trip.destination || tr('目的地待定')}
           </span>
           {trip.startDate > 0 ? (
             <span className="inline-flex items-center gap-1">
               <CalendarBlank size={12} />
               {formatDate(trip.startDate)}
-              {days > 0 ? ` · ${days} 天` : ''}
+              {days > 0 ? ` · ${tr('{n} 天', { n: days })}` : ''}
             </span>
           ) : null}
         </span>
@@ -113,10 +115,10 @@ export function TripCard({
           ) : null}
           {trip.planCount > 0 ? (
             <span>
-              日程 {trip.planDoneCount}/{trip.planCount}
+              {tr('日程 {done}/{total}', { done: trip.planDoneCount, total: trip.planCount })}
             </span>
           ) : null}
-          <span>{trip.momentCount} 条记录</span>
+          <span>{tr('{n} 条记录', { n: trip.momentCount })}</span>
           <span className="h-3 w-px bg-white/20" />
           <span>¥ {formatMoney(trip.expenseTotalCny)}</span>
         </span>
@@ -245,6 +247,7 @@ export function CategoryBar({
   count: number
   ratio: number
 }) {
+  const { tr } = useI18n()
   return (
     <div className="flex items-center gap-3">
       <span className="w-[60px] shrink-0 text-body-sm text-ink-2">{label}</span>
@@ -255,7 +258,7 @@ export function CategoryBar({
         />
       </span>
       <span className="w-[92px] shrink-0 text-right text-note tabular-nums text-ink-3">
-        {count} 笔 · ¥{formatMoney(amount)}
+        {tr('{n} 笔 · ¥{amount}', { n: count, amount: formatMoney(amount) })}
       </span>
     </div>
   )
@@ -270,11 +273,12 @@ export function ChecklistRow({
   onToggle: (done: boolean) => void
   onDelete: () => void
 }) {
+  const { tr } = useI18n()
   return (
     <div className="group flex items-center gap-3 rounded-2xl border border-line bg-surface px-3 py-2.5">
       <button
         type="button"
-        aria-label={item.done ? '标记为未完成' : '标记为完成'}
+        aria-label={item.done ? tr('标记为未完成') : tr('标记为完成')}
         onClick={() => onToggle(!item.done)}
         className={cn(
           'press flex h-6 w-6 shrink-0 items-center justify-center rounded-full border transition-colors',
@@ -295,7 +299,7 @@ export function ChecklistRow({
       </button>
       <button
         type="button"
-        aria-label="删除"
+        aria-label={tr('删除')}
         onClick={onDelete}
         className="press flex h-7 w-7 items-center justify-center rounded-full text-ink-3 hover:text-danger"
       >
@@ -314,6 +318,7 @@ export function FootprintRow({
   onOpenMap: () => void
   onDelete?: () => void
 }) {
+  const { tr } = useI18n()
   const hasCoord = footprint.latitude !== 0 || footprint.longitude !== 0
   return (
     <div className="card flex items-center gap-3 p-3.5">
@@ -335,7 +340,7 @@ export function FootprintRow({
       {hasCoord ? (
         <button
           type="button"
-          aria-label="在地图中查看"
+          aria-label={tr('在地图中查看')}
           onClick={onOpenMap}
           className="press flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line text-ink-2"
         >
@@ -345,7 +350,7 @@ export function FootprintRow({
       {onDelete ? (
         <button
           type="button"
-          aria-label="删除足迹"
+          aria-label={tr('删除足迹')}
           onClick={onDelete}
           className="press flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-3 hover:text-danger"
         >
@@ -357,16 +362,17 @@ export function FootprintRow({
 }
 
 export function MemberRow({ member, onRemove }: { member: Member; onRemove?: () => void }) {
+  const { tr } = useI18n()
   return (
     <div className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-3 py-2.5">
       <Avatar name={member.name} size={38} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-body font-medium text-ink">{member.name}</p>
-        <p className="text-note text-ink-3">{member.role === 'owner' ? '创建者' : '成员'}</p>
+        <p className="text-note text-ink-3">{member.role === 'owner' ? tr('创建者') : tr('成员')}</p>
       </div>
       {onRemove ? (
         <button type="button" onClick={onRemove} className="press text-note text-ink-3 hover:text-danger">
-          移除
+          {tr('移除')}
         </button>
       ) : null}
     </div>
@@ -374,6 +380,7 @@ export function MemberRow({ member, onRemove }: { member: Member; onRemove?: () 
 }
 
 export function PhotoStrip({ photos, onRemove }: { photos: Photo[]; onRemove?: (id: string) => void }) {
+  const { tr } = useI18n()
   if (photos.length === 0) return null
   return (
     <div className="grid grid-cols-3 gap-1.5">
@@ -387,7 +394,7 @@ export function PhotoStrip({ photos, onRemove }: { photos: Photo[]; onRemove?: (
           {onRemove ? (
             <button
               type="button"
-              aria-label="移除照片"
+              aria-label={tr('移除照片')}
               onClick={() => onRemove(photo.id)}
               className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-note text-white"
             >

@@ -1,6 +1,7 @@
 import type { CategoryStat, MonthStat } from '../lib/types'
 import { CATEGORY_COLOR, CATEGORY_LABEL, formatCny, formatMoney } from '../lib/utils'
 import { cn } from '../lib/cn'
+import { useI18n } from '../lib/app-context'
 import { CategoryGlyph } from './Icons'
 
 export function DonutChart({
@@ -14,6 +15,7 @@ export function DonutChart({
   thickness?: number
   total: number
 }) {
+  const { tr } = useI18n()
   const radius = (size - thickness) / 2
   const circumference = 2 * Math.PI * radius
   const sum = stats.reduce((value, item) => value + item.amount, 0)
@@ -27,7 +29,7 @@ export function DonutChart({
 
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label="分类占比">
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={tr('分类占比')}>
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -52,7 +54,7 @@ export function DonutChart({
         ))}
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-caption tracking-wide text-ink-3">合计</span>
+        <span className="text-caption tracking-wide text-ink-3">{tr('合计')}</span>
         <span className="mt-0.5 text-body-lg font-semibold tabular-nums tracking-tight text-ink">
           ¥{formatMoney(total)}
         </span>
@@ -127,6 +129,7 @@ export function MonthBars({
 }
 
 export function BudgetBar({ spent, budget }: { spent: number; budget: number }) {
+  const { tr } = useI18n()
   if (budget <= 0) return null
   const ratio = spent / budget
   const over = spent > budget
@@ -134,9 +137,11 @@ export function BudgetBar({ spent, budget }: { spent: number; budget: number }) 
   return (
     <div className="space-y-1.5">
       <div className="flex items-baseline justify-between gap-2 text-caption">
-        <span className="text-ink-3">预算 ¥{formatMoney(budget)}</span>
+        <span className="text-ink-3">{tr('预算 ¥{amount}', { amount: formatMoney(budget) })}</span>
         <span className={cn('tabular-nums', over ? 'text-danger' : 'text-ink-2')}>
-          {over ? `超支 ¥${formatMoney(Math.abs(remain))}` : `剩余 ¥${formatMoney(remain)}`}
+          {over
+            ? tr('超支 ¥{amount}', { amount: formatMoney(Math.abs(remain)) })
+            : tr('剩余 ¥{amount}', { amount: formatMoney(remain) })}
         </span>
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-paper-2">
@@ -162,6 +167,7 @@ export function HeatStrip({
   labels?: string[]
   todayIndex?: number
 }) {
+  const { tr } = useI18n()
   const max = Math.max(...values, 1)
   return (
     <div className="flex items-end gap-1">
@@ -183,7 +189,7 @@ export function HeatStrip({
             />
             {labels ? <span className="text-caption text-ink-3">{labels[index]}</span> : null}
             <span className="pointer-events-none absolute -top-7 z-10 hidden whitespace-nowrap rounded-md bg-ink px-1.5 py-0.5 text-caption text-paper group-hover:block">
-              第 {index + 1} 天 · {value} 条
+              {tr('第 {n} 天 · {v} 条', { n: index + 1, v: value })}
             </span>
           </div>
         )

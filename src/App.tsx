@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { TabKey, TripTemplate, View } from './lib/types'
 import {
+  I18nContext,
   NavContext,
   RefreshContext,
   SearchContext,
   ShortcutsContext,
   ToastContext,
 } from './lib/app-context'
+import { getLang, setLang as persistLang, translate, translateText, type Lang } from './lib/i18n'
 import { ensureReady } from './lib/repo'
 import { scheduleAutoSync } from './lib/sync-engine'
 import { startAutoCheckin } from './lib/autocheckin'
@@ -149,6 +151,7 @@ export default function App() {
     typeof navigator === 'undefined' ? true : navigator.onLine,
   )
   const [toasts, setToasts] = useState<ToastItem[]>([])
+  const [lang, setLangState] = useState<Lang>(() => getLang())
 
   useEffect(() => {
     const onHashChange = () => setView(parseHash())
@@ -178,6 +181,11 @@ export default function App() {
       window.removeEventListener('online', onOnline)
       window.removeEventListener('offline', onOffline)
     }
+  }, [])
+
+  const changeLang = useCallback((next: Lang) => {
+    persistLang(next)
+    setLangState(next)
   }, [])
 
   const bump = useCallback(() => {
@@ -278,6 +286,14 @@ export default function App() {
   }
 
   return (
+    <I18nContext.Provider
+      value={{
+        lang,
+        setLang: changeLang,
+        t: (key) => translate(lang, key),
+        tr: (zh, vars) => translateText(lang, zh, vars),
+      }}
+    >
     <RefreshContext.Provider value={{ tick, bump }}>
       <NavContext.Provider value={{ navigate, back }}>
         <ToastContext.Provider value={toast}>
@@ -286,7 +302,7 @@ export default function App() {
               {!online ? (
                 <div className="fixed inset-x-0 top-0 z-[65] flex items-center justify-center gap-2 bg-ink/90 px-4 py-1.5 text-note text-paper backdrop-blur">
                   <span className="h-1.5 w-1.5 rounded-full bg-warn" />
-                  离线模式 · 数据仍会保存在本机
+                  {translateText(lang, '离线模式 · 数据仍会保存在本机')}
                 </div>
               ) : null}
               <AppShell view={view} onRootChange={(key) => navigate(ROOT_VIEW[key])}>
@@ -324,6 +340,7 @@ export default function App() {
         </ToastContext.Provider>
       </NavContext.Provider>
     </RefreshContext.Provider>
+    </I18nContext.Provider>
   )
 }
 

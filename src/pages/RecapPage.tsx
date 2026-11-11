@@ -3,7 +3,7 @@ import { ArrowLeft, CaretLeft, CaretRight, Sparkle } from '@phosphor-icons/react
 import type { Expense, Footprint, Moment, TripView } from '../lib/types'
 import { listAllMoments, listExpenses, listFootprints, listTrips } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
-import { useNav } from '../lib/app-context'
+import { useI18n, useNav } from '../lib/app-context'
 import { summarizeVisits } from '../lib/province'
 import {
   CATEGORY_LABEL,
@@ -24,6 +24,7 @@ const MONTHS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
 
 export function RecapPage() {
   const nav = useNav()
+  const { t, tr } = useI18n()
   const loader = useCallback(async () => {
     const [trips, expenses, moments, footprints] = await Promise.all([
       listTrips(),
@@ -127,11 +128,11 @@ export function RecapPage() {
   return (
     <div className="mx-auto w-full max-w-[860px] space-y-5 pb-4">
       <div className="flex items-center gap-2.5 pt-3">
-        <IconButton label="返回" onClick={() => nav.back()}>
+        <IconButton label={tr('返回')} onClick={() => nav.back()}>
           <ArrowLeft size={18} />
         </IconButton>
         <span className="text-note text-ink-3">
-          我的 / <span className="text-ink-2">年度回顾</span>
+          {tr('我的')} / <span className="text-ink-2">{tr('年度回顾')}</span>
         </span>
       </div>
 
@@ -139,7 +140,7 @@ export function RecapPage() {
         <div className="min-w-0">
           <p className="text-caption uppercase tracking-[0.22em] text-ink-3">Year in review</p>
           <h1 className="mt-1.5 text-heading font-semibold leading-none tracking-tight text-ink">
-            {activeYear} 年度回顾
+            {activeYear} {t('recap.title')}
           </h1>
         </div>
         <div className="flex shrink-0 items-center gap-1">

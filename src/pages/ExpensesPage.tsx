@@ -3,7 +3,7 @@ import { ArrowsDownUp, Export, Plus } from '@phosphor-icons/react'
 import type { Expense, ExpenseCategory, TripView } from '../lib/types'
 import { categoryStats, listExpenses, listTrips, monthlyStats, sumExpenseCny } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
-import { useNav, useToast } from '../lib/app-context'
+import { useI18n, useNav, useToast } from '../lib/app-context'
 import {
   CATEGORY_COLOR,
   CATEGORY_LABEL,
@@ -23,6 +23,7 @@ import { EmptyArt } from '../components/EmptyArt'
 
 export function ExpensesPage() {
   const nav = useNav()
+  const { t, tr } = useI18n()
   const toast = useToast()
   const loader = useCallback(async () => {
     const [expenses, trips] = await Promise.all([listExpenses(), listTrips()])
@@ -66,15 +67,25 @@ export function ExpensesPage() {
 
   const exportCsv = () => {
     if (filtered.length === 0) {
-      toast('当前筛选没有可导出的账目')
+      toast(tr('当前筛选没有可导出的账目'))
       return
     }
-    const rows: string[][] = [['日期', '旅行', '分类', '备注', '金额', '币种', '折合人民币']]
+    const rows: string[][] = [
+      [
+        tr('日期'),
+        tr('旅行'),
+        tr('分类'),
+        tr('备注'),
+        tr('金额'),
+        tr('币种'),
+        tr('折合人民币'),
+      ],
+    ]
     for (const expense of filtered) {
       rows.push([
         formatDateCn(expense.spentAt),
         tripTitle.get(expense.tripId) ?? '',
-        CATEGORY_LABEL[expense.category],
+        tr(CATEGORY_LABEL[expense.category]),
         expense.note,
         String(expense.amount),
         expense.currency ?? 'CNY',
@@ -83,7 +94,7 @@ export function ExpensesPage() {
     }
     const csv = '\ufeff' + rows.map((row) => row.map(csvEscape).join(',')).join('\r\n')
     downloadText(`travelog-expenses-${new Date().toISOString().slice(0, 10)}.csv`, csv, 'text/csv;charset=utf-8')
-    toast('CSV 已导出')
+    toast(tr('CSV 已导出'))
   }
 
   return (
@@ -92,11 +103,11 @@ export function ExpensesPage() {
         <div className="min-w-0">
           <p className="text-caption uppercase tracking-[0.22em] text-ink-3">Ledger</p>
           <h1 className="mt-1.5 text-heading font-semibold leading-none tracking-tight text-ink sm:text-display">
-            账本
+            {t('expenses.title')}
           </h1>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <IconButton label="导出 CSV" onClick={exportCsv}>
+          <IconButton label={tr('导出 CSV')} onClick={exportCsv}>
             <Export size={17} />
           </IconButton>
           <button
@@ -105,7 +116,7 @@ export function ExpensesPage() {
             onClick={() => nav.navigate({ name: 'expenseEditor', tripId: '' })}
           >
             <Plus size={16} weight="bold" />
-            记一笔
+            {t('expenses.add')}
           </button>
         </div>
       </header>
@@ -113,29 +124,29 @@ export function ExpensesPage() {
       <section className="border-y border-line py-4">
         <div className="flex items-end justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-caption tracking-wide text-ink-3">当前筛选合计</p>
+            <p className="text-caption tracking-wide text-ink-3">{t('expenses.total')}</p>
             <p className="mt-1 truncate text-display font-semibold leading-none tabular-nums tracking-tight text-ink sm:text-display-lg">
               {formatCny(total)}
             </p>
           </div>
           <p className="shrink-0 text-right text-note leading-4 text-ink-3">
-            {filtered.length} 笔
+            {tr('{n} 笔', { n: filtered.length })}
             <br />
-            共 {data.trips.length} 段旅程
+            {tr('共 {n} 段旅程', { n: data.trips.length })}
           </p>
         </div>
       </section>
 
       <div className="space-y-2.5">
         <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
-          <span className="shrink-0 text-caption text-ink-3">旅行</span>
+          <span className="shrink-0 text-caption text-ink-3">{tr('旅行')}</span>
           <select
             value={tripFilter}
             onChange={(event) => setTripFilter(event.target.value)}
             className="chip shrink-0 appearance-none pr-6"
-            aria-label="按旅行筛选"
+            aria-label={tr('按旅行筛选')}
           >
-            <option value="all">全部旅行</option>
+            <option value="all">{tr('全部旅行')}</option>
             {data.trips.map((trip) => (
               <option key={trip.id} value={trip.id}>
                 {trip.title}
@@ -146,18 +157,18 @@ export function ExpensesPage() {
             value={monthFilter}
             onChange={(event) => setMonthFilter(event.target.value)}
             className="chip shrink-0 appearance-none pr-6"
-            aria-label="按月份筛选"
+            aria-label={tr('按月份筛选')}
           >
-            <option value="all">全部月份</option>
+            <option value="all">{tr('全部月份')}</option>
             {monthOptions.map((key) => (
               <option key={key} value={key}>
-                {key.slice(0, 4)} 年 {monthLabel(key)}
+                {tr('{year} 年 {month} 月', { year: key.slice(0, 4), month: monthLabel(key) })}
               </option>
             ))}
           </select>
           <span className="ml-auto flex shrink-0 items-center gap-1 text-ink-3">
             <ArrowsDownUp size={13} />
-            <span className="text-caption">按时间</span>
+            <span className="text-caption">{tr('按时间')}</span>
           </span>
         </div>
 
@@ -167,7 +178,7 @@ export function ExpensesPage() {
             onClick={() => setCategoryFilter('all')}
             className={cn('chip', categoryFilter === 'all' && 'chip-active')}
           >
-            全部分类
+            {tr('全部分类')}
           </button>
           {CATEGORY_ORDER.map((item) => (
             <button

@@ -11,7 +11,7 @@ import {
   SignOut,
   ArrowsClockwise,
 } from '@phosphor-icons/react'
-import { useNav, useToast } from '../lib/app-context'
+import { useNav, useI18n, useToast } from '../lib/app-context'
 import {
   checkHealth,
   clearCloudConfig,
@@ -38,6 +38,7 @@ const ENDPOINTS = [
 export function SyncPage() {
   const nav = useNav()
   const toast = useToast()
+  const { tr } = useI18n()
 
   const [config, setConfig] = useState(() => getCloudConfig())
   const [baseUrl, setBaseUrl] = useState(config.baseUrl)
@@ -53,7 +54,7 @@ export function SyncPage() {
     const next = saveCloudConfig({ baseUrl: baseUrl.trim() })
     setConfig(next)
     setHealth(null)
-    toast('服务器地址已保存')
+    toast(tr('服务器地址已保存'))
   }
 
   const testConnection = async () => {
@@ -62,10 +63,10 @@ export function SyncPage() {
       saveCloudConfig({ baseUrl: baseUrl.trim() })
       const info = await checkHealth()
       setHealth(info)
-      toast('连接正常')
+      toast(tr('连接正常'))
     } catch (error) {
       setHealth(null)
-      toast(error instanceof Error ? error.message : '连接失败')
+      toast(error instanceof Error ? error.message : tr('连接失败'))
     } finally {
       setBusy(null)
     }
@@ -73,7 +74,7 @@ export function SyncPage() {
 
   const doRegister = async () => {
     if (!nickname.trim()) {
-      toast('先填一个昵称')
+      toast(tr('先填一个昵称'))
       return
     }
     setBusy('register')
@@ -81,10 +82,10 @@ export function SyncPage() {
       saveCloudConfig({ baseUrl: baseUrl.trim() })
       const auth = await registerCloud(nickname.trim())
       setConfig(getCloudConfig())
-      setResult(`同步码：${auth.syncCode}`)
-      toast('账号已创建，请记下同步码')
+      setResult(tr('同步码：{code}', { code: auth.syncCode }))
+      toast(tr('账号已创建，请记下同步码'))
     } catch (error) {
-      toast(error instanceof Error ? error.message : '注册失败')
+      toast(error instanceof Error ? error.message : tr('注册失败'))
     } finally {
       setBusy(null)
     }
@@ -92,7 +93,7 @@ export function SyncPage() {
 
   const doLogin = async () => {
     if (!code.trim()) {
-      toast('请输入同步码')
+      toast(tr('请输入同步码'))
       return
     }
     setBusy('login')
@@ -100,9 +101,9 @@ export function SyncPage() {
       saveCloudConfig({ baseUrl: baseUrl.trim() })
       await loginCloud(code.trim())
       setConfig(getCloudConfig())
-      toast('登录成功，可以同步了')
+      toast(tr('登录成功，可以同步了'))
     } catch (error) {
-      toast(error instanceof Error ? error.message : '登录失败')
+      toast(error instanceof Error ? error.message : tr('登录失败'))
     } finally {
       setBusy(null)
     }
@@ -113,10 +114,16 @@ export function SyncPage() {
     try {
       const sync = await runSync()
       setConfig(getCloudConfig())
-      setResult(`推送 ${sync.pushed} 条 · 拉取 ${sync.pulled} 条 · 删除 ${sync.removed} 条`)
-      toast('同步完成')
+      setResult(
+        tr('推送 {push} 条 · 拉取 {pull} 条 · 删除 {del} 条', {
+          push: sync.pushed,
+          pull: sync.pulled,
+          del: sync.removed,
+        }),
+      )
+      toast(tr('同步完成'))
     } catch (error) {
-      toast(error instanceof Error ? error.message : '同步失败')
+      toast(error instanceof Error ? error.message : tr('同步失败'))
     } finally {
       setBusy(null)
     }
@@ -126,7 +133,7 @@ export function SyncPage() {
     clearCloudConfig()
     setConfig(getCloudConfig())
     setResult('')
-    toast('已退出云同步')
+    toast(tr('已退出云同步'))
   }
 
   const toggleAuto = () => {
@@ -137,10 +144,10 @@ export function SyncPage() {
   return (
     <div className="pt-3">
       <div className="flex items-center gap-2.5">
-        <IconButton label="返回" onClick={() => nav.back()}>
+        <IconButton label={tr('返回')} onClick={() => nav.back()}>
           <ArrowLeft size={18} />
         </IconButton>
-        <span className="text-note text-ink-3">我的 / 云同步</span>
+        <span className="text-note text-ink-3">{tr('我的 / 云同步')}</span>
       </div>
 
       <div className="mx-auto mt-4 w-full max-w-[640px] space-y-4 pb-6">
@@ -156,36 +163,36 @@ export function SyncPage() {
             </span>
             <div className="min-w-0 flex-1">
               <h1 className="text-title font-semibold tracking-tight text-ink">
-                {signedIn ? '已连接云端' : '未连接云端'}
+                {signedIn ? tr('已连接云端') : tr('未连接云端')}
               </h1>
               <p className="mt-1 text-note leading-5 text-ink-3">
                 {signedIn
-                  ? '多台设备可以共用同一个同步码，数据按 updatedAt 较新者为准合并。'
-                  : '所有数据都保存在这台设备。登录云同步后，手机、平板和网页之间可以互相同步。'}
+                  ? tr('多台设备可以共用同一个同步码，数据按 updatedAt 较新者为准合并。')
+                  : tr('所有数据都保存在这台设备。登录云同步后，手机、平板和网页之间可以互相同步。')}
               </p>
             </div>
           </div>
 
           <dl className="mt-4 space-y-2.5 border-t border-line pt-3.5 text-body-sm">
             <div className="flex items-center justify-between">
-              <dt className="text-ink-3">状态</dt>
+              <dt className="text-ink-3">{tr('状态')}</dt>
               <dd className={cn('font-medium', signedIn ? 'text-accent' : 'text-ink')}>
-                {signedIn ? '已登录' : '仅本地'}
+                {signedIn ? tr('已登录') : tr('仅本地')}
               </dd>
             </div>
             {signedIn ? (
               <div className="flex items-center justify-between gap-3">
-                <dt className="shrink-0 text-ink-3">同步码</dt>
+                <dt className="shrink-0 text-ink-3">{tr('同步码')}</dt>
                 <dd className="flex min-w-0 items-center gap-1.5">
                   <span className="truncate font-mono text-body tracking-[0.16em] text-ink">
                     {config.syncCode}
                   </span>
                   <button
                     type="button"
-                    aria-label="复制同步码"
+                    aria-label={tr('复制同步码')}
                     onClick={async () => {
                       const ok = await copyText(config.syncCode)
-                      toast(ok ? '同步码已复制' : '复制失败')
+                      toast(ok ? tr('同步码已复制') : tr('复制失败'))
                     }}
                     className="press shrink-0 text-ink-3 hover:text-ink"
                   >
@@ -195,13 +202,13 @@ export function SyncPage() {
               </div>
             ) : null}
             <div className="flex items-center justify-between">
-              <dt className="text-ink-3">上次同步</dt>
+              <dt className="text-ink-3">{tr('上次同步')}</dt>
               <dd className="text-ink">
-                {config.lastSyncAt > 0 ? relativeTime(config.lastSyncAt) : '从未'}
+                {config.lastSyncAt > 0 ? relativeTime(config.lastSyncAt) : tr('从未')}
               </dd>
             </div>
             <div className="flex items-center justify-between">
-              <dt className="text-ink-3">自动同步</dt>
+              <dt className="text-ink-3">{tr('自动同步')}</dt>
               <dd>
                 <button
                   type="button"
@@ -239,11 +246,11 @@ export function SyncPage() {
                 disabled={busy === 'sync'}
               >
                 <ArrowsClockwise size={16} className={busy === 'sync' ? 'animate-spin' : undefined} />
-                {busy === 'sync' ? '同步中…' : '立即同步'}
+                {busy === 'sync' ? tr('同步中…') : tr('立即同步')}
               </button>
               <button type="button" className="btn-ghost" onClick={doLogout}>
                 <SignOut size={15} />
-                退出
+                {tr('退出')}
               </button>
             </div>
           ) : null}
@@ -252,9 +259,9 @@ export function SyncPage() {
         <section className="card space-y-3 p-5">
           <h2 className="flex items-center gap-1.5 text-body-sm font-semibold tracking-tight text-ink">
             <Plugs size={15} />
-            服务器
+            {tr('服务器')}
           </h2>
-          <Field label="API 地址" hint="留空则使用当前站点同源的 /api">
+          <Field label={tr('API 地址')} hint={tr('留空则使用当前站点同源的 /api')}>
             <input
               className="input"
               value={baseUrl}
@@ -270,12 +277,12 @@ export function SyncPage() {
               onClick={testConnection}
               disabled={busy === 'health'}
             >
-              {busy === 'health' ? '测试中…' : '测试连接'}
+              {busy === 'health' ? tr('测试中…') : tr('测试连接')}
             </button>
             {health ? (
               <span className="inline-flex items-center gap-1.5 text-caption text-accent">
                 <CheckCircle size={13} weight="fill" />
-                服务正常{health.ai ? ' · AI 可用' : ' · AI 未配置'}
+                {health.ai ? tr('服务正常 · AI 可用') : tr('服务正常 · AI 未配置')}
               </span>
             ) : null}
           </div>
@@ -285,16 +292,16 @@ export function SyncPage() {
           <section className="card space-y-4 p-5">
             <h2 className="flex items-center gap-1.5 text-body-sm font-semibold tracking-tight text-ink">
               <Key size={15} />
-              账号
+              {tr('账号')}
             </h2>
 
             <div className="space-y-2 rounded-2xl border border-line p-3">
-              <p className="text-note text-ink-3">第一次用：创建一个同步账号</p>
+              <p className="text-note text-ink-3">{tr('第一次用：创建一个同步账号')}</p>
               <div className="flex gap-2">
                 <input
                   className="input"
                   value={nickname}
-                  placeholder="昵称"
+                  placeholder={tr('昵称')}
                   maxLength={24}
                   onChange={(event) => setNickname(event.target.value)}
                 />
@@ -304,13 +311,13 @@ export function SyncPage() {
                   onClick={doRegister}
                   disabled={busy === 'register'}
                 >
-                  {busy === 'register' ? '创建中…' : '创建'}
+                  {busy === 'register' ? tr('创建中…') : tr('创建')}
                 </button>
               </div>
             </div>
 
             <div className="space-y-2 rounded-2xl border border-line p-3">
-              <p className="text-note text-ink-3">已有账号：输入 8 位同步码</p>
+              <p className="text-note text-ink-3">{tr('已有账号：输入 8 位同步码')}</p>
               <div className="flex gap-2">
                 <input
                   className="input font-mono tracking-[0.2em] uppercase"
@@ -326,7 +333,7 @@ export function SyncPage() {
                   disabled={busy === 'login'}
                 >
                   <SignIn size={15} />
-                  登录
+                  {tr('登录')}
                 </button>
               </div>
             </div>
@@ -334,13 +341,13 @@ export function SyncPage() {
         ) : null}
 
         <section className="card p-5">
-          <h2 className="text-body-sm font-semibold tracking-tight text-ink">接口</h2>
+          <h2 className="text-body-sm font-semibold tracking-tight text-ink">{tr('接口')}</h2>
           <ul className="mt-2 divide-y divide-line">
             {ENDPOINTS.map((item) => (
               <li key={item.path} className="flex items-center gap-2.5 py-2.5 text-note">
                 <span className="w-[38px] shrink-0 font-mono text-caption text-accent">{item.method}</span>
                 <span className="min-w-0 flex-1 truncate font-mono text-caption text-ink-2">{item.path}</span>
-                <span className="shrink-0 text-caption text-ink-3">{item.note}</span>
+                <span className="shrink-0 text-caption text-ink-3">{tr(item.note)}</span>
               </li>
             ))}
           </ul>
@@ -348,8 +355,7 @@ export function SyncPage() {
 
         <section className="rounded-2xl border border-line bg-surface p-4">
           <p className="text-note leading-4 text-ink-3">
-            同步在本地优先的前提下工作：写入先落本机，联网后自动推送。冲突按 updatedAt 较新者胜出，
-            删除会以墓碑记录推送，不会在下次拉取时被复活。
+            {tr('同步在本地优先的前提下工作：写入先落本机，联网后自动推送。冲突按 updatedAt 较新者胜出，删除会以墓碑记录推送，不会在下次拉取时被复活。')}
           </p>
         </section>
       </div>

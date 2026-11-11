@@ -3,8 +3,10 @@ import { CaretLeft, CaretRight } from '@phosphor-icons/react'
 import type { Moment, Plan, TripView } from '../lib/types'
 import { cn } from '../lib/cn'
 import { PLAN_KIND_COLOR, formatDateCn, startOfDay, todayStart } from '../lib/utils'
+import { useI18n } from '../lib/app-context'
 
-const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日']
+const WEEKDAYS_ZH = ['一', '二', '三', '四', '五', '六', '日']
+const WEEKDAYS_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 interface DayBucket {
   key: number
@@ -28,6 +30,8 @@ export function TripsCalendar({
   plans: Plan[]
   onSelectDay: (bucket: DayBucket) => void
 }) {
+  const { tr, lang } = useI18n()
+  const weekdays = lang === 'en' ? WEEKDAYS_EN : WEEKDAYS_ZH
   const [cursor, setCursor] = useState(() => {
     const now = new Date()
     return { year: now.getFullYear(), month: now.getMonth() }
@@ -118,18 +122,18 @@ export function TripsCalendar({
         <div className="flex items-center gap-1.5">
           <button
             type="button"
-            aria-label="上个月"
+            aria-label={tr('上个月')}
             onClick={() => shift(-1)}
             className="press flex h-8 w-8 items-center justify-center rounded-full border border-line text-ink-2"
           >
             <CaretLeft size={14} />
           </button>
           <span className="min-w-[96px] text-center text-body-lg font-semibold tabular-nums tracking-tight text-ink">
-            {year} 年 {month + 1} 月
+            {tr('{year} 年 {month} 月', { year, month: month + 1 })}
           </span>
           <button
             type="button"
-            aria-label="下个月"
+            aria-label={tr('下个月')}
             onClick={() => shift(1)}
             className="press flex h-8 w-8 items-center justify-center rounded-full border border-line text-ink-2"
           >
@@ -144,12 +148,12 @@ export function TripsCalendar({
           }}
           className="press rounded-full border border-line px-2.5 py-1 text-caption text-ink-2"
         >
-          回到本月
+          {tr('回到本月')}
         </button>
       </div>
 
       <div className="grid grid-cols-7 gap-y-1">
-        {WEEKDAYS.map((day) => (
+        {weekdays.map((day) => (
           <span key={day} className="text-center text-caption text-ink-3">
             {day}
           </span>
@@ -193,7 +197,7 @@ export function TripsCalendar({
                 <span className="mt-0.5 h-[3px] w-5" aria-hidden="true" />
               )}
               {cell.inMonth && planCount > 0 ? (
-                <span className="mt-0.5 flex gap-0.5" aria-label={`${planCount} 条日程`}>
+                <span className="mt-0.5 flex gap-0.5" aria-label={tr('{n} 条日程', { n: planCount })}>
                   {bucket?.plans.slice(0, 3).map((plan) => (
                     <span
                       key={plan.id}
@@ -217,12 +221,12 @@ export function TripsCalendar({
             >
               <span className={cn('h-2 w-2 rounded-full', `cover-${trip.cover}`)} />
               {trip.title}
-              <span className="text-ink-3">{formatDateCn(trip.startDate)} 起</span>
+              <span className="text-ink-3">{tr('{date} 起', { date: formatDateCn(trip.startDate) })}</span>
             </span>
           ))}
         </div>
       ) : (
-        <p className="pt-1 text-center text-caption text-ink-3">这个月还没有安排</p>
+        <p className="pt-1 text-center text-caption text-ink-3">{tr('这个月还没有安排')}</p>
       )}
     </div>
   )

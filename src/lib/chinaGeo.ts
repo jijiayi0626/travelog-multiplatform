@@ -79,3 +79,45 @@ export function resolveProvinceName(value: string): string {
 export function provinceByShort(short: string): ProvinceShape | undefined {
   return PROVINCES.find((item) => item.short === short)
 }
+
+/** 省级轮廓在 SVG 坐标系中的包围盒（下钻视口定位用，带缓存） */
+export interface Bounds {
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+  width: number
+  height: number
+}
+
+const boundsCache = new Map<string, Bounds>()
+
+export function provinceBounds(short: string): Bounds | null {
+  const cached = boundsCache.get(short)
+  if (cached) return cached
+
+  const province = provinceByShort(short)
+  if (!province) return null
+
+  const numbers = province.path.match(/-?\d+(?:\.\d+)?/g)
+  if (!numbers || numbers.length < 6) return null
+
+  let minX = Number.POSITIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  for (let i = 0; i + 1 < numbers.length; i += 2) {
+    const x = Number(numbers[i])
+    const y = Number(numbers[i + 1])
+    if (x < minX) minX = x
+    if (x > maxX) maxX = x
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
+  }
+
+  const width = Math.max(maxX - minX, 1)
+  const height = Math.max(maxY - minY, 1)
+  const bounds: Bounds = { minX, minY, maxX, maxY, width, height }
+  boundsCache.set(short, bounds)
+  return bounds
+}

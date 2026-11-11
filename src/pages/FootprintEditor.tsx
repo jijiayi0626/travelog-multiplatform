@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Crosshair, MapPin } from '@phosphor-icons/react'
 import { saveFootprint } from '../lib/repo'
-import { useNav, useRefresh, useToast } from '../lib/app-context'
+import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import { todayStart } from '../lib/utils'
 import { EditorScreen, FormBlock } from '../components/EditorScreen'
 import { Field } from '../components/ui'
@@ -10,6 +10,7 @@ export function FootprintEditor() {
   const nav = useNav()
   const toast = useToast()
   const { bump } = useRefresh()
+  const { tr } = useI18n()
 
   const [placeName, setPlaceName] = useState('')
   const [city, setCity] = useState('')
@@ -22,7 +23,7 @@ export function FootprintEditor() {
 
   const locate = () => {
     if (!('geolocation' in navigator)) {
-      toast('当前环境不支持定位，可手动填写')
+      toast(tr('当前环境不支持定位，可手动填写'))
       return
     }
     setLocating(true)
@@ -31,11 +32,11 @@ export function FootprintEditor() {
         setLatitude(position.coords.latitude)
         setLongitude(position.coords.longitude)
         setLocating(false)
-        toast('已取到当前位置')
+        toast(tr('已取到当前位置'))
       },
       () => {
         setLocating(false)
-        toast('定位失败，可手动填写地点')
+        toast(tr('定位失败，可手动填写地点'))
       },
       { enableHighAccuracy: false, timeout: 8000, maximumAge: 60_000 },
     )
@@ -43,7 +44,7 @@ export function FootprintEditor() {
 
   const save = async () => {
     if (!placeName.trim()) {
-      setError('先填一个地点名称')
+      setError(tr('先填一个地点名称'))
       return
     }
     setError('')
@@ -61,7 +62,7 @@ export function FootprintEditor() {
         createdAt: 0,
       })
       bump()
-      toast('已记录足迹')
+      toast(tr('已记录足迹'))
       nav.back()
     } finally {
       setSaving(false)
@@ -72,28 +73,31 @@ export function FootprintEditor() {
 
   return (
     <EditorScreen
-      title="地点打卡"
+      title={tr('地点打卡')}
       onBack={() => nav.back()}
       onSave={save}
       saving={saving}
     >
-      <FormBlock title="地点">
-        <Field label="地点名称" error={error}>
+      <FormBlock title={tr('地点')}>
+        <Field label={tr('地点名称')} error={error}>
           <input
             className={error ? 'input border-danger' : 'input'}
             value={placeName}
-            placeholder="例如「函馆山」"
+            placeholder={tr('例如「函馆山」')}
             onChange={(event) => {
               setPlaceName(event.target.value)
               if (error) setError('')
             }}
           />
         </Field>
-        <Field label="城市" hint="填写城市名会自动归入省份，点亮足迹地图">
+        <Field
+          label={tr('城市')}
+          hint={tr('填写城市名会自动归入省份，点亮足迹地图')}
+        >
           <input
             className="input"
             value={city}
-            placeholder="例如「杭州」「大理」"
+            placeholder={tr('例如「杭州」「大理」')}
             onChange={(event) => setCity(event.target.value)}
             list="city-suggestions"
           />
@@ -105,17 +109,17 @@ export function FootprintEditor() {
             )}
           </datalist>
         </Field>
-        <Field label="备注">
+        <Field label={tr('备注')}>
           <input
             className="input"
             value={note}
-            placeholder="例如「夜景，风很大」"
+            placeholder={tr('例如「夜景，风很大」')}
             onChange={(event) => setNote(event.target.value)}
           />
         </Field>
       </FormBlock>
 
-      <FormBlock title="坐标" hint={hasCoord ? '已记录' : '可选'}>
+      <FormBlock title={tr('坐标')} hint={hasCoord ? tr('已记录') : tr('可选')}>
         <button
           type="button"
           onClick={locate}
@@ -131,12 +135,12 @@ export function FootprintEditor() {
           </span>
           <span className="min-w-0 flex-1">
             <span className="block text-body-sm font-medium text-ink">
-              {locating ? '定位中…' : '使用当前位置'}
+              {locating ? tr('定位中…') : tr('使用当前位置')}
             </span>
             <span className="mt-0.5 block text-note tabular-nums text-ink-3">
               {hasCoord
                 ? `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`
-                : '允许定位后可在地图中查看这个地点'}
+                : tr('允许定位后可在地图中查看这个地点')}
             </span>
           </span>
           <MapPin size={16} className="shrink-0 text-ink-3" />
@@ -150,7 +154,7 @@ export function FootprintEditor() {
             }}
             className="press self-start text-note text-ink-3 underline-offset-2 hover:text-danger hover:underline"
           >
-            清除坐标
+            {tr('清除坐标')}
           </button>
         ) : null}
       </FormBlock>
