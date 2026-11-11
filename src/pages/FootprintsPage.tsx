@@ -171,7 +171,9 @@ export function FootprintsPage() {
                     className="press chip px-2.5 py-1 text-note"
                   >
                     {visit.short}
-                    <span className="ml-0.5 tabular-nums text-ink-3">{visit.places.length}</span>
+                    <span className="ml-0.5 tabular-nums text-ink-3">
+                      {visit.cities.length > 0 ? `${visit.cities.length}市` : visit.places.length}
+                    </span>
                   </button>
                 ))}
             </div>
@@ -226,18 +228,56 @@ export function FootprintsPage() {
         title={selected ? `${selected.name} · ${selected.places.length} 个地点` : ''}
         onClose={() => setSelected(null)}
       >
-        <div className="space-y-2">
-          {selected?.places.map((footprint) => (
-            <FootprintRow
-              key={footprint.id}
-              footprint={footprint}
-              onOpenMap={() => openMap(footprint)}
-              onDelete={() => {
-                setSelected(null)
-                setPendingDelete(footprint)
-              }}
-            />
-          ))}
+        <div className="space-y-3">
+          {selected && selected.cities.length > 0
+            ? selected.cities.map((cityVisit) => (
+                <section key={cityVisit.city.name} className="rounded-2xl border border-line p-3">
+                  <header className="flex items-baseline justify-between gap-2">
+                    <p className="min-w-0 truncate text-body font-medium text-ink">
+                      {cityVisit.city.name}
+                    </p>
+                    <span className="shrink-0 text-caption text-ink-3">
+                      {cityVisit.places.length} 个地点
+                    </span>
+                  </header>
+                  {cityVisit.districts.size > 0 ? (
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {[...cityVisit.districts.entries()].map(([name, list]) => (
+                        <span
+                          key={name}
+                          className="rounded-full bg-paper-2 px-2 py-0.5 text-caption text-ink-2"
+                        >
+                          {name} · {list.length}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="mt-2 space-y-1.5">
+                    {cityVisit.places.map((footprint) => (
+                      <FootprintRow
+                        key={footprint.id}
+                        footprint={footprint}
+                        onOpenMap={() => openMap(footprint)}
+                        onDelete={() => {
+                          setSelected(null)
+                          setPendingDelete(footprint)
+                        }}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ))
+            : selected?.places.map((footprint) => (
+                <FootprintRow
+                  key={footprint.id}
+                  footprint={footprint}
+                  onOpenMap={() => openMap(footprint)}
+                  onDelete={() => {
+                    setSelected(null)
+                    setPendingDelete(footprint)
+                  }}
+                />
+              ))}
         </div>
       </Sheet>
 

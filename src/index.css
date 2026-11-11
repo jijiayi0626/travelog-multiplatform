@@ -29,9 +29,21 @@
   /* 对比度：paper 4.83 · surface 5.22 · paper-2 4.57，均 ≥ 4.5:1 */
   --color-ink-3: #666d78;
   --color-line: #e5e7eb;
+  /* primary 色阶（50–900）：hover / 按下 / 浅底 / 描边都从这里取 */
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-200: #bfdbfe;
+  --color-primary-300: #93c5fd;
+  --color-primary-400: #60a5fa;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+  --color-primary-800: #1e40af;
+  --color-primary-900: #1e3a8a;
+
   --color-accent: #2563eb;
   --color-accent-2: #1d4ed8;
-  --color-accent-soft: #eff4ff;
+  --color-accent-soft: #eff6ff;
   --color-danger: #dc2626;
   --color-warn: #d97706;
 
@@ -56,6 +68,17 @@ html[data-theme='dark'] {
   --color-ink-2: #b4b8c0;
   --color-ink-3: #8b9099;
   --color-line: #262a33;
+  --color-primary-50: #172554;
+  --color-primary-100: #1e3a8a;
+  --color-primary-200: #1e40af;
+  --color-primary-300: #2563eb;
+  --color-primary-400: #60a5fa;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #1d4ed8;
+  --color-primary-700: #1e40af;
+  --color-primary-800: #1e3a8a;
+  --color-primary-900: #172554;
+
   --color-accent: #60a5fa;
   --color-accent-2: #3b82f6;
   --color-accent-soft: #16233d;

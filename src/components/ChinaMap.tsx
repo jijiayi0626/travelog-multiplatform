@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { CHINA_HEIGHT, CHINA_WIDTH, PROVINCES } from '../lib/chinaGeo'
+import { SOUTH_SEA_BOX, SOUTH_SEA_PATH } from '../lib/chinaCities'
 import type { ProvinceVisit } from '../lib/province'
 import { cn } from '../lib/cn'
 
@@ -72,10 +73,39 @@ export function ChinaMap({
             </path>
           )
         })}
+        {/* 南海诸岛小图（与主图同一投影） */}
+        <g transform={`translate(${CHINA_WIDTH - 136} ${CHINA_HEIGHT - 208})`}>
+          <rect
+            width={128}
+            height={196}
+            rx={8}
+            fill="var(--color-surface)"
+            stroke="var(--color-line)"
+            strokeWidth={1}
+          />
+          <g transform={`translate(4 26) scale(${(SOUTH_SEA_BOX.width - 8) / SOUTH_SEA_BOX.width})`}>
+            <path
+              d={SOUTH_SEA_PATH}
+              fill="var(--color-paper-2)"
+              stroke="var(--color-ink-3)"
+              strokeWidth={0.8}
+              strokeLinejoin="round"
+            />
+          </g>
+          <text
+            x={12}
+            y={18}
+            fontSize={11}
+            fill="var(--color-ink-3)"
+            style={{ fontFamily: 'inherit' }}
+          >
+            南海诸岛
+          </text>
+        </g>
       </svg>
 
-      <div className="pointer-events-none absolute inset-x-3 bottom-3 flex items-end justify-between gap-3">
-        <div className="min-w-0 rounded-lg bg-surface/90 px-2 py-1 backdrop-blur-sm">
+      <div className="pointer-events-none absolute inset-x-3 bottom-3 flex items-end gap-2">
+        <div className="min-w-0 max-w-[60%] rounded-lg bg-surface/90 px-2 py-1 backdrop-blur-sm">
           <p className="truncate text-note text-ink">
             {activeProvince
               ? `${activeProvince.short}${activeVisit ? ` · ${activeVisit.places.length} 个地点` : ' · 还没去过'}`

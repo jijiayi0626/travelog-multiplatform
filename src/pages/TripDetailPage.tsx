@@ -39,12 +39,14 @@ import {
   planSummary,
   removeMember,
   saveChecklistItem,
+  savePlan,
   sumExpenseCny,
   togglePlan,
   CHECKLIST_TEMPLATES,
   PLAN_TEMPLATES,
 } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
+import { generatePlan } from '../lib/ai'
 import { useNav, useRefresh, useToast } from '../lib/app-context'
 import {
   CATEGORY_COLOR,
@@ -370,6 +372,7 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
                 startDate={trip.startDate}
                 endDate={trip.endDate}
                 dayCount={days}
+                destination={trip.destination || trip.title}
                 onAdd={(dayIndex) => nav.navigate({ name: 'planEditor', tripId, dayIndex })}
                 onOpen={(planId) => nav.navigate({ name: 'planEditor', tripId, planId })}
                 onToggle={async (plan, done) => {
@@ -389,6 +392,31 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
                   const added = await applyPlanTemplate(tripId, key, days)
                   bump()
                   toast(added > 0 ? `已排入 ${added} 条日程` : '模板内容已在日程里')
+                }}
+                onAIPlan={async (style) => {
+                  const items = await generatePlan({
+                    destination: trip.destination || trip.title,
+                    days: Math.max(days, 1),
+                    style,
+                    budget: trip.budget ? `¥${trip.budget}` : undefined,
+                  })
+                  for (const item of items) {
+                    await savePlan({
+                      id: '',
+                      tripId,
+                      dayIndex: item.dayIndex,
+                      time: item.time,
+                      title: item.title,
+                      place: item.place,
+                      kind: item.kind,
+                      note: item.note,
+                      done: false,
+                      order: Number.NaN,
+                      createdAt: 0,
+                    })
+                  }
+                  bump()
+                  toast(`AI 已排入 ${items.length} 条日程`)
                 }}
                 onCreateMoment={() => nav.navigate({ name: 'momentEditor', tripId })}
               />
@@ -564,12 +592,14 @@ function PlanTab({
   startDate,
   endDate,
   dayCount,
+  destination,
   onAdd,
   onOpen,
   onToggle,
   onMove,
   onDelete,
   onTemplate,
+  onAIPlan,
   onCreateMoment,
 }: {
   plans: Plan[]
@@ -582,9 +612,15 @@ function PlanTab({
   onMove: (planId: string, delta: number) => void
   onDelete: (plan: Plan) => void
   onTemplate: (key: string) => void
+  onAIPlan: (style: string) => Promise<void>
   onCreateMoment: (plan: Plan) => void
+  destination: string
 }) {
+  const toast = useToast()
   const [templateOpen, setTemplateOpen] = useState(false)
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiStyle, setAiStyle] = useState('轻松')
+  const [aiBusy, setAiBusy] = useState(false)
   const todayIndex = dayIndexOfDate(startDate)
   const progress = planSummary(plans)
   const next = nextPlanOf(plans, startDate, endDate)
@@ -740,6 +776,51 @@ function PlanTab({
           })}
         </div>
       )}
+
+      <Sheet open={aiOpen} title="让 AI 排一份行程" onClose={() => setAiOpen(false)}>
+        <div className="space-y-3">
+          <p className="text-note leading-5 text-ink-3">
+            根据目的地「{destination || '未填写'}」和 {dayCount} 天行程生成逐日安排，生成后仍可逐条修改。
+          </p>
+          <div className="space-y-1.5">
+            <span className="field-label">偏好</span>
+            <div className="flex flex-wrap gap-1.5">
+              {['轻松', '紧凑', '亲子', '美食', '摄影', '人文'].map((style) => (
+                <button
+                  key={style}
+                  type="button"
+                  onClick={() => setAiStyle(style)}
+                  className={cn('chip px-2.5 py-1 text-note', aiStyle === style && 'chip-active')}
+                >
+                  {style}
+                </button>
+              ))}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn-primary w-full"
+            disabled={aiBusy}
+            onClick={async () => {
+              setAiBusy(true)
+              try {
+                await onAIPlan(aiStyle)
+                setAiOpen(false)
+              } catch (error) {
+                toast(error instanceof Error ? error.message : '生成失败')
+              } finally {
+                setAiBusy(false)
+              }
+            }}
+          >
+            <Sparkle size={15} weight="fill" />
+            {aiBusy ? '生成中…' : '生成行程'}
+          </button>
+          <p className="text-caption leading-4 text-ink-3">
+            需要先在「我的 → 云同步」登录，并由服务端配置 Workers AI 或 OpenAI 密钥。
+          </p>
+        </div>
+      </Sheet>
 
       <Sheet open={templateOpen} title="套用日程模板" onClose={() => setTemplateOpen(false)}>
         <div className="space-y-2">

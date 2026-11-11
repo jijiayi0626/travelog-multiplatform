@@ -15,6 +15,13 @@ import { cn } from '../lib/cn'
 import { EditorScreen, FormBlock } from '../components/EditorScreen'
 import { ConfirmDialog, Field } from '../components/ui'
 import { PlanGlyph } from '../components/Icons'
+import { Bell } from '@phosphor-icons/react'
+import {
+  cancelPlanReminder,
+  ensureNotificationPermission,
+  getReminderPrefs,
+  schedulePlanReminder,
+} from '../lib/reminder'
 
 const QUICK_TIMES = ['08:00', '09:30', '12:00', '15:00', '18:30', '21:00']
 
@@ -44,6 +51,8 @@ export function PlanEditor({
   const [place, setPlace] = useState('')
   const [note, setNote] = useState('')
   const [done, setDone] = useState(false)
+  const [remind, setRemind] = useState(() => getReminderPrefs().enabled)
+  const [lead, setLead] = useState(() => getReminderPrefs().leadMinutes)
   const [error, setError] = useState('')
 
   const maxDay = Math.max(trip ? tripDayCount(trip.startDate, trip.endDate) : 0, 1)
@@ -83,7 +92,7 @@ export function PlanEditor({
     setError('')
     setSaving(true)
     try {
-      await savePlan({
+      const saved = await savePlan({
         id: original?.id ?? '',
         tripId,
         dayIndex: Math.min(Math.max(day, 1), 99),
@@ -96,6 +105,12 @@ export function PlanEditor({
         order: original?.order ?? Number.NaN,
         createdAt: original?.createdAt ?? 0,
       })
+      if (remind && trip) {
+        const allowed = await ensureNotificationPermission()
+        if (allowed) {
+          await schedulePlanReminder(saved, trip, lead)
+        }
+      }
       bump()
       toast(original ? '计划已更新' : '已加入日程')
       nav.back()
@@ -107,6 +122,7 @@ export function PlanEditor({
   const doDelete = async () => {
     if (!original) return
     await deletePlan(original.id)
+    await cancelPlanReminder(original.id)
     bump()
     toast('计划已删除')
     nav.back()
@@ -259,6 +275,52 @@ export function PlanEditor({
             onChange={(event) => setNote(event.target.value)}
           />
         </Field>
+      </FormBlock>
+
+      <FormBlock title="提醒">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="flex items-center gap-1.5 text-body text-ink">
+              <Bell size={14} className="text-ink-3" />
+              出发前提醒
+            </p>
+            <p className="mt-0.5 text-caption text-ink-3">
+              {trip && trip.startDate > 0
+                ? `按第 ${day} 天的 ${time || '设定时间'} 提前提醒`
+                : '先给旅程设置日期，提醒才有意义'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setRemind((value) => !value)}
+            aria-pressed={remind}
+            className={cn(
+              'press relative h-6 w-11 shrink-0 rounded-full transition-colors',
+              remind ? 'bg-accent' : 'bg-paper-2',
+            )}
+          >
+            <span
+              className={cn(
+                'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all',
+                remind ? 'left-[22px]' : 'left-0.5',
+              )}
+            />
+          </button>
+        </div>
+        {remind ? (
+          <div className="flex flex-wrap gap-1.5">
+            {[5, 15, 30, 60].map((minutes) => (
+              <button
+                key={minutes}
+                type="button"
+                onClick={() => setLead(minutes)}
+                className={cn('chip px-2.5 py-1 text-caption', lead === minutes && 'chip-active')}
+              >
+                提前 {minutes} 分钟
+              </button>
+            ))}
+          </div>
+        ) : null}
       </FormBlock>
 
       {original ? (

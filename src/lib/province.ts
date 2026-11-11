@@ -1,5 +1,11 @@
 import type { Footprint } from './types'
 import { PROVINCES, projectLngLat, type ProvinceShape } from './chinaGeo'
+import {
+  citiesOfProvince,
+  locateCity,
+  type CityPoint,
+  type DistrictPoint,
+} from './chinaCities'
 
 /* ---------------- path 解析（缓存） ---------------- */
 
@@ -166,11 +172,18 @@ export function provinceOfFootprint(footprint: Footprint): ProvinceShape | undef
 
 /* ---------------- 聚合 ---------------- */
 
+export interface CityVisit {
+  city: CityPoint
+  places: Footprint[]
+  districts: Map<string, Footprint[]>
+}
+
 export interface ProvinceVisit {
   short: string
   name: string
   province: ProvinceShape | undefined
   places: Footprint[]
+  cities: CityVisit[]
 }
 
 export function summarizeVisits(footprints: Footprint[]): {
@@ -185,16 +198,33 @@ export function summarizeVisits(footprints: Footprint[]): {
   for (const footprint of footprints) {
     const province = provinceOfFootprint(footprint)
     if (province) {
-      const existing = visited.get(province.short)
-      if (existing) {
-        existing.places.push(footprint)
-      } else {
-        visited.set(province.short, {
+      let entry = visited.get(province.short)
+      if (!entry) {
+        entry = {
           short: province.short,
           name: province.name,
           province,
-          places: [footprint],
-        })
+          places: [],
+          cities: [],
+        }
+        visited.set(province.short, entry)
+      }
+      entry.places.push(footprint)
+
+      const located = locateCityOf(footprint, province.short)
+      const locatedCity = located?.city
+      if (locatedCity) {
+        let cityVisit = entry.cities.find((item) => item.city.name === locatedCity.name)
+        if (!cityVisit) {
+          cityVisit = { city: locatedCity, places: [], districts: new Map() }
+          entry.cities.push(cityVisit)
+        }
+        cityVisit.places.push(footprint)
+        if (located.district) {
+          const bucket = cityVisit.districts.get(located.district.name)
+          if (bucket) bucket.push(footprint)
+          else cityVisit.districts.set(located.district.name, [footprint])
+        }
       }
       continue
     }
@@ -207,4 +237,27 @@ export function summarizeVisits(footprints: Footprint[]): {
   }
 
   return { visited, overseas, unknown }
+}
+
+/** 足迹 → 城市 / 区县（优先坐标，其次城市名） */
+export function locateCityOf(
+  footprint: Footprint,
+  provinceShort?: string,
+): { city?: CityPoint; district?: DistrictPoint; distanceKm?: number } | undefined {
+  const hit = locateCity(footprint.latitude, footprint.longitude, provinceShort)
+  if (hit) return hit
+
+  const key = (footprint.city || footprint.placeName || '').trim()
+  if (!key || !provinceShort) return undefined
+  const normalized = key.replace(/市$|区$|县$|镇$|街道$/g, '')
+  const pool = citiesOfProvince(provinceShort)
+  const city =
+    pool.find((item) => item.short === normalized) ??
+    pool.find((item) => item.name.startsWith(normalized)) ??
+    pool.find((item) => item.districts.some((d) => d.name.startsWith(normalized)))
+  if (!city) return undefined
+  const district = city.districts.find(
+    (item) => item.name === key || item.name.startsWith(normalized),
+  )
+  return { city, district }
 }

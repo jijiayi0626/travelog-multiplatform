@@ -18,6 +18,7 @@ import {
   toDateInputValue,
 } from '../lib/utils'
 import { cn } from '../lib/cn'
+import { guessCategory } from '../lib/ai'
 import { EditorScreen, FormBlock } from '../components/EditorScreen'
 import { ConfirmDialog, Field } from '../components/ui'
 import { CategoryGlyph } from '../components/Icons'
@@ -40,6 +41,8 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
   const [currency, setCurrency] = useState<Currency>('CNY')
   const [error, setError] = useState('')
   const [recent, setRecent] = useState<Expense[]>([])
+  const [categoryTouched, setCategoryTouched] = useState(Boolean(expenseId))
+  const [autoHint, setAutoHint] = useState('')
 
   useEffect(() => {
     let alive = true
@@ -190,6 +193,7 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
       </FormBlock>
 
       <FormBlock title="分类">
+        {autoHint ? <p className="text-caption text-accent">{autoHint}</p> : null}
         <div className="flex flex-wrap gap-2">
           {CATEGORY_ORDER.map((item) => {
             const active = item === category
@@ -197,7 +201,11 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
               <button
                 key={item}
                 type="button"
-                onClick={() => setCategory(item)}
+                onClick={() => {
+                setCategory(item)
+                setCategoryTouched(true)
+                setAutoHint('')
+              }}
                 className={cn(
                   'press inline-flex items-center gap-1.5 rounded-full border px-3 py-2 text-body-sm',
                   active ? 'border-transparent text-white' : 'border-line bg-surface text-ink-2',
@@ -228,6 +236,16 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
             maxLength={60}
             placeholder="例如「海鲜烧烤 · 两人」"
             onChange={(event) => setNote(event.target.value)}
+            onBlur={async (event) => {
+              const value = event.target.value.trim()
+              if (!value || categoryTouched) return
+              const parsed = Number.parseFloat(amountText || '0')
+              const hit = await guessCategory(value, parsed > 0 ? parsed : undefined)
+              if (hit) {
+                setCategory(hit)
+                setAutoHint(`AI 归类为「${CATEGORY_LABEL[hit]}」，点分类可改`)
+              }
+            }}
           />
         </Field>
       </FormBlock>

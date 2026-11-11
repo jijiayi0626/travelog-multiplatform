@@ -8,6 +8,8 @@ import {
   ToastContext,
 } from './lib/app-context'
 import { ensureReady } from './lib/repo'
+import { scheduleAutoSync } from './lib/sync-engine'
+import { startAutoCheckin } from './lib/autocheckin'
 import { AppShell, type RootKey } from './components/AppShell'
 import { SearchPalette } from './components/SearchPalette'
 import { InstallBanner } from './components/InstallBanner'
@@ -161,6 +163,10 @@ export default function App() {
     ensureReady()
       .then(() => setReady(true))
       .catch(() => setReady(true))
+    const stopCheckin = startAutoCheckin()
+    return () => {
+      stopCheckin()
+    }
   }, [])
 
   useEffect(() => {
@@ -174,7 +180,10 @@ export default function App() {
     }
   }, [])
 
-  const bump = useCallback(() => setTick((value) => value + 1), [])
+  const bump = useCallback(() => {
+    setTick((value) => value + 1)
+    scheduleAutoSync()
+  }, [])
   const openSearch = useCallback(() => setSearchOpen(true), [])
   const openShortcuts = useCallback(() => setShortcutsOpen(true), [])
 

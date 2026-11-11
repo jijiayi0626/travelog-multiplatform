@@ -16,7 +16,7 @@ import type {
   TripTemplate,
   TripView,
 } from './types'
-import { clearStore, deleteOne, getAll, getOne, putOne } from './db'
+import { clearStore, deleteOne, getAll, getOne, putOne, type StoreName } from './db'
 import {
   CATEGORY_ORDER,
   clockToMinutes,
@@ -30,6 +30,18 @@ import {
   uid,
 } from './utils'
 import { seedIfNeeded } from './seed'
+
+/* ---------------- 删除墓碑（同步用） ---------------- */
+
+async function tomb(kind: string, id: string): Promise<void> {
+  await putOne('tombstones', { id: `${kind}:${id}`, kind, value: id, deletedAt: Date.now() })
+}
+
+/** 本地删除统一入口：先写墓碑再真删，保证下一次同步能把删除推给服务端 */
+async function trackedDelete(store: StoreName, id: string): Promise<void> {
+  await tomb(store, id)
+  await deleteOne(store, id)
+}
 
 /* ---------------- 归一化（兼容旧版本数据） ---------------- */
 
@@ -138,13 +150,13 @@ export async function deleteTrip(id: string): Promise<void> {
     getAll<Plan>('plans'),
   ])
   await Promise.all([
-    deleteOne('trips', id),
-    ...moments.filter((item) => item.tripId === id).map((item) => deleteOne('moments', item.id)),
-    ...expenses.filter((item) => item.tripId === id).map((item) => deleteOne('expenses', item.id)),
-    ...checklist.filter((item) => item.tripId === id).map((item) => deleteOne('checklist', item.id)),
-    ...footprints.filter((item) => item.tripId === id).map((item) => deleteOne('footprints', item.id)),
-    ...members.filter((item) => item.tripId === id).map((item) => deleteOne('members', item.id)),
-    ...plans.filter((item) => item.tripId === id).map((item) => deleteOne('plans', item.id)),
+    trackedDelete('trips', id),
+    ...moments.filter((item) => item.tripId === id).map((item) => trackedDelete('moments', item.id)),
+    ...expenses.filter((item) => item.tripId === id).map((item) => trackedDelete('expenses', item.id)),
+    ...checklist.filter((item) => item.tripId === id).map((item) => trackedDelete('checklist', item.id)),
+    ...footprints.filter((item) => item.tripId === id).map((item) => trackedDelete('footprints', item.id)),
+    ...members.filter((item) => item.tripId === id).map((item) => trackedDelete('members', item.id)),
+    ...plans.filter((item) => item.tripId === id).map((item) => trackedDelete('plans', item.id)),
   ])
 }
 
@@ -205,7 +217,7 @@ export async function saveMoment(moment: Moment): Promise<Moment> {
 }
 
 export async function deleteMoment(id: string): Promise<void> {
-  await deleteOne('moments', id)
+  await trackedDelete('moments', id)
 }
 
 /* ---------------- 记账 ---------------- */
@@ -232,7 +244,7 @@ export async function saveExpense(expense: Expense): Promise<Expense> {
 }
 
 export async function deleteExpense(id: string): Promise<void> {
-  await deleteOne('expenses', id)
+  await trackedDelete('expenses', id)
 }
 
 export function sumExpense(expenses: Expense[]): number {
@@ -314,7 +326,7 @@ export async function savePlan(plan: Plan): Promise<Plan> {
 }
 
 export async function deletePlan(id: string): Promise<void> {
-  await deleteOne('plans', id)
+  await trackedDelete('plans', id)
 }
 
 export async function togglePlan(plan: Plan, done: boolean): Promise<void> {
@@ -505,7 +517,7 @@ export async function saveChecklistItem(item: ChecklistItem): Promise<ChecklistI
 }
 
 export async function deleteChecklistItem(id: string): Promise<void> {
-  await deleteOne('checklist', id)
+  await trackedDelete('checklist', id)
 }
 
 export const CHECKLIST_TEMPLATES: Array<{ key: string; label: string; items: string[] }> = [
@@ -548,7 +560,7 @@ export async function saveFootprint(item: Footprint): Promise<Footprint> {
 }
 
 export async function deleteFootprint(id: string): Promise<void> {
-  await deleteOne('footprints', id)
+  await trackedDelete('footprints', id)
 }
 
 /* ---------------- 旅伴 ---------------- */
@@ -577,7 +589,7 @@ export async function addMember(
 }
 
 export async function removeMember(id: string): Promise<void> {
-  await deleteOne('members', id)
+  await trackedDelete('members', id)
 }
 
 /* ---------------- 账号 ---------------- */
@@ -927,3 +939,62 @@ export async function resetAll(): Promise<void> {
 }
 
 export type { TripTemplate }
+/* ---------------- 云同步 ---------------- */
+
+export const SYNC_KINDS = ['trips', 'moments', 'expenses', 'checklist', 'footprints', 'members', 'plans'] as const
+export type SyncKind = (typeof SYNC_KINDS)[number]
+
+export interface SyncEntity {
+  kind: SyncKind
+  id: string
+  data: unknown
+  updatedAt: number
+  deleted?: boolean
+}
+
+/** 导出本次需要推送的全部实体（含墓碑） */
+export async function exportAllEntities(): Promise<SyncEntity[]> {
+  const out: SyncEntity[] = []
+  for (const kind of SYNC_KINDS) {
+    const rows = await getAll<{ id: string; updatedAt?: number; createdAt?: number }>(kind)
+    for (const row of rows) {
+      out.push({
+        kind,
+        id: row.id,
+        data: row,
+        updatedAt: row.updatedAt ?? row.createdAt ?? Date.now(),
+      })
+    }
+  }
+  const tombs = await getAll<{ id: string; kind: SyncKind; value: string; deletedAt: number }>('tombstones')
+  for (const item of tombs) {
+    if (!SYNC_KINDS.includes(item.kind)) continue
+    out.push({ kind: item.kind, id: item.value, data: null, updatedAt: item.deletedAt, deleted: true })
+  }
+  return out
+}
+
+/** 应用服务端下发的实体；删除不再写墓碑，避免被回推 */
+export async function applyRemoteEntities(
+  entities: SyncEntity[],
+): Promise<{ applied: number; removed: number }> {
+  let applied = 0
+  let removed = 0
+  for (const entity of entities) {
+    if (!SYNC_KINDS.includes(entity.kind)) continue
+    if (entity.deleted) {
+      await deleteOne(entity.kind, entity.id)
+      removed++
+      continue
+    }
+    if (entity.data && typeof entity.data === 'object') {
+      await putOne(entity.kind, entity.data as { id: string })
+      applied++
+    }
+  }
+  return { applied, removed }
+}
+
+export async function clearTombstones(): Promise<void> {
+  await clearStore('tombstones')
+}

@@ -6,6 +6,8 @@ import {
   CloudSlash,
   DownloadSimple,
   Images,
+  MapPinLine,
+  Sparkle,
   Moon,
   PaintBrush,
   PencilSimple,
@@ -18,6 +20,13 @@ import { useLoader } from '../lib/hooks'
 import { useNav, useRefresh, useToast } from '../lib/app-context'
 import { ACCENTS, type AccentName, currentTheme, getAccent, setAccent, setThemeMode } from '../lib/theme'
 import { downloadText, formatCny, readTextFile } from '../lib/utils'
+import { isSignedIn } from '../lib/cloud'
+import {
+  getAutoCheckinSettings,
+  setAutoCheckinSettings,
+  startAutoCheckin,
+  stopAutoCheckin,
+} from '../lib/autocheckin'
 import { cn } from '../lib/cn'
 import { Avatar, ConfirmDialog, Field, Sheet, StatTile } from '../components/ui'
 
@@ -52,11 +61,39 @@ export function ProfilePage() {
   const [editing, setEditing] = useState(false)
   const [nickname, setNickname] = useState('')
   const [confirmReset, setConfirmReset] = useState(false)
+  const [autoCheckin, setAutoCheckin] = useState(() => getAutoCheckinSettings())
+  const signedIn = isSignedIn()
   const [importing, setImporting] = useState(false)
 
   useEffect(() => {
     if (data.profile) setNickname(data.profile.nickname)
   }, [data.profile])
+
+  const toggleAutoCheckin = () => {
+    const next = setAutoCheckinSettings({ enabled: !autoCheckin.enabled })
+    setAutoCheckin(next)
+    if (next.enabled) {
+      startAutoCheckin((event) => {
+        if (event.type === 'checked') {
+          toast(`已在「${event.place ?? '这里'}」自动打卡`)
+          bump()
+        } else if (event.type === 'error') {
+          toast(event.message ?? '定位失败')
+        }
+      })
+      toast('已开启自动打卡，请保持定位权限')
+    } else {
+      stopAutoCheckin()
+      toast('已关闭自动打卡')
+    }
+  }
+
+  const cycleRadius = () => {
+    const order = [100, 200, 500]
+    const index = order.indexOf(autoCheckin.radius)
+    const next = setAutoCheckinSettings({ radius: order[(index + 1) % order.length] })
+    setAutoCheckin(next)
+  }
 
   const toggleTheme = () => {
     const next = theme === 'dark' ? 'light' : 'dark'
@@ -198,6 +235,48 @@ export function ProfilePage() {
           icon={<CloudSlash size={17} />}
           title="云同步"
           value={data.stats.pendingSync > 0 ? `${data.stats.pendingSync} 条待同步` : '未连接云端'}
+          onClick={() => nav.navigate({ name: 'sync' })}
+        />
+        <div className="flex w-full items-center gap-3 border-b border-line px-4 py-3.5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-ink-2">
+            <MapPinLine size={17} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-body text-ink">自动打卡</p>
+            <p className="text-caption text-ink-3">
+              {autoCheckin.enabled ? `已开启 · 半径 ${autoCheckin.radius}m（点右侧切换）` : '进入常去地点附近自动补足迹'}
+            </p>
+          </div>
+          {autoCheckin.enabled ? (
+            <button
+              type="button"
+              onClick={cycleRadius}
+              className="press shrink-0 rounded-full border border-line px-2 py-0.5 text-caption text-ink-2"
+            >
+              {autoCheckin.radius}m
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={toggleAutoCheckin}
+            aria-pressed={autoCheckin.enabled}
+            className={cn(
+              'press relative h-6 w-11 shrink-0 rounded-full transition-colors',
+              autoCheckin.enabled ? 'bg-accent' : 'bg-paper-2',
+            )}
+          >
+            <span
+              className={cn(
+                'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all',
+                autoCheckin.enabled ? 'left-[22px]' : 'left-0.5',
+              )}
+            />
+          </button>
+        </div>
+        <SettingRow
+          icon={<Sparkle size={17} />}
+          title="AI 助手"
+          value={signedIn ? '已就绪' : '需登录云同步'}
           onClick={() => nav.navigate({ name: 'sync' })}
         />
         <SettingRow

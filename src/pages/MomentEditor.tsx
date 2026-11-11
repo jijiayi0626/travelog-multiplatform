@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { ImageSquare, Plus, Trash } from '@phosphor-icons/react'
+import { ImageSquare, Plus, Sparkle, Trash } from '@phosphor-icons/react'
 import type { Moment, Photo, Trip } from '../lib/types'
 import { deleteMoment, getTrip, listMoments, saveMoment } from '../lib/repo'
 import { useNav, useRefresh, useToast } from '../lib/app-context'
 import { compressImage, dayIndexInTrip, uid } from '../lib/utils'
+import { polishMoment } from '../lib/ai'
+import { readFileGps } from '../lib/exif'
+import { locateProvince } from '../lib/province'
+import { locateCity } from '../lib/chinaCities'
 import { cn } from '../lib/cn'
 import { EditorScreen, FormBlock } from '../components/EditorScreen'
 import { ConfirmDialog, Field } from '../components/ui'
@@ -26,6 +30,9 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
   const [trip, setTrip] = useState<Trip | undefined>(undefined)
 
   const [content, setContent] = useState('')
+  const [previousContent, setPreviousContent] = useState<string | null>(null)
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null)
+  const [polishing, setPolishing] = useState(false)
   const [locationName, setLocationName] = useState('')
   const [photos, setPhotos] = useState<Photo[]>([])
   const [dayIndex, setDayIndex] = useState(1)
@@ -47,6 +54,9 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
           setOriginal(target)
           setContent(target.content)
           setLocationName(target.locationName)
+          if (target.latitude !== 0 || target.longitude !== 0) {
+            setCoords({ lat: target.latitude, lng: target.longitude })
+          }
           setPhotos(target.photos ?? [])
           setDayIndex(target.dayIndex || 1)
           setTags(target.tags ?? [])
@@ -67,17 +77,55 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
     setUploading(true)
     try {
       const next = [...photos]
+      let gpsHit: { lat: number; lng: number } | null = null
       for (const file of Array.from(files)) {
         if (next.length >= MAX_PHOTOS) break
+        if (!coords && !gpsHit) {
+          const gps = await readFileGps(file)
+          if (gps) gpsHit = { lat: gps.latitude, lng: gps.longitude }
+        }
         const src = await compressImage(file)
         next.push({ id: uid(), src })
       }
       setPhotos(next)
+
+      if (gpsHit) {
+        setCoords(gpsHit)
+        if (!locationName.trim()) {
+          const province = locateProvince(gpsHit.lat, gpsHit.lng)
+          const located = locateCity(gpsHit.lat, gpsHit.lng, province?.short)
+          if (located?.city) setLocationName(located.city.short)
+        }
+        toast('已从照片读取拍摄位置')
+      }
     } catch {
       toast('图片处理失败，换一张试试')
     } finally {
       setUploading(false)
       if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  const polish = async () => {
+    if (!content.trim()) {
+      toast('先写几句再润色')
+      return
+    }
+    setPolishing(true)
+    try {
+      const before = content
+      const text = await polishMoment(content, {
+        trip: trip?.title,
+        location: locationName,
+        date: original ? undefined : undefined,
+      })
+      setPreviousContent(before)
+      setContent(text)
+      toast('已润色，可撤销')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '润色失败')
+    } finally {
+      setPolishing(false)
     }
   }
 
@@ -95,8 +143,8 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
         dayIndex,
         content: content.trim(),
         locationName: locationName.trim(),
-        latitude: original?.latitude ?? 0,
-        longitude: original?.longitude ?? 0,
+        latitude: coords?.lat ?? original?.latitude ?? 0,
+        longitude: coords?.lng ?? original?.longitude ?? 0,
         createdAt: original?.createdAt ?? 0,
         updatedAt: 0,
         syncState: 1,
@@ -135,7 +183,34 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
       </div>
 
       <FormBlock title="这一刻">
-        <Field label="文字" error={error}>
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className={cn('field-label', error && 'text-danger')}>{error || '文字'}</span>
+            <span className="flex items-center gap-2">
+              {previousContent !== null ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setContent(previousContent)
+                    setPreviousContent(null)
+                    toast('已还原')
+                  }}
+                  className="press text-caption text-ink-3 hover:text-ink"
+                >
+                  撤销
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={polish}
+                disabled={polishing || !content.trim()}
+                className="press inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-caption text-ink-2 disabled:opacity-40 hover:text-accent"
+              >
+                <Sparkle size={11} weight="fill" />
+                {polishing ? '润色中…' : 'AI 润色'}
+              </button>
+            </span>
+          </div>
           <textarea
             className={error ? 'input-area border-danger' : 'input-area'}
             rows={6}
@@ -146,7 +221,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
               if (error) setError('')
             }}
           />
-        </Field>
+        </div>
         <Field label="地点" hint="会显示在记录上方，可用于之后整理足迹">
           <input
             className="input"

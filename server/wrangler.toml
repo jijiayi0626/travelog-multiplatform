@@ -1,0 +1,26 @@
+name = "travelog-api"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# 首次部署：
+#   wrangler d1 create travelog
+# 把返回的 database_id 填到下面
+[[d1_databases]]
+binding = "DB"
+database_name = "travelog"
+database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
+
+# Workers AI（可选）：删除这段则走 OPENAI_API_KEY
+[ai]
+binding = "AI"
+
+[vars]
+# 允许的前端来源，部署时改成你的域名，或保持 * 便于调试
+CORS_ORIGIN = "*"
+# Workers AI 默认模型
+AI_MODEL = "@cf/meta/llama-3.1-8b-instruct"
+
+# 如果要接 OpenAI 兼容接口：
+#   wrangler secret put OPENAI_API_KEY
+#   wrangler secret put OPENAI_BASE_URL   （默认 https://api.openai.com/v1）
+#   wrangler secret put OPENAI_MODEL      （默认 gpt-4o-mini）

@@ -1,36 +1,138 @@
-import { ArrowLeft, CloudSlash, Link, ShieldCheck } from '@phosphor-icons/react'
-import { useLoader } from '../lib/hooks'
-import { stats } from '../lib/repo'
+import { useState } from 'react'
+import {
+  ArrowLeft,
+  CheckCircle,
+  CloudCheck,
+  CloudSlash,
+  Copy,
+  Key,
+  Plugs,
+  SignIn,
+  SignOut,
+  ArrowsClockwise,
+} from '@phosphor-icons/react'
 import { useNav, useToast } from '../lib/app-context'
-import { IconButton } from '../components/ui'
+import {
+  checkHealth,
+  clearCloudConfig,
+  getCloudConfig,
+  loginCloud,
+  registerCloud,
+  saveCloudConfig,
+  type HealthInfo,
+} from '../lib/cloud'
+import { runSync } from '../lib/sync-engine'
+import { copyText, relativeTime } from '../lib/utils'
+import { cn } from '../lib/cn'
+import { Field, IconButton } from '../components/ui'
 
 const ENDPOINTS = [
-  { method: 'POST', path: '/v1/auth/login', note: '换取 JWT' },
-  { method: 'GET', path: '/v1/sync/pull?cursor=', note: '增量拉取' },
-  { method: 'POST', path: '/v1/sync/push', note: '增量推送' },
-  { method: 'POST', path: '/v1/media', note: '图片上传' },
+  { method: 'POST', path: '/api/auth/register', note: '创建同步账号' },
+  { method: 'POST', path: '/api/auth/login', note: '用同步码登录' },
+  { method: 'GET', path: '/api/sync/pull', note: '游标增量拉取' },
+  { method: 'POST', path: '/api/sync/push', note: 'LWW 增量推送' },
+  { method: 'POST', path: '/api/ai/complete', note: 'AI 调用代理' },
+  { method: 'GET', path: '/api/weather', note: '天气代理' },
 ]
 
 export function SyncPage() {
   const nav = useNav()
   const toast = useToast()
-  const { data } = useLoader(
-    () => stats(),
-    {
-      tripCount: 0,
-      momentCount: 0,
-      footprintCount: 0,
-      expenseCount: 0,
-      cityCount: 0,
-      pendingSync: 0,
-      totalCny: 0,
-      totalDays: 0,
-      photoCount: 0,
-      planCount: 0,
-      planDoneCount: 0,
-    },
-    'sync-stats',
-  )
+
+  const [config, setConfig] = useState(() => getCloudConfig())
+  const [baseUrl, setBaseUrl] = useState(config.baseUrl)
+  const [nickname, setNickname] = useState('')
+  const [code, setCode] = useState('')
+  const [health, setHealth] = useState<HealthInfo | null>(null)
+  const [busy, setBusy] = useState<'health' | 'register' | 'login' | 'sync' | null>(null)
+  const [result, setResult] = useState('')
+
+  const signedIn = Boolean(config.token)
+
+  const saveBaseUrl = () => {
+    const next = saveCloudConfig({ baseUrl: baseUrl.trim() })
+    setConfig(next)
+    setHealth(null)
+    toast('服务器地址已保存')
+  }
+
+  const testConnection = async () => {
+    setBusy('health')
+    try {
+      saveCloudConfig({ baseUrl: baseUrl.trim() })
+      const info = await checkHealth()
+      setHealth(info)
+      toast('连接正常')
+    } catch (error) {
+      setHealth(null)
+      toast(error instanceof Error ? error.message : '连接失败')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const doRegister = async () => {
+    if (!nickname.trim()) {
+      toast('先填一个昵称')
+      return
+    }
+    setBusy('register')
+    try {
+      saveCloudConfig({ baseUrl: baseUrl.trim() })
+      const auth = await registerCloud(nickname.trim())
+      setConfig(getCloudConfig())
+      setResult(`同步码：${auth.syncCode}`)
+      toast('账号已创建，请记下同步码')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '注册失败')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const doLogin = async () => {
+    if (!code.trim()) {
+      toast('请输入同步码')
+      return
+    }
+    setBusy('login')
+    try {
+      saveCloudConfig({ baseUrl: baseUrl.trim() })
+      await loginCloud(code.trim())
+      setConfig(getCloudConfig())
+      toast('登录成功，可以同步了')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '登录失败')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const doSync = async () => {
+    setBusy('sync')
+    try {
+      const sync = await runSync()
+      setConfig(getCloudConfig())
+      setResult(`推送 ${sync.pushed} 条 · 拉取 ${sync.pulled} 条 · 删除 ${sync.removed} 条`)
+      toast('同步完成')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '同步失败')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const doLogout = () => {
+    clearCloudConfig()
+    setConfig(getCloudConfig())
+    setResult('')
+    toast('已退出云同步')
+  }
+
+  const toggleAuto = () => {
+    const next = saveCloudConfig({ autoSync: !config.autoSync })
+    setConfig(next)
+  }
 
   return (
     <div className="pt-3">
@@ -41,16 +143,25 @@ export function SyncPage() {
         <span className="text-note text-ink-3">我的 / 云同步</span>
       </div>
 
-      <div className="mx-auto mt-4 w-full max-w-[640px] space-y-4">
+      <div className="mx-auto mt-4 w-full max-w-[640px] space-y-4 pb-6">
         <section className="card p-5">
           <div className="flex items-start gap-3">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-paper-2 text-ink-2">
-              <CloudSlash size={20} />
+            <span
+              className={cn(
+                'flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl',
+                signedIn ? 'bg-accent-soft text-accent' : 'bg-paper-2 text-ink-2',
+              )}
+            >
+              {signedIn ? <CloudCheck size={20} /> : <CloudSlash size={20} />}
             </span>
             <div className="min-w-0 flex-1">
-              <h1 className="text-title font-semibold tracking-tight text-ink">未连接云端</h1>
+              <h1 className="text-title font-semibold tracking-tight text-ink">
+                {signedIn ? '已连接云端' : '未连接云端'}
+              </h1>
               <p className="mt-1 text-note leading-5 text-ink-3">
-                当前所有数据都保存在这台设备。接入后端后，同一段旅程可以在手机、平板和网页之间同步。
+                {signedIn
+                  ? '多台设备可以共用同一个同步码，数据按 updatedAt 较新者为准合并。'
+                  : '所有数据都保存在这台设备。登录云同步后，手机、平板和网页之间可以互相同步。'}
               </p>
             </div>
           </div>
@@ -58,36 +169,173 @@ export function SyncPage() {
           <dl className="mt-4 space-y-2.5 border-t border-line pt-3.5 text-body-sm">
             <div className="flex items-center justify-between">
               <dt className="text-ink-3">状态</dt>
-              <dd className="text-ink">仅本地</dd>
+              <dd className={cn('font-medium', signedIn ? 'text-accent' : 'text-ink')}>
+                {signedIn ? '已登录' : '仅本地'}
+              </dd>
             </div>
-            <div className="flex items-center justify-between">
-              <dt className="text-ink-3">待同步改动</dt>
-              <dd className="tabular-nums text-ink">{data.pendingSync} 条</dd>
-            </div>
+            {signedIn ? (
+              <div className="flex items-center justify-between gap-3">
+                <dt className="shrink-0 text-ink-3">同步码</dt>
+                <dd className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate font-mono text-body tracking-[0.16em] text-ink">
+                    {config.syncCode}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="复制同步码"
+                    onClick={async () => {
+                      const ok = await copyText(config.syncCode)
+                      toast(ok ? '同步码已复制' : '复制失败')
+                    }}
+                    className="press shrink-0 text-ink-3 hover:text-ink"
+                  >
+                    <Copy size={13} />
+                  </button>
+                </dd>
+              </div>
+            ) : null}
             <div className="flex items-center justify-between">
               <dt className="text-ink-3">上次同步</dt>
-              <dd className="text-ink">从未</dd>
+              <dd className="text-ink">
+                {config.lastSyncAt > 0 ? relativeTime(config.lastSyncAt) : '从未'}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between">
+              <dt className="text-ink-3">自动同步</dt>
+              <dd>
+                <button
+                  type="button"
+                  onClick={toggleAuto}
+                  className={cn(
+                    'press relative h-6 w-11 rounded-full transition-colors',
+                    config.autoSync ? 'bg-accent' : 'bg-paper-2',
+                  )}
+                  aria-pressed={config.autoSync}
+                >
+                  <span
+                    className={cn(
+                      'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all',
+                      config.autoSync ? 'left-[22px]' : 'left-0.5',
+                    )}
+                  />
+                </button>
+              </dd>
             </div>
           </dl>
 
-          <button
-            type="button"
-            className="btn-primary mt-4 w-full"
-            onClick={() => toast('本地模式暂无云端可同步')}
-          >
-            立即同步
-          </button>
+          {result ? (
+            <p className="mt-3 flex items-start gap-1.5 rounded-xl bg-accent-soft/70 px-3 py-2 text-note leading-5 text-accent">
+              <CheckCircle size={14} className="mt-0.5 shrink-0" weight="fill" />
+              <span className="min-w-0 break-all">{result}</span>
+            </p>
+          ) : null}
+
+          {signedIn ? (
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                className="btn-primary flex-1"
+                onClick={doSync}
+                disabled={busy === 'sync'}
+              >
+                <ArrowsClockwise size={16} className={busy === 'sync' ? 'animate-spin' : undefined} />
+                {busy === 'sync' ? '同步中…' : '立即同步'}
+              </button>
+              <button type="button" className="btn-ghost" onClick={doLogout}>
+                <SignOut size={15} />
+                退出
+              </button>
+            </div>
+          ) : null}
         </section>
 
-        <section className="card p-5">
+        <section className="card space-y-3 p-5">
           <h2 className="flex items-center gap-1.5 text-body-sm font-semibold tracking-tight text-ink">
-            <Link size={15} />
-            同步接口契约
+            <Plugs size={15} />
+            服务器
           </h2>
-          <p className="mt-1.5 text-note leading-5 text-ink-3">
-            客户端通过 Repository 与 SyncService 两个抽象访问数据。后端实现同一组接口后，替换注入点即可，页面无需改动。
-          </p>
-          <ul className="mt-3 divide-y divide-line">
+          <Field label="API 地址" hint="留空则使用当前站点同源的 /api">
+            <input
+              className="input"
+              value={baseUrl}
+              placeholder="https://travelog-api.your-name.workers.dev"
+              onChange={(event) => setBaseUrl(event.target.value)}
+              onBlur={saveBaseUrl}
+            />
+          </Field>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="btn-ghost h-9 px-3 text-body-sm"
+              onClick={testConnection}
+              disabled={busy === 'health'}
+            >
+              {busy === 'health' ? '测试中…' : '测试连接'}
+            </button>
+            {health ? (
+              <span className="inline-flex items-center gap-1.5 text-caption text-accent">
+                <CheckCircle size={13} weight="fill" />
+                服务正常{health.ai ? ' · AI 可用' : ' · AI 未配置'}
+              </span>
+            ) : null}
+          </div>
+        </section>
+
+        {!signedIn ? (
+          <section className="card space-y-4 p-5">
+            <h2 className="flex items-center gap-1.5 text-body-sm font-semibold tracking-tight text-ink">
+              <Key size={15} />
+              账号
+            </h2>
+
+            <div className="space-y-2 rounded-2xl border border-line p-3">
+              <p className="text-note text-ink-3">第一次用：创建一个同步账号</p>
+              <div className="flex gap-2">
+                <input
+                  className="input"
+                  value={nickname}
+                  placeholder="昵称"
+                  maxLength={24}
+                  onChange={(event) => setNickname(event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn-primary h-[46px] shrink-0 px-4"
+                  onClick={doRegister}
+                  disabled={busy === 'register'}
+                >
+                  {busy === 'register' ? '创建中…' : '创建'}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2 rounded-2xl border border-line p-3">
+              <p className="text-note text-ink-3">已有账号：输入 8 位同步码</p>
+              <div className="flex gap-2">
+                <input
+                  className="input font-mono tracking-[0.2em] uppercase"
+                  value={code}
+                  placeholder="ABCD2345"
+                  maxLength={8}
+                  onChange={(event) => setCode(event.target.value.toUpperCase())}
+                />
+                <button
+                  type="button"
+                  className="btn-ghost h-[46px] shrink-0 px-4"
+                  onClick={doLogin}
+                  disabled={busy === 'login'}
+                >
+                  <SignIn size={15} />
+                  登录
+                </button>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        <section className="card p-5">
+          <h2 className="text-body-sm font-semibold tracking-tight text-ink">接口</h2>
+          <ul className="mt-2 divide-y divide-line">
             {ENDPOINTS.map((item) => (
               <li key={item.path} className="flex items-center gap-2.5 py-2.5 text-note">
                 <span className="w-[38px] shrink-0 font-mono text-caption text-accent">{item.method}</span>
@@ -99,12 +347,9 @@ export function SyncPage() {
         </section>
 
         <section className="rounded-2xl border border-line bg-surface p-4">
-          <p className="flex items-center gap-1.5 text-note font-medium text-ink">
-            <ShieldCheck size={15} className="text-accent" />
-            本地优先
-          </p>
-          <p className="mt-1.5 text-note leading-4 text-ink-3">
-            读写先落本地，网络失败不影响记录；同步以 updatedAt 较新者为准，删除通过墓碑记录避免回滚。
+          <p className="text-note leading-4 text-ink-3">
+            同步在本地优先的前提下工作：写入先落本机，联网后自动推送。冲突按 updatedAt 较新者胜出，
+            删除会以墓碑记录推送，不会在下次拉取时被复活。
           </p>
         </section>
       </div>
