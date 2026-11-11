@@ -112,6 +112,8 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
       bump()
       toast(tr('账目已保存'))
       nav.back()
+    } catch (error) {
+      toast(error instanceof Error ? error.message : tr('保存失败，请重试'))
     } finally {
       setSaving(false)
     }

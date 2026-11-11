@@ -3,6 +3,7 @@ import { Crosshair, MapPin } from '@phosphor-icons/react'
 import { saveFootprint } from '../lib/repo'
 import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import { todayStart } from '../lib/utils'
+import { getBestFix, isNative } from '../lib/native'
 import { EditorScreen, FormBlock } from '../components/EditorScreen'
 import { Field } from '../components/ui'
 
@@ -21,12 +22,28 @@ export function FootprintEditor() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  const locate = () => {
+  const locate = async () => {
+    setLocating(true)
+
+    // App 内优先走原生定位：不依赖 Google Play 服务，且会自动降级到网络定位
+    if (isNative()) {
+      const fix = await getBestFix()
+      setLocating(false)
+      if (fix) {
+        setLatitude(fix.latitude)
+        setLongitude(fix.longitude)
+        toast(tr('已取到当前位置'))
+      } else {
+        toast(tr('定位失败，可手动填写地点'))
+      }
+      return
+    }
+
     if (!('geolocation' in navigator)) {
+      setLocating(false)
       toast(tr('当前环境不支持定位，可手动填写'))
       return
     }
-    setLocating(true)
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setLatitude(position.coords.latitude)
@@ -38,7 +55,7 @@ export function FootprintEditor() {
         setLocating(false)
         toast(tr('定位失败，可手动填写地点'))
       },
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 60_000 },
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 60_000 },
     )
   }
 
@@ -64,6 +81,8 @@ export function FootprintEditor() {
       bump()
       toast(tr('已记录足迹'))
       nav.back()
+    } catch (error) {
+      toast(error instanceof Error ? error.message : tr('保存失败，请重试'))
     } finally {
       setSaving(false)
     }

@@ -114,6 +114,8 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
       } else {
         nav.navigate({ name: 'trip', id: saved.id, tab: 'plan' })
       }
+    } catch (error) {
+      toast(error instanceof Error ? error.message : tr('保存失败，请重试'))
     } finally {
       setSaving(false)
     }

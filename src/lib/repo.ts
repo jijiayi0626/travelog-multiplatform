@@ -985,12 +985,20 @@ export async function applyRemoteEntities(
   let removed = 0
   for (const entity of entities) {
     if (!SYNC_KINDS.includes(entity.kind)) continue
+
+    // 本地优先：本地更新时间更新时不接受远程版本，避免刚编辑/AI 生成的内容被旧数据覆盖
+    const local = await getOne<{ updatedAt?: number }>(entity.kind, entity.id)
+    const localAt = local?.updatedAt ?? 0
+
     if (entity.deleted) {
-      await deleteOne(entity.kind, entity.id)
-      removed++
+      if (!local || localAt <= entity.updatedAt) {
+        await deleteOne(entity.kind, entity.id)
+        removed++
+      }
       continue
     }
     if (entity.data && typeof entity.data === 'object') {
+      if (local && localAt > entity.updatedAt) continue
       await putOne(entity.kind, entity.data as { id: string })
       applied++
     }

@@ -1562,10 +1562,21 @@ function MembersTab({
       <div className="rounded-2xl border border-line bg-surface p-3.5">
         <p className="flex items-center gap-2 text-note font-medium text-ink">
           <Avatar name={tr('云端')} size={22} />
-          {tr('多人同步')}
+          {tr('多人共享这段旅程')}
         </p>
         <p className="mt-1.5 text-note leading-4 text-ink-3">
-          {tr('当前为本地档案，成员与邀请码保存在本机。接入后端后，旅伴可通过邀请码加入并实时同步。')}
+          {tr('把这串邀请码发给旅伴，让对方在「我的旅行」右上角的人形图标里输入，加入后两端自动同步同一份旅程、日程、图文与账本。')}
+        </p>
+        <button
+          type="button"
+          onClick={onCopy}
+          className="btn-ghost mt-2.5 w-full"
+        >
+          <Copy size={14} />
+          {tr('复制邀请码 {code}', { code: inviteCode })}
+        </button>
+        <p className="mt-1.5 text-caption leading-4 text-ink-3">
+          {tr('未登录云同步时邀请码只在本地，登录后才会真正同步给对方。')}
         </p>
       </div>
     </div>

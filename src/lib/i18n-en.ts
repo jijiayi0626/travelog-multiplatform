@@ -656,4 +656,11 @@ export const EN_TEXT: Record<string, string> = {
   '加入中…': 'Joining…',
   加入旅程: 'Join trip',
   '不想共享时，可以随时在旅程里退出。': 'You can leave the shared trip at any time.',
+  '保存失败，请重试': 'Save failed — please try again',
+  多人共享这段旅程: 'Share this trip',
+  '把这串邀请码发给旅伴，让对方在「我的旅行」右上角的人形图标里输入，加入后两端自动同步同一份旅程、日程、图文与账本。':
+    'Send this code to your companion. They enter it via the people icon on the Trips page, and both sides then sync the same trip, itinerary, entries and expenses.',
+  '复制邀请码 {code}': 'Copy code {code}',
+  '未登录云同步时邀请码只在本地，登录后才会真正同步给对方。':
+    'Without cloud sync the code only lives on this device; sign in to actually share it.',
 }
