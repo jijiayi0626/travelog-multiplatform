@@ -2,6 +2,21 @@
 
 本文件用于生成 GitHub Release 说明：每个版本一个 `## [x.y.z]` 段落，发布时自动提取。
 
+## [1.7.3]
+
+### 修复
+
+- **构建失败：keystore 路径被重复拼接**
+  报错：`.../android/app/app/travelog-release.keystore which doesn't exist`。
+  原因是 workflow 里 `working-directory: android`，而 AGP 会再按 module 目录（`app/`）解析相对路径，
+  于是 `app/travelog-release.keystore` 变成了 `android/app/app/...`。
+  已改为绝对路径 `$GITHUB_WORKSPACE/android/app/travelog-release.keystore`。
+
+本版包含 1.7.1 / 1.7.2 的全部内容：
+
+- 旅伴邀请码（trip 级共享，双端操作同一份旅程）
+- 固定 APK 签名，可直接覆盖升级
+
 ## [1.7.2]
 
 ### 修复
