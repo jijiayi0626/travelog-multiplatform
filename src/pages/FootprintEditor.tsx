@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Crosshair, MapPin } from '@phosphor-icons/react'
 import { saveFootprint } from '../lib/repo'
 import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
@@ -21,6 +21,8 @@ export function FootprintEditor() {
   const [locating, setLocating] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  // 输入法下 state 可能滞后，保存时以 DOM 值为准
+  const placeRef = useRef<HTMLInputElement>(null)
 
   const locate = async () => {
     setLocating(true)
@@ -60,7 +62,9 @@ export function FootprintEditor() {
   }
 
   const save = async () => {
-    if (!placeName.trim()) {
+    // 以输入框实际值为准：部分输入法下 React state 会滞后
+    const placeValue = (placeRef.current?.value ?? placeName).trim()
+    if (!placeValue) {
       setError(tr('先填一个地点名称'))
       return
     }
@@ -70,7 +74,7 @@ export function FootprintEditor() {
       await saveFootprint({
         id: '',
         tripId: '',
-        placeName: placeName.trim(),
+        placeName: placeValue,
         city: city.trim(),
         latitude,
         longitude,
@@ -100,6 +104,7 @@ export function FootprintEditor() {
       <FormBlock title={tr('地点')}>
         <Field label={tr('地点名称')} error={error}>
           <input
+            ref={placeRef}
             className={error ? 'input border-danger' : 'input'}
             value={placeName}
             placeholder={tr('例如「函馆山」')}

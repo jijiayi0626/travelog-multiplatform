@@ -40,6 +40,9 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
   const [tags, setTags] = useState<string[]>([])
   const [customTag, setCustomTag] = useState('')
   const [error, setError] = useState('')
+  // 输入法下 state 可能滞后，保存时以 DOM 值为准
+  const contentRef = useRef<HTMLTextAreaElement>(null)
+  const locationRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     let alive = true
@@ -131,7 +134,10 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
   }
 
   const save = async () => {
-    if (!content.trim() && photos.length === 0) {
+    // 以 DOM 实际值为准：部分输入法下 React state 会滞后
+    const contentValue = (contentRef.current?.value ?? content).trim()
+    const locationValue = (locationRef.current?.value ?? locationName).trim()
+    if (!contentValue && photos.length === 0) {
       setError(tr('至少写一句文字或加一张照片'))
       return
     }
@@ -142,8 +148,8 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
         id: original?.id ?? '',
         tripId,
         dayIndex,
-        content: content.trim(),
-        locationName: locationName.trim(),
+        content: contentValue,
+        locationName: locationValue,
         latitude: coords?.lat ?? original?.latitude ?? 0,
         longitude: coords?.lng ?? original?.longitude ?? 0,
         createdAt: original?.createdAt ?? 0,
@@ -215,6 +221,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
             </span>
           </div>
           <textarea
+            ref={contentRef}
             className={error ? 'input-area border-danger' : 'input-area'}
             rows={6}
             value={content}
@@ -230,6 +237,9 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
           hint={tr('会显示在记录上方，可用于之后整理足迹')}
         >
           <input
+            ref={locationRef}
+            type="text"
+            inputMode="text"
             className="input"
             value={locationName}
             placeholder={tr('例如「小樽运河」')}

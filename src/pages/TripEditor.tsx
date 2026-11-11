@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Sparkle, Trash } from '@phosphor-icons/react'
 import type { Currency, Trip, TripTemplate } from '../lib/types'
 import { applyChecklistTemplate, applyPlanTemplate, deleteTrip, getProfile, getTrip, saveTrip } from '../lib/repo'
@@ -47,6 +47,9 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
   const [budgetText, setBudgetText] = useState('')
   const [error, setError] = useState('')
   const [aiNoteBusy, setAiNoteBusy] = useState(false)
+  // WebView 中文输入法下 onChange 可能滞后，保存时以 DOM 实际值为准
+  const titleRef = useRef<HTMLInputElement>(null)
+  const destinationRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!id) return
@@ -72,7 +75,10 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
   }, [id])
 
   const save = async () => {
-    if (!title.trim()) {
+    // 以输入框实际值为准：部分输入法下 React state 会滞后
+    const titleValue = (titleRef.current?.value ?? title).trim()
+    const destinationValue = (destinationRef.current?.value ?? destination).trim()
+    if (!titleValue) {
       setError(tr('给这段旅程起个名字'))
       return
     }
@@ -85,8 +91,8 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
       const end = endDate && endDate >= start ? endDate : start
       const saved = await saveTrip({
         id: original?.id ?? '',
-        title: title.trim(),
-        destination: destination.trim(),
+        title: titleValue,
+        destination: destinationValue,
         startDate: start,
         endDate: end,
         note: note.trim(),
@@ -144,6 +150,10 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
           hint={error ? undefined : tr('例如「北海道夏日纪行」')}
         >
           <input
+            ref={titleRef}
+            type="text"
+            inputMode="text"
+            autoComplete="off"
             className={cn('input', error && 'border-danger')}
             value={title}
             maxLength={40}
@@ -156,6 +166,10 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
         </Field>
         <Field label={tr('目的地')} hint={tr('城市或地区，会显示在封面上')}>
           <input
+            ref={destinationRef}
+            type="text"
+            inputMode="text"
+            autoComplete="off"
             className="input"
             value={destination}
             maxLength={40}
