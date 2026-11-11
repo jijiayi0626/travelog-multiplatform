@@ -17,6 +17,7 @@ const ADMIN_KEYS = [
   'admin.token',
   'site.name',
   'ai.enabled',
+  'ai.endpoints',
   'ai.provider',
   'ai.openaiKey',
   'ai.openaiBase',
@@ -288,23 +289,45 @@ async function handleAdminUserDelete(request, env, userId) {
   return json({ ok: true }, 200, env, request)
 }
 
+function maskKey(key) {
+  if (!key) return ''
+  return `${key.slice(0, 5)}…${key.slice(-4)}`
+}
+
+async function readRawEndpoints(env) {
+  const raw = await getSetting(env, 'ai.endpoints')
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
 async function handleAdminSettingsGet(request, env) {
   await requireAdmin(request, env)
   const map = await getSettings(env, ADMIN_KEYS)
-  const key = map['ai.openaiKey'] || ''
+  const config = await loadEndpoints(env)
   return json(
     {
       site: { name: map['site.name'] || env.SITE_NAME || '旅记 Travelog' },
       ai: {
         enabled: map['ai.enabled'] !== '0',
-        provider: map['ai.provider'] || (env.OPENAI_API_KEY ? 'openai' : 'workers'),
-        openaiKey: key ? `${key.slice(0, 5)}…${key.slice(-4)}` : '',
-        hasOpenaiKey: Boolean(key),
-        openaiBase: map['ai.openaiBase'] || 'https://api.openai.com/v1',
-        openaiModel: map['ai.openaiModel'] || 'gpt-4o-mini',
-        workersModel: map['ai.workersModel'] || '@cf/meta/llama-3.1-8b-instruct',
         temperature: Number(map['ai.temperature'] || 0.6),
         workersBound: Boolean(env.AI),
+        endpoints: config.all.map((item) => ({
+          id: item.id,
+          name: item.name || item.type,
+          type: item.type === 'workers' ? 'workers' : 'openai',
+          base: item.base || '',
+          model: item.model || '',
+          key: maskKey(item.key),
+          hasKey: Boolean(item.key),
+          weight: Number(item.weight) || 1,
+          enabled: item.enabled !== false,
+          usable: item.type === 'workers' ? Boolean(env.AI) : Boolean(item.key),
+        })),
       },
     },
     200,
@@ -320,22 +343,29 @@ async function handleAdminSettingsPut(request, env) {
   const site = body.site || {}
   if (site.name !== undefined) await setSetting(env, 'site.name', String(site.name).slice(0, 60))
   if (ai.enabled !== undefined) await setSetting(env, 'ai.enabled', ai.enabled ? '1' : '0')
-  if (ai.provider !== undefined) {
-    await setSetting(env, 'ai.provider', ai.provider === 'openai' ? 'openai' : 'workers')
+
+  // 多接口：按 id 合并，密钥留空或带掩码时保留原值
+  if (Array.isArray(ai.endpoints)) {
+    const previous = await readRawEndpoints(env)
+    const byId = new Map(previous.map((item) => [item.id, item]))
+    const next = ai.endpoints.slice(0, 8).map((item, index) => {
+      const prev = byId.get(item.id) || {}
+      const typed = typeof item.key === 'string' ? item.key.trim() : ''
+      const keepKey = !typed || typed.includes('…')
+      return {
+        id: String(item.id || `ep${index + 1}`),
+        name: String(item.name || `接口 ${index + 1}`).slice(0, 30),
+        type: item.type === 'workers' ? 'workers' : 'openai',
+        base: String(item.base || 'https://api.openai.com/v1').slice(0, 200),
+        model: String(item.model || '').slice(0, 80),
+        key: keepKey ? prev.key || '' : typed,
+        weight: Math.max(1, Math.min(10, Number(item.weight) || 1)),
+        enabled: item.enabled !== false,
+      }
+    })
+    await setSetting(env, 'ai.endpoints', JSON.stringify(next))
   }
-  if (typeof ai.openaiKey === 'string' && ai.openaiKey.trim() && !ai.openaiKey.includes('…')) {
-    await setSetting(env, 'ai.openaiKey', ai.openaiKey.trim())
-  }
-  if (ai.clearOpenaiKey) await setSetting(env, 'ai.openaiKey', '')
-  if (ai.openaiBase !== undefined) {
-    await setSetting(env, 'ai.openaiBase', String(ai.openaiBase).trim() || 'https://api.openai.com/v1')
-  }
-  if (ai.openaiModel !== undefined) {
-    await setSetting(env, 'ai.openaiModel', String(ai.openaiModel).trim() || 'gpt-4o-mini')
-  }
-  if (ai.workersModel !== undefined) {
-    await setSetting(env, 'ai.workersModel', String(ai.workersModel).trim() || '@cf/meta/llama-3.1-8b-instruct')
-  }
+
   if (ai.temperature !== undefined) {
     const t = Math.min(Math.max(Number(ai.temperature) || 0.6, 0), 1)
     await setSetting(env, 'ai.temperature', String(t))
@@ -343,10 +373,79 @@ async function handleAdminSettingsPut(request, env) {
   return json({ ok: true }, 200, env, request)
 }
 
+/** 测试单个接口或全部接口，返回每个的耗时与样本 */
 async function handleAdminAITest(request, env) {
   await requireAdmin(request, env)
-  const result = await runAI(env, [{ role: 'user', content: '用一句话介绍你自己。' }], 0.4)
-  return json({ ok: true, model: result.model, sample: result.text.slice(0, 200) }, 200, env, request)
+  const body = await readJSON(request).catch(() => ({}))
+  const config = await loadEndpoints(env)
+  const targetId = String(body.endpointId || '')
+  const targets = targetId
+    ? config.endpoints.filter((item) => item.id === targetId)
+    : config.endpoints
+
+  if (targets.length === 0) throw new HttpError(400, '没有可用的 AI 接口')
+
+  const messages = [{ role: 'user', content: '用一句话介绍你自己。' }]
+  const results = []
+  for (const endpoint of targets) {
+    try {
+      const result = await callEndpoint(env, endpoint, messages, 0.4)
+      results.push({
+        id: endpoint.id,
+        name: endpoint.name,
+        model: result.model,
+        ms: result.ms,
+        ok: true,
+        sample: result.text.slice(0, 120),
+      })
+    } catch (error) {
+      results.push({
+        id: endpoint.id,
+        name: endpoint.name,
+        model: endpoint.model,
+        ms: 0,
+        ok: false,
+        error: error.message,
+      })
+    }
+  }
+  return json({ ok: results.some((item) => item.ok), results }, 200, env, request)
+}
+
+/** 拉取模型列表：OpenAI 兼容走 /models，Workers AI 返回内置候选 */
+async function handleAdminAIModels(request, env, url) {
+  await requireAdmin(request, env)
+  const config = await loadEndpoints(env)
+  const endpoint = config.endpoints.find((item) => item.id === url.searchParams.get('endpointId'))
+  if (!endpoint) throw new HttpError(404, '接口不存在')
+
+  if (endpoint.type === 'workers') {
+    return json(
+      {
+        models: [
+          '@cf/meta/llama-3.1-8b-instruct',
+          '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+          '@cf/qwen/qwen1.5-14b-chat-awq',
+          '@cf/mistral/mistral-7b-instruct-v0.2',
+        ],
+      },
+      200,
+      env,
+      request,
+    )
+  }
+
+  const base = (endpoint.base || 'https://api.openai.com/v1').replace(/\/$/, '')
+  const response = await fetch(`${base}/models`, {
+    headers: { authorization: `Bearer ${endpoint.key}` },
+  })
+  if (!response.ok) throw new HttpError(502, `拉取模型失败：${response.status}`)
+  const data = await response.json()
+  const models = (data.data || [])
+    .map((item) => item.id)
+    .filter(Boolean)
+    .sort()
+  return json({ models: models.slice(0, 200) }, 200, env, request)
 }
 
 /* ---------------- 普通用户 ---------------- */
@@ -471,57 +570,137 @@ async function handleStats(request, env) {
 
 /* ---------------- AI ---------------- */
 
-async function loadAIConfig(env) {
+async function loadEndpoints(env) {
   const map = await getSettings(env, [
     'ai.enabled',
-    'ai.provider',
+    'ai.endpoints',
+    'ai.temperature',
     'ai.openaiKey',
     'ai.openaiBase',
     'ai.openaiModel',
     'ai.workersModel',
-    'ai.temperature',
   ])
+
+  let list = []
+  if (map['ai.endpoints']) {
+    try {
+      const parsed = JSON.parse(map['ai.endpoints'])
+      if (Array.isArray(parsed)) list = parsed
+    } catch {
+      list = []
+    }
+  }
+  // 兼容旧的单接口配置
+  if (list.length === 0) {
+    if (map['ai.openaiKey'] || env.OPENAI_API_KEY) {
+      list.push({
+        id: 'legacy-openai',
+        name: 'OpenAI',
+        type: 'openai',
+        base: map['ai.openaiBase'] || env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+        key: map['ai.openaiKey'] || env.OPENAI_API_KEY || '',
+        model: map['ai.openaiModel'] || env.OPENAI_MODEL || 'gpt-4o-mini',
+        weight: 1,
+        enabled: true,
+      })
+    }
+    if (env.AI) {
+      list.push({
+        id: 'legacy-workers',
+        name: 'Workers AI',
+        type: 'workers',
+        model: map['ai.workersModel'] || env.AI_MODEL || '@cf/meta/llama-3.1-8b-instruct',
+        weight: 1,
+        enabled: true,
+      })
+    }
+  }
+
+  const usable = list.filter((item) => {
+    if (item.enabled === false) return false
+    if (item.type === 'workers') return Boolean(env.AI)
+    return Boolean(item.key)
+  })
+
   return {
     enabled: map['ai.enabled'] !== '0',
-    provider: map['ai.provider'] || (env.OPENAI_API_KEY ? 'openai' : 'workers'),
-    openaiKey: map['ai.openaiKey'] || env.OPENAI_API_KEY || '',
-    openaiBase: map['ai.openaiBase'] || env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
-    openaiModel: map['ai.openaiModel'] || env.OPENAI_MODEL || 'gpt-4o-mini',
-    workersModel: map['ai.workersModel'] || env.AI_MODEL || '@cf/meta/llama-3.1-8b-instruct',
     temperature: Number(map['ai.temperature'] || 0.6),
+    all: list,
+    endpoints: usable,
   }
 }
 
-async function runAI(env, messages, temperature) {
-  const config = await loadAIConfig(env)
-  if (!config.enabled) throw new HttpError(503, 'AI 已在管理面板中关闭')
-  if (config.provider === 'openai' && config.openaiKey) {
-    const base = config.openaiBase.replace(/\/$/, '')
-    const response = await fetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${config.openaiKey}` },
-      body: JSON.stringify({
-        model: config.openaiModel,
-        messages,
-        temperature: temperature ?? config.temperature,
-        max_tokens: 800,
-      }),
-    })
-    if (!response.ok) {
-      const text = await response.text()
-      throw new HttpError(502, `上游 AI 失败：${text.slice(0, 200)}`)
+/** 按权重随机挑一个，实现简单负载均衡 */
+function pickEndpoint(endpoints) {
+  const pool = []
+  for (const item of endpoints) {
+    const weight = Math.max(1, Math.min(10, Number(item.weight) || 1))
+    for (let i = 0; i < weight; i += 1) pool.push(item)
+  }
+  return pool[Math.floor(Math.random() * pool.length)]
+}
+
+async function callEndpoint(env, endpoint, messages, temperature) {
+  const started = Date.now()
+
+  if (endpoint.type === 'workers') {
+    if (!env.AI) throw new Error('Workers AI 未绑定')
+    const output = await env.AI.run(endpoint.model, { messages, temperature })
+    return {
+      text: (output.response || '').trim(),
+      model: endpoint.model,
+      endpoint: endpoint.name,
+      ms: Date.now() - started,
     }
-    const data = await response.json()
-    return { text: data.choices?.[0]?.message?.content?.trim() || '', model: config.openaiModel }
   }
-  if (env.AI) {
-    const output = await env.AI.run(config.workersModel, {
+
+  const base = (endpoint.base || 'https://api.openai.com/v1').replace(/\/$/, '')
+  const response = await fetch(`${base}/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${endpoint.key}` },
+    body: JSON.stringify({
+      model: endpoint.model,
       messages,
-      temperature: temperature ?? config.temperature,
-    })
-    return { text: (output.response || '').trim(), model: config.workersModel }
+      temperature,
+      max_tokens: 800,
+    }),
+  })
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`${endpoint.name || 'OpenAI'} 返回 ${response.status}：${text.slice(0, 160)}`)
   }
-  throw new HttpError(503, 'AI 未配置：在管理面板填写接口，或绑定 Workers AI')
+  const data = await response.json()
+  return {
+    text: data.choices?.[0]?.message?.content?.trim() || '',
+    model: endpoint.model,
+    endpoint: endpoint.name,
+    ms: Date.now() - started,
+  }
+}
+
+/** 多个接口按权重随机，失败自动切换到下一个 */
+async function runAI(env, messages, temperature) {
+  const config = await loadEndpoints(env)
+  if (!config.enabled) throw new HttpError(503, 'AI 已在管理面板中关闭')
+  if (config.endpoints.length === 0) {
+    throw new HttpError(503, 'AI 未配置：在管理面板添加接口，或绑定 Workers AI')
+  }
+
+  const tried = new Set()
+  let lastError = null
+  for (let attempt = 0; attempt < config.endpoints.length; attempt += 1) {
+    const candidates = config.endpoints.filter((item) => !tried.has(item.id))
+    if (candidates.length === 0) break
+    const endpoint = pickEndpoint(candidates)
+    tried.add(endpoint.id)
+    try {
+      return await callEndpoint(env, endpoint, messages, temperature ?? config.temperature)
+    } catch (error) {
+      lastError = error
+      console.error(`ai endpoint failed: ${endpoint.name} ${error.message}`)
+    }
+  }
+  throw new HttpError(502, `所有 AI 接口都失败了：${lastError?.message || '未知错误'}`)
 }
 
 async function handleAI(request, env) {
@@ -589,11 +768,12 @@ async function handleApi(request, env, url) {
   const route = `${request.method} ${url.pathname}`
 
   if (route === 'GET /api/health') {
-    const ai = await loadAIConfig(env).catch(() => null)
+    const ai = await loadEndpoints(env).catch(() => null)
     return json(
       {
         ok: true,
-        ai: Boolean(ai?.enabled && (ai.provider === 'openai' ? ai.openaiKey : env.AI)),
+        ai: Boolean(ai?.enabled && ai.endpoints.length > 0),
+        endpoints: ai?.endpoints.length ?? 0,
         site: env.SITE_NAME || '旅记 Travelog',
         time: Date.now(),
       },
@@ -611,6 +791,7 @@ async function handleApi(request, env, url) {
   if (route === 'GET /api/admin/settings') return await handleAdminSettingsGet(request, env)
   if (route === 'PUT /api/admin/settings') return await handleAdminSettingsPut(request, env)
   if (route === 'POST /api/admin/ai/test') return await handleAdminAITest(request, env)
+  if (route === 'GET /api/admin/ai/models') return await handleAdminAIModels(request, env, url)
 
   const userMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)$/)
   if (userMatch && request.method === 'PATCH') {

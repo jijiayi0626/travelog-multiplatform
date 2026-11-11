@@ -274,19 +274,37 @@ export interface AdminUser {
   entityCount: number
 }
 
+export interface AdminEndpoint {
+  id: string
+  name: string
+  type: 'openai' | 'workers'
+  base: string
+  model: string
+  key: string
+  hasKey: boolean
+  weight: number
+  enabled: boolean
+  usable: boolean
+}
+
 export interface AdminSettings {
   site: { name: string }
   ai: {
     enabled: boolean
-    provider: 'openai' | 'workers'
-    openaiKey: string
-    hasOpenaiKey: boolean
-    openaiBase: string
-    openaiModel: string
-    workersModel: string
     temperature: number
     workersBound: boolean
+    endpoints: AdminEndpoint[]
   }
+}
+
+export interface AdminAITestResult {
+  id: string
+  name: string
+  model: string
+  ms: number
+  ok: boolean
+  sample?: string
+  error?: string
 }
 
 export async function adminLogin(username: string, password: string): Promise<AdminSession> {
@@ -339,13 +357,21 @@ export function adminGetSettings(): Promise<AdminSettings> {
 
 export function adminSaveSettings(payload: {
   site?: { name?: string }
-  ai?: Partial<AdminSettings['ai']> & { clearOpenaiKey?: boolean }
+  ai?: {
+    enabled?: boolean
+    temperature?: number
+    endpoints?: Array<Partial<AdminEndpoint>>
+  }
 }): Promise<{ ok: boolean }> {
   return adminApi('/admin/settings', { method: 'PUT', body: payload })
 }
 
-export function adminTestAI(): Promise<{ ok: boolean; model: string; sample: string }> {
-  return adminApi('/admin/ai/test', { method: 'POST' })
+export function adminTestAI(endpointId?: string): Promise<{ ok: boolean; results: AdminAITestResult[] }> {
+  return adminApi('/admin/ai/test', { method: 'POST', body: endpointId ? { endpointId } : {} })
+}
+
+export function adminListModels(endpointId: string): Promise<{ models: string[] }> {
+  return adminApi(`/admin/ai/models?endpointId=${encodeURIComponent(endpointId)}`)
 }
 
 export function adminChangePassword(password: string): Promise<{ ok: boolean }> {

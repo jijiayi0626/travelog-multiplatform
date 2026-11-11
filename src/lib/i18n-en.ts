@@ -626,4 +626,18 @@ export const EN_TEXT: Record<string, string> = {
   '例如「这趟花了多少」「哪天花得最多」': 'e.g. "How much did this trip cost?" "Which day cost the most?"',
   '思考中…': 'Thinking…',
   提问: 'Ask',
+
+  /* ---------- AI 多接口 ---------- */
+  '已拉取 {n} 个模型': 'Fetched {n} models',
+  测试完成: 'Test finished',
+  全部接口都失败了: 'All endpoints failed',
+  'OpenAI 兼容': 'OpenAI-compatible',
+  权重: 'Weight',
+  '已保存，留空则不改': 'Saved — leave blank to keep',
+  拉取模型: 'Fetch models',
+  可用: 'Available',
+  '未绑定 Workers AI': 'Workers AI not bound',
+  缺少密钥: 'Missing API key',
+  新增接口: 'Add endpoint',
+  测试全部: 'Test all',
 }

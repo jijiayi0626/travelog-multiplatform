@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   CheckCircle,
   MagnifyingGlass,
+  Plus,
   SignOut,
   Sparkle,
   Trash,
@@ -13,6 +14,7 @@ import {
   adminChangePassword,
   adminDeleteUser,
   adminGetSettings,
+  adminListModels,
   adminListUsers,
   adminLogin,
   adminLogout,
@@ -23,6 +25,8 @@ import {
   adminTestAI,
   ApiError,
   getAdminSession,
+  type AdminAITestResult,
+  type AdminEndpoint,
   type AdminOverview,
   type AdminSettings,
   type AdminUser,
@@ -417,14 +421,52 @@ function AISettings({
   const toast = useToast()
   const { tr } = useI18n()
   const [enabled, setEnabled] = useState(settings.ai.enabled)
-  const [provider, setProvider] = useState<'openai' | 'workers'>(settings.ai.provider)
-  const [openaiKey, setOpenaiKey] = useState('')
-  const [openaiBase, setOpenaiBase] = useState(settings.ai.openaiBase)
-  const [openaiModel, setOpenaiModel] = useState(settings.ai.openaiModel)
-  const [workersModel, setWorkersModel] = useState(settings.ai.workersModel)
   const [temperature, setTemperature] = useState(String(settings.ai.temperature))
-  const [busy, setBusy] = useState<'save' | 'test' | null>(null)
-  const [sample, setSample] = useState('')
+  const [drafts, setDrafts] = useState<AdminEndpoint[]>(() =>
+    settings.ai.endpoints.map((item) => ({ ...item })),
+  )
+  const [busy, setBusy] = useState<'save' | 'test' | 'models' | null>(null)
+  const [testResults, setTestResults] = useState<AdminAITestResult[]>([])
+  const [modelOptions, setModelOptions] = useState<Record<string, string[]>>({})
+
+  const patchDraft = (id: string, patch: Partial<AdminEndpoint>) => {
+    setDrafts((list) => list.map((item) => (item.id === id ? { ...item, ...patch } : item)))
+  }
+
+  const addEndpoint = () => {
+    setDrafts((list) => [
+      ...list,
+      {
+        id: `ep${Date.now().toString(36)}`,
+        name: `接口 ${list.length + 1}`,
+        type: 'openai',
+        base: 'https://api.openai.com/v1',
+        model: 'gpt-4o-mini',
+        key: '',
+        hasKey: false,
+        weight: 1,
+        enabled: true,
+        usable: true,
+      },
+    ])
+  }
+
+  const removeEndpoint = (id: string) => {
+    setDrafts((list) => list.filter((item) => item.id !== id))
+  }
+
+  const loadModels = async (id: string) => {
+    setBusy('models')
+    try {
+      const result = await adminListModels(id)
+      setModelOptions((map) => ({ ...map, [id]: result.models }))
+      toast(tr('已拉取 {n} 个模型', { n: result.models.length }))
+    } catch (error) {
+      onError(error)
+    } finally {
+      setBusy(null)
+    }
+  }
 
   const save = async () => {
     setBusy('save')
@@ -432,15 +474,19 @@ function AISettings({
       await adminSaveSettings({
         ai: {
           enabled,
-          provider,
-          openaiBase,
-          openaiModel,
-          workersModel,
           temperature: Number(temperature) || 0.6,
-          ...(openaiKey.trim() ? { openaiKey: openaiKey.trim() } : {}),
+          endpoints: drafts.map((item) => ({
+            id: item.id,
+            name: item.name,
+            type: item.type,
+            base: item.base,
+            model: item.model,
+            key: item.key,
+            weight: item.weight,
+            enabled: item.enabled,
+          })),
         },
       })
-      setOpenaiKey('')
       toast(tr('AI 配置已保存'))
       onSaved()
     } catch (error) {
@@ -452,11 +498,11 @@ function AISettings({
 
   const test = async () => {
     setBusy('test')
-    setSample('')
+    setTestResults([])
     try {
       const result = await adminTestAI()
-      setSample(`${result.model} · ${result.sample}`)
-      toast(tr('AI 连接正常'))
+      setTestResults(result.results)
+      toast(result.ok ? tr('测试完成') : tr('全部接口都失败了'))
     } catch (error) {
       onError(error)
     } finally {
@@ -494,103 +540,162 @@ function AISettings({
         </button>
       </div>
 
-      <div className="space-y-1.5">
-        <span className="field-label">{tr('服务来源')}</span>
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            type="button"
-            className={cn('chip px-2.5 py-1 text-note', provider === 'openai' && 'chip-active')}
-            onClick={() => setProvider('openai')}
-          >
-            {tr('OpenAI 兼容接口')}
-          </button>
-          <button
-            type="button"
-            className={cn('chip px-2.5 py-1 text-note', provider === 'workers' && 'chip-active')}
-            onClick={() => setProvider('workers')}
-          >
-            {tr('Workers AI')}
-          </button>
-        </div>
+      <div className="space-y-2">
+        {drafts.map((item) => (
+          <div key={item.id} className="space-y-2.5 rounded-2xl border border-line p-3">
+            <div className="flex items-center gap-2">
+              <input
+                className="input h-9 flex-1"
+                value={item.name}
+                onChange={(event) => patchDraft(item.id, { name: event.target.value })}
+              />
+              <button
+                type="button"
+                className={cn('chip px-2 py-1 text-caption', item.enabled && 'chip-active')}
+                onClick={() => patchDraft(item.id, { enabled: !item.enabled })}
+              >
+                {item.enabled ? tr('启用') : tr('停用')}
+              </button>
+              <button
+                type="button"
+                className="chip px-2 py-1 text-caption text-danger"
+                onClick={() => removeEndpoint(item.id)}
+              >
+                <Trash size={12} />
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                className={cn('chip px-2 py-1 text-caption', item.type === 'openai' && 'chip-active')}
+                onClick={() => patchDraft(item.id, { type: 'openai' })}
+              >
+                {tr('OpenAI 兼容')}
+              </button>
+              <button
+                type="button"
+                className={cn('chip px-2 py-1 text-caption', item.type === 'workers' && 'chip-active')}
+                onClick={() => patchDraft(item.id, { type: 'workers' })}
+              >
+                {tr('Workers AI')}
+              </button>
+              <span className="ml-auto flex items-center gap-1 text-caption text-ink-3">
+                {tr('权重')}
+                <input
+                  className="input h-7 w-12 px-1 text-center"
+                  inputMode="numeric"
+                  value={item.weight}
+                  onChange={(event) =>
+                    patchDraft(item.id, { weight: Number(event.target.value.replace(/\D/g, '')) || 1 })
+                  }
+                />
+              </span>
+            </div>
+
+            {item.type === 'openai' ? (
+              <>
+                <input
+                  className="input font-mono"
+                  type="password"
+                  placeholder={item.hasKey ? tr('已保存，留空则不改') : 'sk-…'}
+                  value={item.key}
+                  onChange={(event) => patchDraft(item.id, { key: event.target.value })}
+                />
+                <input
+                  className="input"
+                  placeholder="https://api.openai.com/v1"
+                  value={item.base}
+                  onChange={(event) => patchDraft(item.id, { base: event.target.value })}
+                />
+              </>
+            ) : null}
+
+            <div className="flex gap-2">
+              <input
+                className="input flex-1 font-mono"
+                placeholder={
+                  item.type === 'workers' ? '@cf/meta/llama-3.1-8b-instruct' : 'gpt-4o-mini'
+                }
+                value={item.model}
+                onChange={(event) => patchDraft(item.id, { model: event.target.value })}
+              />
+              <button
+                type="button"
+                className="btn-ghost h-[42px] shrink-0 px-3 text-caption"
+                disabled={busy !== null}
+                onClick={() => void loadModels(item.id)}
+              >
+                {tr('拉取模型')}
+              </button>
+            </div>
+            {modelOptions[item.id]?.length ? (
+              <div className="flex flex-wrap gap-1">
+                {modelOptions[item.id].slice(0, 12).map((model) => (
+                  <button
+                    key={model}
+                    type="button"
+                    className="chip px-2 py-0.5 text-caption"
+                    onClick={() => patchDraft(item.id, { model })}
+                  >
+                    {model}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            <div className="flex items-center gap-2 text-caption text-ink-3">
+              <span className={cn('h-1.5 w-1.5 rounded-full', item.usable ? 'bg-accent' : 'bg-danger')} />
+              {item.usable
+                ? tr('可用')
+                : item.type === 'workers'
+                  ? tr('未绑定 Workers AI')
+                  : tr('缺少密钥')}
+            </div>
+          </div>
+        ))}
+        <button type="button" className="btn-ghost w-full" onClick={addEndpoint}>
+          <Plus size={14} weight="bold" />
+          {tr('新增接口')}
+        </button>
       </div>
 
-      {provider === 'openai' ? (
-        <>
-          <Field
-            label={tr('API Key')}
-            hint={
-              settings.ai.hasOpenaiKey
-                ? tr('已保存（{masked}），留空则不修改', { masked: settings.ai.openaiKey })
-                : tr('填写你的 OpenAI 或兼容服务密钥')
-            }
-          >
-            <input
-              className="input font-mono"
-              type="password"
-              value={openaiKey}
-              placeholder="sk-…"
-              onChange={(event) => setOpenaiKey(event.target.value)}
-            />
-          </Field>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label={tr('接口地址')}>
-              <input
-                className="input"
-                value={openaiBase}
-                placeholder="https://api.openai.com/v1"
-                onChange={(event) => setOpenaiBase(event.target.value)}
-              />
-            </Field>
-            <Field label={tr('模型')}>
-              <input
-                className="input"
-                value={openaiModel}
-                placeholder="gpt-4o-mini"
-                onChange={(event) => setOpenaiModel(event.target.value)}
-              />
-            </Field>
-          </div>
-        </>
-      ) : (
-        <Field
-          label={tr('Workers AI 模型')}
-          hint={
-            settings.ai.workersBound
-              ? tr('已绑定 Workers AI 服务')
-              : tr('未绑定 Workers AI，需要在 wrangler.toml 开启 [ai]')
-          }
-        >
-          <input
-            className="input font-mono"
-            value={workersModel}
-            onChange={(event) => setWorkersModel(event.target.value)}
-          />
-        </Field>
-      )}
-
-      <Field label={tr('温度')} hint={tr('0 更稳定，1 更发散')}>
+      <div className="flex items-center justify-between gap-3">
+        <span className="field-label">{tr('温度')}</span>
         <input
-          className="input"
+          className="input max-w-[96px]"
           inputMode="decimal"
           value={temperature}
           onChange={(event) => setTemperature(event.target.value.replace(/[^\d.]/g, ''))}
         />
-      </Field>
+      </div>
 
       <div className="flex flex-wrap gap-2">
         <button type="button" className="btn-primary" onClick={save} disabled={busy !== null}>
           {busy === 'save' ? tr('保存中…') : tr('保存配置')}
         </button>
         <button type="button" className="btn-ghost" onClick={test} disabled={busy !== null}>
-          {busy === 'test' ? tr('测试中…') : tr('测试连接')}
+          {busy === 'test' ? tr('测试中…') : tr('测试全部')}
         </button>
       </div>
 
-      {sample ? (
-        <p className="flex items-start gap-1.5 rounded-xl bg-accent-soft/70 px-3 py-2 text-caption leading-4 text-accent">
-          <CheckCircle size={13} className="mt-0.5 shrink-0" weight="fill" />
-          <span className="min-w-0 break-all">{sample}</span>
-        </p>
+      {testResults.length > 0 ? (
+        <div className="space-y-1.5">
+          {testResults.map((item) => (
+            <p
+              key={item.id}
+              className={cn(
+                'flex items-start gap-1.5 rounded-xl px-3 py-2 text-caption leading-4',
+                item.ok ? 'bg-accent-soft/70 text-accent' : 'bg-danger/10 text-danger',
+              )}
+            >
+              <CheckCircle size={13} className="mt-0.5 shrink-0" weight="fill" />
+              <span className="min-w-0 break-all">
+                {item.name} · {item.ok ? `${item.ms}ms · ${item.sample}` : item.error}
+              </span>
+            </p>
+          ))}
+        </div>
       ) : null}
     </section>
   )
