@@ -59,7 +59,7 @@ jobs:
           fi
           ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
 
-- name: Prepare signing keystore
+      - name: Prepare signing keystore
         run: |
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
             echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/travelog.keystore"
