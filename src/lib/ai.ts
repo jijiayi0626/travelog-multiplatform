@@ -136,3 +136,110 @@ export async function suggestTripNote(destination: string, days: number): Promis
   const result = await aiComplete(`目的地：${destination}\n天数：${days} 天`, system, 0.8)
   return result.text.replace(/^["“']|["”']$/g, '').trim()
 }
+
+/* ---------------- 行李清单 ---------------- */
+
+const PACKING_SYSTEM =
+  '你是旅行打包助手。只输出一个 JSON 对象：{"items":["..."]}，不要 Markdown、不要解释。' +
+  '要求 12–18 项，每项不超过 12 个字，按证件 / 衣物 / 电子 / 洗漱 / 药品 / 其他 的顺序排列，' +
+  '不要重复，不要写"等""之类"，不要包含具体品牌。'
+
+export async function generatePackingList(input: {
+  destination: string
+  days: number
+  month?: number
+  note?: string
+}): Promise<string[]> {
+  ensureReady()
+  const days = Math.min(Math.max(Math.round(input.days) || 3, 1), 30)
+  const prompt = [
+    `目的地：${input.destination || '未指定'}`,
+    `天数：${days} 天`,
+    input.month ? `出行月份：${input.month} 月` : '',
+    input.note ? `补充：${input.note}` : '',
+    '请给出这次旅行的打包清单。',
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  const result = await aiComplete(prompt, PACKING_SYSTEM, 0.4)
+  const raw = result.text
+  const start = raw.indexOf('{')
+  const end = raw.lastIndexOf('}')
+
+  let list: unknown = null
+  if (start >= 0 && end > start) {
+    try {
+      list = (JSON.parse(raw.slice(start, end + 1)) as { items?: unknown }).items
+    } catch {
+      list = null
+    }
+  }
+
+  const items = Array.isArray(list)
+    ? list
+    : raw
+        .split(/\r?\n/)
+        .map((line) => line.replace(/^\s*[-*\d.、]+\s*/, '').trim())
+        .filter(Boolean)
+
+  const cleaned: string[] = []
+  const seen = new Set<string>()
+  for (const item of items as unknown[]) {
+    const title = String(item ?? '').trim().replace(/^["“']|["”']$/g, '')
+    if (!title || title.length > 24 || seen.has(title)) continue
+    seen.add(title)
+    cleaned.push(title.replace(/。$/, ''))
+    if (cleaned.length >= 20) break
+  }
+  if (cleaned.length === 0) throw new Error('AI 没有给出可用的清单')
+  return cleaned
+}
+
+/* ---------------- 旅行问答 ---------------- */
+
+export async function answerTripQuestion(context: string, question: string): Promise<string> {
+  ensureReady()
+  if (!question.trim()) throw new Error('先写一个想问的问题')
+  const system =
+    '你是旅行数据助理。只根据用户给出的旅程数据回答，数据里没有的信息就明确说"数据里没有这项信息"，不要编造。' +
+    '用简体中文回答，两三句话，能带数字就带数字，不要用 Markdown 列表。'
+  const result = await aiComplete(`旅程数据：\n${context}\n\n问题：${question}`, system, 0.3)
+  const text = result.text.trim()
+  if (!text) throw new Error('AI 没有返回内容，稍后再试')
+  return text
+}
+
+/* ---------------- 年度回顾 ---------------- */
+
+export async function summarizeYear(input: {
+  year: number
+  trips: number
+  days: number
+  cities: number
+  photos: number
+  totalCny: number
+  topCategories: string
+  longestTrip?: string
+}): Promise<string> {
+  ensureReady()
+  const system =
+    '你是中文旅行编辑。根据年度数据写一段 80–120 字的年度回顾：克制、有画面、不用感叹号、' +
+    '不堆形容词、不编造数据里没有的事。只输出正文，不要标题。'
+  const prompt = [
+    `年份：${input.year}`,
+    `旅程数：${input.trips} 段`,
+    `总天数：${input.days} 天`,
+    `城市数：${input.cities} 个`,
+    `照片数：${input.photos} 张`,
+    `总花费：${Math.round(input.totalCny)} 元人民币`,
+    input.topCategories ? `主要开销：${input.topCategories}` : '',
+    input.longestTrip ? `最长的一段：${input.longestTrip}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+  const result = await aiComplete(prompt, system, 0.7)
+  const text = result.text.replace(/^["“']|["”']$/g, '').trim()
+  if (!text) throw new Error('AI 没有返回内容，稍后再试')
+  return text
+}

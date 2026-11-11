@@ -47,7 +47,7 @@ import {
   PLAN_TEMPLATES,
 } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
-import { generatePlan } from '../lib/ai'
+import { answerTripQuestion, generatePlan, generatePackingList } from '../lib/ai'
 import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import {
   CATEGORY_COLOR,
@@ -119,6 +119,11 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
   const [newMember, setNewMember] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [aiPackingBusy, setAiPackingBusy] = useState(false)
+  const [qaOpen, setQaOpen] = useState(false)
+  const [qaText, setQaText] = useState('')
+  const [qaAnswer, setQaAnswer] = useState('')
+  const [qaBusy, setQaBusy] = useState(false)
   const [checklistTemplateOpen, setChecklistTemplateOpen] = useState(false)
   const [lightbox, setLightbox] = useState<{ photos: Photo[]; index: number } | null>(null)
 
@@ -154,6 +159,34 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
     await saveChecklistItem({ id: '', tripId, title, done: false, createdAt: Date.now() })
     setNewCheck('')
     bump()
+  }
+
+  const aiPacking = async () => {
+    if (aiPackingBusy || !trip) return
+    setAiPackingBusy(true)
+    try {
+      const month = trip.startDate > 0 ? new Date(trip.startDate).getMonth() + 1 : undefined
+      const items = await generatePackingList({
+        destination: trip.destination || trip.title,
+        days: tripDayCount(trip.startDate, trip.endDate),
+        month,
+        note: trip.note,
+      })
+      const existing = new Set(checklist.map((item) => item.title))
+      let added = 0
+      for (const title of items) {
+        if (existing.has(title)) continue
+        existing.add(title)
+        await saveChecklistItem({ id: '', tripId, title, done: false, createdAt: Date.now() + added })
+        added += 1
+      }
+      bump()
+      toast(added > 0 ? tr('已生成 {n} 项', { n: added }) : tr('清单里已经有这些了'))
+    } catch (error) {
+      toast(error instanceof Error ? error.message : tr('生成失败'))
+    } finally {
+      setAiPackingBusy(false)
+    }
   }
 
   const toggleChecklist = async (item: ChecklistItem, done: boolean) => {
@@ -471,6 +504,8 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
                 onToggle={toggleChecklist}
                 onDelete={removeChecklist}
                 onTemplate={() => setChecklistTemplateOpen(true)}
+                onAIGenerate={aiPacking}
+                aiBusy={aiPackingBusy}
               />
             ) : null}
 
@@ -600,6 +635,17 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
             <Copy size={16} className="text-ink-3" />
             {tr('复制这段旅程')}
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMenuOpen(false)
+              setQaOpen(true)
+            }}
+            className="press flex w-full items-center gap-2.5 rounded-xl px-3 py-3 text-left text-body text-ink hover:bg-paper-2"
+          >
+            <Sparkle size={16} className="text-ink-3" />
+            {tr('问问 AI')}
+          </button>
           <div className="my-1 h-px bg-line" />
           <button
             type="button"
@@ -612,6 +658,87 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
             <Trash size={16} />
             {tr('删除这段旅程')}
           </button>
+        </div>
+      </Sheet>
+
+      <Sheet open={qaOpen} title={tr('问问 AI')} onClose={() => setQaOpen(false)}>
+        <div className="space-y-3">
+          <p className="text-note leading-5 text-ink-3">
+            {tr('只根据这趟旅程的数据回答，数据里没有的会直说不知道。需要先登录云同步。')}
+          </p>
+          <div className="flex gap-2">
+            <input
+              className="input"
+              value={qaText}
+              placeholder={tr('例如「这趟花了多少」「哪天花得最多」')}
+              onChange={(event) => setQaText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !qaBusy) {
+                  event.currentTarget.blur()
+                  void (async () => {
+                    setQaBusy(true)
+                    setQaAnswer('')
+                    try {
+                      const byCategory = stats
+                        .map((item) => `${tr(CATEGORY_LABEL[item.category])} ${formatMoney(item.amount)}`)
+                        .join('、')
+                      const context = [
+                        `旅程：${trip.title}`,
+                        `目的地：${trip.destination || '未填'}`,
+                        `日期：${formatDate(trip.startDate)} — ${formatDate(trip.endDate)}（${days} 天）`,
+                        `日程：共 ${planProgress.total} 条，已完成 ${planProgress.done} 条`,
+                        `图文记录：${moments.length} 条`,
+                        `花费合计：${formatMoney(total)}${byCategory ? `（${byCategory}）` : ''}`,
+                        trip.budget ? `预算：${formatMoney(trip.budget)}` : '',
+                      ]
+                        .filter(Boolean)
+                        .join('\n')
+                      setQaAnswer(await answerTripQuestion(context, qaText))
+                    } catch (error) {
+                      toast(error instanceof Error ? error.message : tr('生成失败'))
+                    } finally {
+                      setQaBusy(false)
+                    }
+                  })()
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="btn-primary h-[46px] shrink-0 px-4"
+              disabled={qaBusy}
+              onClick={async () => {
+                setQaBusy(true)
+                setQaAnswer('')
+                try {
+                  const byCategory = stats
+                    .map((item) => `${tr(CATEGORY_LABEL[item.category])} ${formatMoney(item.amount)}`)
+                    .join('、')
+                  const context = [
+                    `旅程：${trip.title}`,
+                    `目的地：${trip.destination || '未填'}`,
+                    `日期：${formatDate(trip.startDate)} — ${formatDate(trip.endDate)}（${days} 天）`,
+                    `日程：共 ${planProgress.total} 条，已完成 ${planProgress.done} 条`,
+                    `图文记录：${moments.length} 条`,
+                    `花费合计：${formatMoney(total)}${byCategory ? `（${byCategory}）` : ''}`,
+                    trip.budget ? `预算：${formatMoney(trip.budget)}` : '',
+                  ]
+                    .filter(Boolean)
+                    .join('\n')
+                  setQaAnswer(await answerTripQuestion(context, qaText))
+                } catch (error) {
+                  toast(error instanceof Error ? error.message : tr('生成失败'))
+                } finally {
+                  setQaBusy(false)
+                }
+              }}
+            >
+              {qaBusy ? tr('思考中…') : tr('提问')}
+            </button>
+          </div>
+          {qaAnswer ? (
+            <p className="rounded-xl bg-accent-soft/60 px-3 py-2.5 text-body-sm leading-6 text-ink">{qaAnswer}</p>
+          ) : null}
         </div>
       </Sheet>
 
@@ -1244,6 +1371,8 @@ function ChecklistTab({
   onToggle,
   onDelete,
   onTemplate,
+  onAIGenerate,
+  aiBusy,
 }: {
   items: ChecklistItem[]
   progress: { done: number; total: number }
@@ -1253,6 +1382,8 @@ function ChecklistTab({
   onToggle: (item: ChecklistItem, done: boolean) => void
   onDelete: (item: ChecklistItem) => void
   onTemplate: () => void
+  onAIGenerate: () => void
+  aiBusy: boolean
 }) {
   const { tr } = useI18n()
   return (
@@ -1261,13 +1392,24 @@ function ChecklistTab({
         <span>
           {tr('已完成 {done}/{total}', { done: progress.done, total: progress.total })}
         </span>
-        <button
-          type="button"
-          onClick={onTemplate}
-          className="press rounded-full border border-line px-2.5 py-1 text-caption text-ink-2 hover:text-ink"
-        >
-          {tr('套用模板')}
-        </button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onAIGenerate}
+            disabled={aiBusy}
+            className="press inline-flex items-center gap-1 rounded-full border border-accent/40 bg-accent-soft px-2.5 py-1 text-caption text-accent hover:border-accent disabled:opacity-60"
+          >
+            <Sparkle size={12} weight="fill" />
+            {aiBusy ? tr('生成中…') : tr('AI 打包')}
+          </button>
+          <button
+            type="button"
+            onClick={onTemplate}
+            className="press rounded-full border border-line px-2.5 py-1 text-caption text-ink-2 hover:text-ink"
+          >
+            {tr('套用模板')}
+          </button>
+        </div>
       </div>
 
       <form

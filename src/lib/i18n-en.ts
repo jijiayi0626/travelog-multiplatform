@@ -610,4 +610,20 @@ export const EN_TEXT: Record<string, string> = {
   '口令已更新，请重新登录': 'Password updated — please sign in again',
   更新口令: 'Update password',
   '用户、AI 接口与站点设置': 'Users, AI endpoints and site',
+
+  /* ---------- AI 增强 ---------- */
+  '已生成 {n} 项': 'Added {n} items',
+  清单里已经有这些了: 'Checklist already has these',
+  'AI 打包': 'AI pack',
+  'AI 生成': 'AI draft',
+  年度总结: 'Year summary',
+  生成总结: 'Generate summary',
+  '根据这一年的旅程、城市与花费，写一段回顾。需要先登录云同步。':
+    'Writes a recap from this year\'s trips, cities and spending. Sign in to cloud sync first.',
+  '问问 AI': 'Ask AI',
+  '只根据这趟旅程的数据回答，数据里没有的会直说不知道。需要先登录云同步。':
+    'Answers only from this trip\'s data and says so when it is missing. Sign in to cloud sync first.',
+  '例如「这趟花了多少」「哪天花得最多」': 'e.g. "How much did this trip cost?" "Which day cost the most?"',
+  '思考中…': 'Thinking…',
+  提问: 'Ask',
 }

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Trash } from '@phosphor-icons/react'
+import { Sparkle, Trash } from '@phosphor-icons/react'
 import type { Currency, Trip, TripTemplate } from '../lib/types'
 import { applyChecklistTemplate, applyPlanTemplate, deleteTrip, getProfile, getTrip, saveTrip } from '../lib/repo'
+import { suggestTripNote } from '../lib/ai'
 import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import {
   addDays,
@@ -45,6 +46,7 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
   const [currency, setCurrency] = useState<Currency>('CNY')
   const [budgetText, setBudgetText] = useState('')
   const [error, setError] = useState('')
+  const [aiNoteBusy, setAiNoteBusy] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -241,14 +243,39 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
           </div>
         </div>
         <Field label={tr('旅行备注')} hint={tr('写给这段旅程的一句话')}>
-          <textarea
-            className="input-area"
-            rows={3}
-            value={note}
-            maxLength={160}
-            placeholder={tr('比如：从札幌一路到函馆，海风、拉面和一整夜的路灯。')}
-            onChange={(event) => setNote(event.target.value)}
-          />
+          <div className="space-y-2">
+            <textarea
+              className="input-area"
+              rows={3}
+              value={note}
+              maxLength={160}
+              placeholder={tr('比如：从札幌一路到函馆，海风、拉面和一整夜的路灯。')}
+              onChange={(event) => setNote(event.target.value)}
+            />
+            <button
+              type="button"
+              disabled={aiNoteBusy}
+              onClick={async () => {
+                setAiNoteBusy(true)
+                try {
+                  const days =
+                    startDate > 0 && endDate > 0
+                      ? Math.max(Math.floor((endDate - startDate) / 864e5) + 1, 1)
+                      : 3
+                  const text = await suggestTripNote(destination || title || '这次旅行', days)
+                  setNote(text)
+                } catch (error) {
+                  toast(error instanceof Error ? error.message : tr('生成失败'))
+                } finally {
+                  setAiNoteBusy(false)
+                }
+              }}
+              className="press inline-flex items-center gap-1 rounded-full border border-accent/40 bg-accent-soft px-2.5 py-1 text-caption text-accent disabled:opacity-60"
+            >
+              <Sparkle size={12} weight="fill" />
+              {aiNoteBusy ? tr('生成中…') : tr('AI 生成')}
+            </button>
+          </div>
         </Field>
       </FormBlock>
 

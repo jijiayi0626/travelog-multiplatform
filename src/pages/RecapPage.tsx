@@ -3,7 +3,8 @@ import { ArrowLeft, CaretLeft, CaretRight, Sparkle } from '@phosphor-icons/react
 import type { Expense, Footprint, Moment, TripView } from '../lib/types'
 import { listAllMoments, listExpenses, listFootprints, listTrips } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
-import { useI18n, useNav } from '../lib/app-context'
+import { useI18n, useNav, useToast } from '../lib/app-context'
+import { summarizeYear } from '../lib/ai'
 import { summarizeVisits } from '../lib/province'
 import {
   CATEGORY_LABEL,
@@ -24,6 +25,7 @@ const MONTHS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
 
 export function RecapPage() {
   const nav = useNav()
+  const toast = useToast()
   const { t, tr } = useI18n()
   const loader = useCallback(async () => {
     const [trips, expenses, moments, footprints] = await Promise.all([
@@ -58,6 +60,8 @@ export function RecapPage() {
   }, [data])
 
   const [year, setYear] = useState<number>(() => new Date().getFullYear())
+  const [aiSummary, setAiSummary] = useState('')
+  const [aiBusy, setAiBusy] = useState(false)
   const activeYear = years.includes(year) ? year : years[0]
 
   const yearTrips = useMemo(
@@ -200,6 +204,53 @@ export function RecapPage() {
             <div className="card p-3.5">
               <StatTile label="照片" value={`${photos} 张`} />
             </div>
+          </section>
+
+          <section className="card space-y-3 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="flex items-center gap-1.5 text-note font-semibold tracking-tight text-ink">
+                <Sparkle size={14} weight="fill" className="text-accent" />
+                {tr('年度总结')}
+              </h2>
+              <button
+                type="button"
+                disabled={aiBusy}
+                onClick={async () => {
+                  setAiBusy(true)
+                  try {
+                    const text = await summarizeYear({
+                      year: activeYear,
+                      trips: yearTrips.length,
+                      days: totalDays,
+                      cities,
+                      photos,
+                      totalCny,
+                      topCategories: stats
+                        .slice(0, 3)
+                        .map((item) => `${CATEGORY_LABEL[item.category]} ${formatCny(item.amount)}`)
+                        .join('、'),
+                      longestTrip: longest ? `${longest.trip.title}（${longest.days} 天）` : undefined,
+                    })
+                    setAiSummary(text)
+                  } catch (error) {
+                    toast(error instanceof Error ? error.message : tr('生成失败'))
+                  } finally {
+                    setAiBusy(false)
+                  }
+                }}
+                className="press inline-flex shrink-0 items-center gap-1 rounded-full border border-accent/40 bg-accent-soft px-2.5 py-1 text-caption text-accent disabled:opacity-60"
+              >
+                <Sparkle size={12} weight="fill" />
+                {aiBusy ? tr('生成中…') : tr('生成总结')}
+              </button>
+            </div>
+            {aiSummary ? (
+              <p className="text-body-sm leading-6 text-ink-2">{aiSummary}</p>
+            ) : (
+              <p className="text-note leading-5 text-ink-3">
+                {tr('根据这一年的旅程、城市与花费，写一段回顾。需要先登录云同步。')}
+              </p>
+            )}
           </section>
 
           <section className="card p-4">
