@@ -369,6 +369,7 @@ export const EN_TEXT: Record<string, string> = {
   今天: 'Today',
   '给第 {n} 天添加安排': 'Add a plan to day {n}',
   '让 AI 排一份行程': 'Let AI draft an itinerary',
+  'AI 排行程': 'AI itinerary',
   '根据目的地「{dest}」和 {n} 天行程生成逐日安排，生成后仍可逐条修改。':
     'Generates a day-by-day plan for "{dest}" over {n} days — every item stays editable.',
   未填写: 'not set',

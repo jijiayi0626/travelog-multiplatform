@@ -753,6 +753,15 @@ function PlanTab({
         <div className="flex shrink-0 gap-2">
           <button
             type="button"
+            onClick={() => setAiOpen(true)}
+            aria-label={tr('让 AI 排一份行程')}
+            className="press inline-flex items-center gap-1 rounded-full border border-accent/40 bg-accent-soft px-2.5 py-1.5 text-note text-accent hover:border-accent"
+          >
+            <Sparkle size={12} weight="fill" />
+            {tr('AI')}
+          </button>
+          <button
+            type="button"
             onClick={() => setTemplateOpen(true)}
             className="press rounded-full border border-line px-2.5 py-1.5 text-note text-ink-2 hover:text-ink"
           >
@@ -792,6 +801,10 @@ function PlanTab({
               </button>
               <button type="button" className="btn-ghost" onClick={() => setTemplateOpen(true)}>
                 {tr('套用模板')}
+              </button>
+              <button type="button" className="btn-ghost" onClick={() => setAiOpen(true)}>
+                <Sparkle size={14} weight="fill" />
+                {tr('AI 排行程')}
               </button>
             </div>
           }
