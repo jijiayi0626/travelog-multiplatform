@@ -16,6 +16,7 @@ import { TripsPage } from './pages/TripsPage'
 import { TripDetailPage } from './pages/TripDetailPage'
 import { FootprintsPage } from './pages/FootprintsPage'
 import { AlbumPage } from './pages/AlbumPage'
+import { RecapPage } from './pages/RecapPage'
 import { ExpensesPage } from './pages/ExpensesPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { TripEditor } from './pages/TripEditor'
@@ -59,6 +60,8 @@ function parseHash(): View {
       return { name: 'footprints' }
     case 'album':
       return { name: 'album' }
+    case 'recap':
+      return { name: 'recap' }
     case 'expenses':
       return { name: 'expenses' }
     case 'profile':
@@ -80,6 +83,8 @@ function toHash(view: View): string {
       return '#/footprints'
     case 'album':
       return '#/album'
+    case 'recap':
+      return '#/recap'
     case 'expenses':
       return '#/expenses'
     case 'profile':
@@ -242,6 +247,8 @@ export default function App() {
         return <FootprintsPage />
       case 'album':
         return <AlbumPage />
+      case 'recap':
+        return <RecapPage />
       case 'expenses':
         return <ExpensesPage />
       case 'profile':

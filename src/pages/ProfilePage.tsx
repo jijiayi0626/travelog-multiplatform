@@ -156,7 +156,14 @@ export function ProfilePage() {
       <section className="card p-4">
         <div className="flex items-baseline justify-between">
           <h2 className="text-note font-semibold tracking-tight text-ink">年度回顾</h2>
-          <span className="text-caption text-ink-3">全部旅程累计</span>
+          <button
+            type="button"
+            onClick={() => nav.navigate({ name: 'recap' })}
+            className="press inline-flex items-center gap-0.5 text-caption text-accent"
+          >
+            查看完整
+            <CaretRight size={12} />
+          </button>
         </div>
         <div className="mt-3 grid grid-cols-2 gap-4">
           <StatTile label="在路上" value={`${data.stats.totalDays} 天`} />

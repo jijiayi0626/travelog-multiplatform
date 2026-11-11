@@ -84,14 +84,22 @@ export function CategoryLegend({ stats }: { stats: CategoryStat[] }) {
   )
 }
 
-export function MonthBars({ data, height = 96 }: { data: MonthStat[]; height?: number }) {
+export function MonthBars({
+  data,
+  height = 96,
+  currentKey,
+}: {
+  data: MonthStat[]
+  height?: number
+  currentKey?: string
+}) {
   const max = Math.max(...data.map((item) => item.amount), 1)
   const barArea = height - 18
   return (
     <div className="flex items-stretch gap-1.5">
       {data.map((item, index) => {
         const percent = item.amount > 0 ? Math.max((item.amount / max) * 100, 4) : 0
-        const isCurrent = index === data.length - 1
+        const isCurrent = currentKey ? item.key === currentKey : index === data.length - 1
         return (
           <div key={item.key} className="group flex min-w-0 flex-1 flex-col items-center gap-1.5">
             <div className="relative flex w-full items-end justify-center" style={{ height: barArea }}>

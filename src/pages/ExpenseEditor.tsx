@@ -39,6 +39,7 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
   const [spentAt, setSpentAt] = useState(todayStart())
   const [currency, setCurrency] = useState<Currency>('CNY')
   const [error, setError] = useState('')
+  const [recent, setRecent] = useState<Expense[]>([])
 
   useEffect(() => {
     let alive = true
@@ -65,6 +66,24 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
       alive = false
     }
   }, [tripId, expenseId])
+
+  useEffect(() => {
+    let alive = true
+    listExpenses(tripId || undefined).then((list) => {
+      if (!alive) return
+      const unique: Expense[] = []
+      for (const item of list) {
+        if (!unique.some((u) => u.amount === item.amount && u.category === item.category)) {
+          unique.push(item)
+        }
+        if (unique.length >= 3) break
+      }
+      setRecent(unique)
+    })
+    return () => {
+      alive = false
+    }
+  }, [tripId])
 
   const save = async () => {
     const amount = Number.parseFloat(amountText)
@@ -144,6 +163,29 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
             约 ¥{formatMoney(Number.parseFloat(amountText || '0') * CURRENCY_RATE_TO_CNY[currency])} ·{' '}
             {CURRENCY_LABEL[currency]}按离线汇率折算
           </p>
+        ) : null}
+
+        {recent.length > 0 ? (
+          <div className="space-y-1.5 border-t border-line pt-2.5">
+            <span className="field-label">再来一笔</span>
+            <div className="flex flex-wrap gap-1.5">
+              {recent.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    setAmountText(String(item.amount))
+                    setCategory(item.category)
+                    setNote(item.note)
+                    setCurrency(item.currency ?? 'CNY')
+                  }}
+                  className="press chip px-2.5 py-1 text-note"
+                >
+                  {CATEGORY_LABEL[item.category]} · {item.currency && item.currency !== 'CNY' ? item.currency + ' ' : '¥'}{formatMoney(item.amount)}
+                </button>
+              ))}
+            </div>
+          </div>
         ) : null}
       </FormBlock>
 

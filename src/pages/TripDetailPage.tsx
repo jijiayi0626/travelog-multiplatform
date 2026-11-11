@@ -6,6 +6,7 @@ import {
   CaretDown,
   CaretUp,
   Copy,
+  DownloadSimple,
   MapPin,
   PencilSimple,
   Plus,
@@ -27,6 +28,7 @@ import {
   duplicateTrip,
   getTrip,
   groupMoments,
+  groupPlans,
   listChecklist,
   listExpenses,
   listMembers,
@@ -53,6 +55,7 @@ import {
   copyText,
   coverClass,
   dayIndexOfDate,
+  downloadText,
   formatDate,
   formatDateCn,
   formatMoney,
@@ -176,6 +179,64 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
     toast(ok ? '邀请码已复制' : '复制失败，请手动记录')
   }
 
+  const exportMarkdown = () => {
+    const md: string[] = []
+    md.push(`# ${trip?.title || '未命名旅程'}`, '')
+    md.push(
+      `> ${trip?.destination || '目的地待定'} · ${formatDate(trip?.startDate ?? 0)} — ${formatDate(trip?.endDate ?? 0)}`,
+    )
+    if (trip?.note) md.push('', trip.note)
+    md.push('')
+    md.push(`- 行程天数：${days} 天`)
+    md.push(`- 日程完成：${planProgress.done}/${planProgress.total}`)
+    md.push(`- 花费合计：¥${formatMoney(total)}`)
+    if (trip?.budget) md.push(`- 预算：¥${formatMoney(trip.budget)}`)
+    if (trip?.inviteCode) md.push(`- 邀请码：${trip.inviteCode}`)
+
+    if (plans.length > 0) {
+      md.push('', '## 日程')
+      for (const group of groupPlans(plans)) {
+        md.push('', `### 第 ${group.dayIndex} 天`)
+        for (const plan of group.plans) {
+          const time = plan.time ? `${plan.time} ` : ''
+          const place = plan.place ? `（${plan.place}）` : ''
+          md.push(`- ${plan.done ? '[x]' : '[ ]'} ${time}${plan.title}${place}`)
+        }
+      }
+    }
+
+    if (moments.length > 0) {
+      md.push('', '## 记录')
+      for (const group of groups) {
+        for (const moment of group.moments) {
+          md.push('', `### 第 ${group.dayIndex} 天 · ${moment.locationName || '未标注地点'}`, '', moment.content)
+          if (moment.photos.length > 0) {
+            md.push('', `> ${moment.photos.length} 张照片已存于应用内`)
+          }
+        }
+      }
+    }
+
+    if (expenses.length > 0) {
+      md.push('', '## 账本')
+      for (const expense of expenses) {
+        md.push(
+          `- ${expense.note || CATEGORY_LABEL[expense.category]} — ¥${formatMoney(expense.amount)}`,
+        )
+      }
+    }
+
+    if (checklist.length > 0) {
+      md.push('', '## 清单')
+      for (const item of checklist) {
+        md.push(`- ${item.done ? '[x]' : '[ ]'} ${item.title}`)
+      }
+    }
+
+    downloadText(`${trip?.title || 'trip'}.md`, md.join('\n'), 'text/markdown;charset=utf-8')
+    toast('Markdown 已导出')
+  }
+
   const copyTrip = async () => {
     const copy = await duplicateTrip(tripId)
     if (!copy) return
@@ -229,6 +290,15 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
         <span className="min-w-0 truncate text-note text-ink-3">
           行程 / <span className="text-ink-2">{trip.title}</span>
         </span>
+        <button
+          type="button"
+          onClick={exportMarkdown}
+          aria-label="导出为 Markdown"
+          className="press ml-auto flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-line px-2.5 text-caption text-ink-2 hover:text-ink"
+        >
+          <DownloadSimple size={13} />
+          导出
+        </button>
       </div>
 
       <section className={cn('relative mt-3 overflow-hidden rounded-[1.6rem] p-5 text-white', coverClass(trip.cover))}>

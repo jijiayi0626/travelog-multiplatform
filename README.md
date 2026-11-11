@@ -6,16 +6,18 @@
 
 | 模块 | 能力 |
 | --- | --- |
-| 行程 | 旅行列表、封面、状态（计划中 / 进行中 / 已结束）、筛选与排序、模板新建、日期区间与天数、预算与多币种 |
+| 行程 | 旅行列表、**列表 / 日历双视图**、封面、状态（计划中 / 进行中 / 已结束）、筛选与排序、模板新建、日期区间与天数、预算与多币种 |
 | 日程 | 按天排程：时间、类型（交通 / 游玩 / 用餐 / 住宿 / 购物）、地点、备注；勾选完成、上下移动、每日密度条、下一步提示、4 套模板 |
 | 回忆 | 首页「往年今日」横滑卡片，不足时用最近 30 天记录补齐 |
 | 时间线 | 按天归组的图文记录，文字 + 最多 9 张照片（本地压缩后保存）、标签、灯箱翻页 |
 | 相册 | 跨旅程照片聚合，按旅程 / 按时间分组，灯箱左右翻页与单张下载 |
 | 足迹 | 地点打卡、浏览器定位、城市统计、星图可视化、**中国省份地图**（本地内置矢量边界，点亮去过的省份，点击省份看该省地点）、点击跳转地图查看坐标、删除 |
-| 账本 | 金额 / 分类 / 备注 / 日期 / 币种，分类占比环形图、近 6 个月柱状图、CSV 导出 |
+| 账本 | 金额 / 分类 / 备注 / 日期 / 币种，分类占比环形图、近 6 个月柱状图、CSV 导出、**「再来一笔」快捷填充** |
 | 清单 | 行前待办、勾选与进度、5 套模板 |
 | 旅伴 | 成员列表、添加与移除、邀请码复制 |
-| 我的 | 昵称、年度统计、日程完成度、深色模式、4 套主题色、JSON 备份导入导出 |
+| 我的 | 昵称、年度统计、日程完成度、深色模式、5 套主题色、JSON 备份导入导出 |
+| 年度回顾 | 按年份汇总：旅行天数、城市、照片、全年花费柱状图、分类占比、最长旅程 |
+| 导出 | 单个旅程导出 Markdown（日程 / 记录 / 账本 / 清单）、账本导出 CSV、全量备份 JSON |
 | 全局 | `⌘K` / `/` 搜索、`?` 快捷键面板、`N` 新建旅程、离线提示、PWA 安装 |
 | 云同步 | 本地优先；提供接口契约与替换注入点，后端接入后即可多端同步 |
 
@@ -90,12 +92,12 @@ npm run preview    # 本地预览生产构建
 
 ## 下载 APK
 
-由 GitHub Actions（`ubuntu-latest` / x86_64）自动构建，产物见 [Releases · v1.2.0](https://github.com/jijiayi0626/travelog-multiplatform/releases/tag/v1.2.0)：
+由 GitHub Actions（`ubuntu-latest` / x86_64）自动构建，产物见 [Releases · v1.3.0](https://github.com/jijiayi0626/travelog-multiplatform/releases/tag/v1.3.0)：
 
-- [Debug APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v1.2.0/travelog-1.2.0-debug.apk)（约 4 MB，可直接安装）
-- [Release APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v1.2.0/travelog-1.2.0-release.apk)（约 3 MB，CI 临时签名，正式发布请换成自有 keystore）
+- [Debug APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v1.3.0/travelog-1.3.0-debug.apk)（约 4 MB，可直接安装）
+- [Release APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v1.3.0/travelog-1.3.0-release.apk)（约 3 MB，CI 临时签名，正式发布请换成自有 keystore）
 
-包名 `com.travellog.app`，minSdk 23 / targetSdk 35，versionCode 2 / versionName 1.1。应用为 WebView + Java 实现，**不含 native 库**，单个 APK 兼容 `arm64-v8a` / `armeabi-v7a` / `x86_64`。
+包名 `com.travellog.app`，minSdk 23 / targetSdk 35，versionCode 4 / versionName 1.3。应用为 WebView + Java 实现，**不含 native 库**，单个 APK 兼容 `arm64-v8a` / `armeabi-v7a` / `x86_64`。
 
 ### 自动构建
 

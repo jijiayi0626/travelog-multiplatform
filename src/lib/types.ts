@@ -156,6 +156,7 @@ export type View =
   | { name: 'trip'; id: string; tab: TabKey }
   | { name: 'footprints' }
   | { name: 'album' }
+  | { name: 'recap' }
   | { name: 'expenses' }
   | { name: 'profile' }
   | { name: 'tripEditor'; id?: string; template?: TripTemplate }

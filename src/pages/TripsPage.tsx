@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { ArrowRight, ArrowsDownUp, MagnifyingGlass, Plus, Sparkle, X } from '@phosphor-icons/react'
+import { ArrowRight, ArrowsDownUp, CalendarBlank, ListBullets, MagnifyingGlass, Plus, Sparkle, X } from '@phosphor-icons/react'
 import type { Moment, Plan, TripStatus, TripTemplate, TripView } from '../lib/types'
 import { listAllMoments, listAllPlans, listTrips, memoriesOf } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
@@ -15,6 +15,7 @@ import {
 } from '../lib/utils'
 import { cn } from '../lib/cn'
 import { TripCard } from '../components/cards'
+import { TripsCalendar, type DayBucket } from '../components/TripsCalendar'
 import { EmptyState, IconButton, Sheet, SkeletonList } from '../components/ui'
 import { EmptyArt } from '../components/EmptyArt'
 
@@ -49,6 +50,8 @@ export function TripsPage() {
   const [status, setStatus] = useState<'all' | TripStatus>('all')
   const [sortBy, setSortBy] = useState<'date' | 'spend' | 'title'>('date')
   const [templateOpen, setTemplateOpen] = useState(false)
+  const [mode, setMode] = useState<'list' | 'calendar'>('list')
+  const [selectedDay, setSelectedDay] = useState<DayBucket | null>(null)
 
   const trips = data.trips
   const memories = useMemo(() => memoriesOf(data.moments, trips), [data.moments, trips])
@@ -112,6 +115,40 @@ export function TripsPage() {
         </div>
       </header>
 
+      <div className="flex w-fit items-center gap-1 rounded-full border border-line bg-paper-2 p-1">
+        <button
+          type="button"
+          onClick={() => setMode('list')}
+          className={cn(
+            'press flex items-center gap-1.5 rounded-full px-3 py-1.5 text-note',
+            mode === 'list' ? 'bg-surface text-ink shadow-sm' : 'text-ink-3',
+          )}
+        >
+          <ListBullets size={14} />
+          列表
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('calendar')}
+          className={cn(
+            'press flex items-center gap-1.5 rounded-full px-3 py-1.5 text-note',
+            mode === 'calendar' ? 'bg-surface text-ink shadow-sm' : 'text-ink-3',
+          )}
+        >
+          <CalendarBlank size={14} />
+          日历
+        </button>
+      </div>
+
+      {mode === 'calendar' ? (
+        <TripsCalendar
+          trips={trips}
+          moments={data.moments}
+          plans={data.plans}
+          onSelectDay={(bucket) => setSelectedDay(bucket)}
+        />
+      ) : (
+        <>
       {!loading && trips.length > 0 ? (
         <div className="flex divide-x divide-line border-y border-line py-3.5">
           <div className="min-w-0 flex-1 pr-3">
@@ -319,6 +356,9 @@ export function TripsPage() {
         </div>
       )}
 
+      </>
+      )}
+
       <Sheet open={templateOpen} title="从模板开始" onClose={() => setTemplateOpen(false)}>
         <div className="space-y-2">
           {TEMPLATES.map((item) => (
@@ -343,6 +383,77 @@ export function TripsPage() {
         <p className="px-1 pt-3 text-caption leading-4 text-ink-3">
           选模板会自动套用对应的日程与打包清单，之后都能单独修改。
         </p>
+      </Sheet>
+
+      <Sheet
+        open={selectedDay !== null}
+        title={selectedDay ? `${formatDateCn(selectedDay.key)} · 当天安排` : ''}
+        onClose={() => setSelectedDay(null)}
+      >
+        <div className="space-y-3">
+          {selectedDay?.trips.map((trip) => (
+            <button
+              key={trip.id}
+              type="button"
+              onClick={() => {
+                setSelectedDay(null)
+                nav.navigate({ name: 'trip', id: trip.id, tab: 'plan' })
+              }}
+              className="press flex w-full items-center gap-3 rounded-2xl border border-line bg-surface p-3 text-left"
+            >
+              <span className={cn('h-10 w-10 shrink-0 rounded-xl', `cover-${trip.cover}`)} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-body font-medium text-ink">{trip.title}</span>
+                <span className="block truncate text-note text-ink-3">{trip.destination}</span>
+              </span>
+              <ArrowRight size={14} className="shrink-0 text-ink-3" />
+            </button>
+          ))}
+
+          {selectedDay && selectedDay.plans.length > 0 ? (
+            <div className="space-y-1.5">
+              <p className="text-caption uppercase tracking-[0.14em] text-ink-3">日程</p>
+              {selectedDay.plans.map((plan) => (
+                <div key={plan.id} className="flex items-start gap-2.5 rounded-xl bg-paper-2/60 px-3 py-2">
+                  <span className="w-10 shrink-0 pt-0.5 text-caption tabular-nums text-ink-3">
+                    {plan.time || '—'}
+                  </span>
+                  <span
+                    className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: PLAN_KIND_COLOR[plan.kind] }}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span
+                      className={cn(
+                        'block truncate text-note',
+                        plan.done ? 'text-ink-3 line-through' : 'text-ink',
+                      )}
+                    >
+                      {plan.title}
+                    </span>
+                    <span className="block truncate text-caption text-ink-3">
+                      {plan.tripTitle}
+                      {plan.place ? ` · ${plan.place}` : ''}
+                    </span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {selectedDay && selectedDay.moments.length > 0 ? (
+            <p className="text-caption text-ink-3">
+              这天写了 {selectedDay.moments.length} 条记录
+            </p>
+          ) : null}
+
+          {selectedDay &&
+          selectedDay.trips.length === 0 &&
+          selectedDay.plans.length === 0 &&
+          selectedDay.moments.length === 0 ? (
+            <p className="py-6 text-center text-note text-ink-3">这天还没有安排</p>
+          ) : null}
+        </div>
       </Sheet>
     </div>
   )
