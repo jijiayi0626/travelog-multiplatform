@@ -38,4 +38,11 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 自动打卡 / 定位足迹 -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Android 11+ 后台定位（可选，缺失时前台定位仍可用） -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!-- 导出备份 / 选择照片 -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
 </manifest>

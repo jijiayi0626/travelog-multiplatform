@@ -160,7 +160,7 @@ export function AppShell({
               {tr('快捷键')}
               <kbd className="ml-auto rounded border border-line px-1 py-0.5 text-caption text-ink-3">?</kbd>
             </button>
-            <p className="px-3 text-caption uppercase tracking-[0.16em] text-ink-3">v1.3</p>
+            <p className="px-3 text-caption uppercase tracking-[0.16em] text-ink-3">{`v${__APP_VERSION__}`}</p>
           </div>
         </aside>
       ) : null}

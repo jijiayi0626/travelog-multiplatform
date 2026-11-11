@@ -22,6 +22,7 @@ import { useLoader } from '../lib/hooks'
 import { useI18n, useNav, useRefresh, useToast } from '../lib/app-context'
 import { ACCENTS, type AccentName, currentTheme, getAccent, setAccent, setThemeMode } from '../lib/theme'
 import { downloadText, formatCny, readTextFile } from '../lib/utils'
+import { shareTextFile } from '../lib/native'
 import { isSignedIn } from '../lib/cloud'
 import {
   getAutoCheckinSettings,
@@ -130,8 +131,10 @@ export function ProfilePage() {
 
   const doExport = async () => {
     const json = await exportAll()
-    downloadText(`travelog-backup-${new Date().toISOString().slice(0, 10)}.json`, json, 'application/json')
-    toast('备份已导出')
+    const name = `travelog-backup-${new Date().toISOString().slice(0, 10)}.json`
+    const shared = await shareTextFile(name, json)
+    if (!shared) downloadText(name, json, 'application/json')
+    toast(shared ? `备份已交给系统保存：${name}` : '备份已导出到浏览器下载目录')
   }
 
   const doImport = async (file: File | undefined) => {
