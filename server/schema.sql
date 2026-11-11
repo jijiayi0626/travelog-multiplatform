@@ -38,3 +38,16 @@ CREATE TABLE IF NOT EXISTS user_meta (
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_meta_status ON user_meta (status);
+
+-- 旅程协作：member 通过邀请码加入 owner 的某趟旅程
+-- 共享后，member 的读写都重定向到 owner 的实体空间，实现真正的多人同步
+CREATE TABLE IF NOT EXISTS trip_shares (
+  trip_id TEXT NOT NULL,
+  owner_id TEXT NOT NULL,
+  member_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (trip_id, member_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_trip_shares_member ON trip_shares (member_id);
+CREATE INDEX IF NOT EXISTS idx_trip_shares_owner ON trip_shares (owner_id);

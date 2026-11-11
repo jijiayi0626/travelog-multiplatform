@@ -645,4 +645,15 @@ export const EN_TEXT: Record<string, string> = {
   强制更新: 'Force update',
   清除缓存并重新加载: 'Clear cache and reload',
   '缓存已清除，正在重新加载': 'Cache cleared, reloading',
+
+  /* ---------- 旅伴邀请码 ---------- */
+  用邀请码加入: 'Join with code',
+  '用邀请码加入旅程': 'Join a trip with a code',
+  '向旅伴要这趟旅程的邀请码（6 位）。加入后两端自动同步同一份数据，需要先登录云同步。':
+    'Ask your companion for the 6-character trip code. Once joined, both sides sync the same data — sign in to cloud sync first.',
+  '已加入「{title}」': 'Joined "{title}"',
+  加入失败: 'Failed to join',
+  '加入中…': 'Joining…',
+  加入旅程: 'Join trip',
+  '不想共享时，可以随时在旅程里退出。': 'You can leave the shared trip at any time.',
 }

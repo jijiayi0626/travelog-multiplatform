@@ -504,13 +504,21 @@ async function handlePull(request, env, url) {
   const user = await requireUser(request, env)
   const cursor = Number(url.searchParams.get('cursor') || 0)
   const limit = Math.min(Number(url.searchParams.get('limit') || 500), 1000)
+  // 同时拉取自己 + 已加入的共享旅程（owner 的实体）
   const { results } = await env.DB.prepare(
-    `SELECT kind, id, data, updated_at, deleted FROM entities
-     WHERE user_id = ? AND updated_at > ?
-     ORDER BY updated_at ASC LIMIT ?`,
+    `WITH shared AS (SELECT trip_id, owner_id FROM trip_shares WHERE member_id = ?)
+     SELECT e.kind, e.id, e.data, e.updated_at, e.deleted FROM entities e
+     WHERE e.updated_at > ?
+       AND (
+         e.user_id = ?
+         OR e.user_id = (SELECT owner_id FROM shared WHERE e.kind = 'trips' AND shared.trip_id = e.id)
+         OR e.user_id = (SELECT owner_id FROM shared WHERE e.kind != 'trips' AND shared.trip_id = json_extract(e.data, '$.tripId'))
+       )
+     ORDER BY e.updated_at ASC LIMIT ?`,
   )
-    .bind(user.id, cursor, limit)
+    .bind(user.id, cursor, user.id, limit)
     .all()
+
   const entities = (results || []).map((row) => ({
     kind: row.kind,
     id: row.id,
@@ -528,10 +536,20 @@ async function handlePush(request, env) {
   const incoming = Array.isArray(body.entities) ? body.entities : []
   if (incoming.length === 0) return json({ applied: 0, skipped: 0, cursor: 0 }, 200, env, request)
   if (incoming.length > 500) throw new HttpError(413, '单次最多推送 500 条')
+
+  // 已加入的共享旅程：member 的写入重定向到 owner 的实体空间，实现真协作
+  const { results: shareRows } = await env.DB.prepare(
+    'SELECT trip_id, owner_id FROM trip_shares WHERE member_id = ?',
+  )
+    .bind(user.id)
+    .all()
+  const shareMap = new Map((shareRows || []).map((row) => [row.trip_id, row.owner_id]))
+
   let applied = 0
   let skipped = 0
   const statements = []
   const now = Date.now()
+
   for (const item of incoming) {
     const kind = String(item.kind || '')
     const id = String(item.id || '')
@@ -539,9 +557,14 @@ async function handlePush(request, env) {
       skipped++
       continue
     }
+
+    const tripId = kind === 'trips' ? id : String(item.data?.tripId || '')
+    const ownerId = tripId && shareMap.has(tripId) ? shareMap.get(tripId) : user.id
+
     const updatedAt = Number(item.updatedAt) || now
     const deleted = item.deleted ? 1 : 0
     const data = item.deleted ? '{}' : JSON.stringify(item.data ?? {})
+
     statements.push(
       env.DB.prepare(
         `INSERT INTO entities (user_id, kind, id, data, updated_at, deleted)
@@ -549,12 +572,114 @@ async function handlePush(request, env) {
          ON CONFLICT (user_id, kind, id) DO UPDATE SET
            data = excluded.data, updated_at = excluded.updated_at, deleted = excluded.deleted
          WHERE excluded.updated_at >= entities.updated_at`,
-      ).bind(user.id, kind, id, data, updatedAt, deleted),
+      ).bind(ownerId, kind, id, data, updatedAt, deleted),
     )
     applied++
   }
+
   if (statements.length > 0) await env.DB.batch(statements)
   return json({ applied, skipped, cursor: now }, 200, env, request)
+}
+
+/** 用邀请码加入别人的旅程（trip 级共享） */
+async function handleJoinTrip(request, env) {
+  const user = await requireUser(request, env)
+  const body = await readJSON(request)
+  const code = String(body.inviteCode || '')
+    .trim()
+    .toUpperCase()
+  if (!code) throw new HttpError(400, '请输入邀请码')
+
+  const row = await env.DB.prepare(
+    `SELECT user_id, id, data FROM entities
+     WHERE kind = 'trips' AND deleted = 0 AND json_extract(data, '$.inviteCode') = ?
+     LIMIT 1`,
+  )
+    .bind(code)
+    .first()
+
+  if (!row) throw new HttpError(404, '邀请码不存在，或这趟旅程已被删除')
+  if (row.user_id === user.id) throw new HttpError(400, '这是你自己的旅程')
+
+  await env.DB.prepare(
+    `INSERT INTO trip_shares (trip_id, owner_id, member_id, created_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT (trip_id, member_id) DO NOTHING`,
+  )
+    .bind(row.id, row.user_id, user.id, Date.now())
+    .run()
+
+  // 在 owner 的成员列表里登记一条，owner 端能看到「谁加入了」
+  const trip = JSON.parse(row.data)
+  const memberId = crypto.randomUUID()
+  const memberData = {
+    id: memberId,
+    tripId: row.id,
+    userId: user.id,
+    name: user.nickname || '旅伴',
+    role: 'member',
+    joinedAt: Date.now(),
+    emojiSeed: Math.floor(Math.random() * 1000),
+  }
+  await env.DB.prepare(
+    `INSERT INTO entities (user_id, kind, id, data, updated_at, deleted)
+     VALUES (?, 'members', ?, ?, ?, 0)
+     ON CONFLICT (user_id, kind, id) DO UPDATE SET
+       data = excluded.data, updated_at = excluded.updated_at, deleted = 0`,
+  )
+    .bind(row.user_id, memberId, JSON.stringify(memberData), Date.now())
+    .run()
+
+  const owner = await env.DB.prepare('SELECT nickname FROM users WHERE id = ?').bind(row.user_id).first()
+
+  return json(
+    {
+      tripId: row.id,
+      title: trip.title || '',
+      owner: owner?.nickname || '旅伴',
+      shared: true,
+    },
+    200,
+    env,
+    request,
+  )
+}
+
+/** 列出我加入的共享旅程 */
+async function handleListShares(request, env) {
+  const user = await requireUser(request, env)
+  const { results } = await env.DB.prepare(
+    `SELECT s.trip_id, s.owner_id, s.created_at, u.nickname AS owner_name,
+            json_extract(e.data, '$.title') AS title
+     FROM trip_shares s
+     LEFT JOIN users u ON u.id = s.owner_id
+     LEFT JOIN entities e ON e.user_id = s.owner_id AND e.kind = 'trips' AND e.id = s.trip_id AND e.deleted = 0
+     WHERE s.member_id = ?
+     ORDER BY s.created_at DESC`,
+  )
+    .bind(user.id)
+    .all()
+  return json(
+    {
+      shares: (results || []).map((row) => ({
+        tripId: row.trip_id,
+        owner: row.owner_name || '旅伴',
+        title: row.title || '',
+        joinedAt: row.created_at,
+      })),
+    },
+    200,
+    env,
+    request,
+  )
+}
+
+async function handleLeaveShare(request, env, tripId) {
+  const user = await requireUser(request, env)
+  await env.DB.prepare('DELETE FROM trip_shares WHERE trip_id = ? AND member_id = ?')
+    .bind(tripId, user.id)
+    .run()
+  return json({ ok: true }, 200, env, request)
 }
 
 async function handleStats(request, env) {
@@ -810,6 +935,12 @@ async function handleApi(request, env, url) {
   if (route === 'GET /api/sync/pull') return await handlePull(request, env, url)
   if (route === 'POST /api/sync/push') return await handlePush(request, env)
   if (route === 'GET /api/sync/stats') return await handleStats(request, env)
+  if (route === 'POST /api/trips/join') return await handleJoinTrip(request, env)
+  if (route === 'GET /api/trips/shares') return await handleListShares(request, env)
+  const leaveMatch = url.pathname.match(/^\/api\/trips\/shares\/([^/]+)$/)
+  if (leaveMatch && request.method === 'DELETE') {
+    return await handleLeaveShare(request, env, decodeURIComponent(leaveMatch[1]))
+  }
   if (route === 'POST /api/ai/complete') return await handleAI(request, env)
   if (route === 'GET /api/weather') return await handleWeather(request, env, url)
   if (route === 'GET /api/geocode') return await handleGeocode(request, env, url)

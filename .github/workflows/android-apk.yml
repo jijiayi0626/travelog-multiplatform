@@ -59,31 +59,43 @@ jobs:
           fi
           ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
 
+- name: Prepare signing keystore
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/travelog.keystore"
+            echo "KEYSTORE=$RUNNER_TEMP/travelog.keystore" >> "$GITHUB_ENV"
+            echo "STORE_PASS=${{ secrets.KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
+            echo "KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> "$GITHUB_ENV"
+            echo "KEY_PASS=${{ secrets.KEY_PASSWORD }}" >> "$GITHUB_ENV"
+            echo "签名来源：Secrets"
+          else
+            # 仓库内固定 keystore：保证每次构建签名一致，可覆盖升级
+            echo "KEYSTORE=app/travelog-release.keystore" >> "$GITHUB_ENV"
+            echo "STORE_PASS=travelog2024" >> "$GITHUB_ENV"
+            echo "KEY_ALIAS=travelog" >> "$GITHUB_ENV"
+            echo "KEY_PASS=travelog2024" >> "$GITHUB_ENV"
+            echo "签名来源：仓库内固定 keystore"
+          fi
+
       - name: Build Debug APK
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
-
-      - name: Create CI keystore
-        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
-        run: |
-          keytool -genkeypair -v \
-            -keystore "$RUNNER_TEMP/travelog-ci.keystore" \
-            -alias travelog \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass travelog -keypass travelog \
-            -dname "CN=Travelog CI, OU=Build, O=Travelog, L=Tokyo, C=JP"
+          ./gradlew assembleDebug --no-daemon \
+            -Pandroid.injected.signing.store.file="$KEYSTORE" \
+            -Pandroid.injected.signing.store.password="$STORE_PASS" \
+            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$KEY_PASS"
 
       - name: Build Release APK
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
         working-directory: android
         run: |
           ./gradlew assembleRelease --no-daemon \
-            -Pandroid.injected.signing.store.file="$RUNNER_TEMP/travelog-ci.keystore" \
-            -Pandroid.injected.signing.store.password=travelog \
-            -Pandroid.injected.signing.key.alias=travelog \
-            -Pandroid.injected.signing.key.password=travelog
+            -Pandroid.injected.signing.store.file="$KEYSTORE" \
+            -Pandroid.injected.signing.store.password="$STORE_PASS" \
+            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$KEY_PASS"
 
       - name: Inspect APK (package / sdk / abi)
         run: |

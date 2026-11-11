@@ -1,9 +1,21 @@
 import { useCallback, useMemo, useState } from 'react'
-import { ArrowRight, ArrowsDownUp, CalendarBlank, ListBullets, MagnifyingGlass, Plus, Sparkle, X } from '@phosphor-icons/react'
+import {
+  ArrowRight,
+  ArrowsDownUp,
+  CalendarBlank,
+  ListBullets,
+  MagnifyingGlass,
+  Plus,
+  Sparkle,
+  UsersThree,
+  X,
+} from '@phosphor-icons/react'
 import type { Moment, Plan, TripStatus, TripTemplate, TripView } from '../lib/types'
 import { listAllMoments, listAllPlans, listTrips, memoriesOf } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
-import { useI18n, useNav, useSearch } from '../lib/app-context'
+import { useI18n, useNav, useSearch, useToast } from '../lib/app-context'
+import { joinTripByCode } from '../lib/cloud'
+import { runSync } from '../lib/sync-engine'
 import {
   daysUntil,
   dayIndexOfDate,
@@ -46,11 +58,15 @@ export function TripsPage() {
   )
   const nav = useNav()
   const openSearch = useSearch()
+  const toast = useToast()
   const { t, tr } = useI18n()
 
   const [status, setStatus] = useState<'all' | TripStatus>('all')
   const [sortBy, setSortBy] = useState<'date' | 'spend' | 'title'>('date')
   const [templateOpen, setTemplateOpen] = useState(false)
+  const [joinOpen, setJoinOpen] = useState(false)
+  const [joinCode, setJoinCode] = useState('')
+  const [joinBusy, setJoinBusy] = useState(false)
   const [mode, setMode] = useState<'list' | 'calendar'>('list')
   const [selectedDay, setSelectedDay] = useState<DayBucket | null>(null)
 
@@ -106,6 +122,9 @@ export function TripsPage() {
           </h1>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <IconButton label={tr('用邀请码加入')} onClick={() => setJoinOpen(true)}>
+            <UsersThree size={17} />
+          </IconButton>
           <IconButton label={tr('搜索')} onClick={openSearch}>
             <MagnifyingGlass size={17} />
           </IconButton>
@@ -390,6 +409,46 @@ export function TripsPage() {
         <p className="px-1 pt-3 text-caption leading-4 text-ink-3">
           {tr('选模板会自动套用对应的日程与打包清单，之后都能单独修改。')}
         </p>
+      </Sheet>
+
+      <Sheet open={joinOpen} title={tr('用邀请码加入旅程')} onClose={() => setJoinOpen(false)}>
+        <div className="space-y-3">
+          <p className="text-note leading-5 text-ink-3">
+            {tr('向旅伴要这趟旅程的邀请码（6 位）。加入后两端自动同步同一份数据，需要先登录云同步。')}
+          </p>
+          <input
+            className="input text-center font-mono text-title tracking-[0.3em]"
+            value={joinCode}
+            maxLength={8}
+            placeholder="ABCD12"
+            onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
+          />
+          <button
+            type="button"
+            className="btn-primary w-full"
+            disabled={joinBusy || joinCode.trim().length < 4}
+            onClick={async () => {
+              setJoinBusy(true)
+              try {
+                const result = await joinTripByCode(joinCode.trim())
+                await runSync().catch(() => null)
+                toast(tr('已加入「{title}」', { title: result.title || result.owner }))
+                setJoinOpen(false)
+                setJoinCode('')
+                nav.navigate({ name: 'trip', id: result.tripId, tab: 'plan' })
+              } catch (error) {
+                toast(error instanceof Error ? error.message : tr('加入失败'))
+              } finally {
+                setJoinBusy(false)
+              }
+            }}
+          >
+            {joinBusy ? tr('加入中…') : tr('加入旅程')}
+          </button>
+          <p className="text-caption leading-4 text-ink-3">
+            {tr('不想共享时，可以随时在旅程里退出。')}
+          </p>
+        </div>
       </Sheet>
 
       <Sheet

@@ -377,3 +377,31 @@ export function adminListModels(endpointId: string): Promise<{ models: string[] 
 export function adminChangePassword(password: string): Promise<{ ok: boolean }> {
   return adminApi('/admin/password', { method: 'POST', body: { password } })
 }
+
+/* ---------------- 旅伴邀请码（trip 级共享） ---------------- */
+
+export interface TripShare {
+  tripId: string
+  owner: string
+  title: string
+  joinedAt: number
+}
+
+/** 用邀请码加入别人的旅程 */
+export async function joinTripByCode(inviteCode: string): Promise<{
+  tripId: string
+  title: string
+  owner: string
+}> {
+  return api('/trips/join', { method: 'POST', body: { inviteCode } })
+}
+
+/** 我加入的共享旅程 */
+export async function listTripShares(): Promise<{ shares: TripShare[] }> {
+  return api('/trips/shares')
+}
+
+/** 退出某个共享旅程 */
+export async function leaveTripShare(tripId: string): Promise<{ ok: boolean }> {
+  return api(`/trips/shares/${encodeURIComponent(tripId)}`, { method: 'DELETE' })
+}
