@@ -29,6 +29,7 @@ import { ExpenseEditor } from './pages/ExpenseEditor'
 import { FootprintEditor } from './pages/FootprintEditor'
 import { PlanEditor } from './pages/PlanEditor'
 import { SyncPage } from './pages/SyncPage'
+import { AdminPage } from './pages/AdminPage'
 
 const TABS: TabKey[] = ['plan', 'timeline', 'ledger', 'checklist', 'members']
 const TEMPLATES: TripTemplate[] = ['blank', 'city', 'beach', 'road', 'ski']
@@ -72,6 +73,8 @@ function parseHash(): View {
       return { name: 'profile' }
     case 'sync':
       return { name: 'sync' }
+    case 'admin':
+      return { name: 'admin' }
     default:
       return { name: 'trips' }
   }
@@ -107,6 +110,8 @@ function toHash(view: View): string {
       return '#/footprint-editor'
     case 'sync':
       return '#/sync'
+    case 'admin':
+      return '#/admin'
   }
 }
 
@@ -282,6 +287,8 @@ export default function App() {
         return <FootprintEditor />
       case 'sync':
         return <SyncPage />
+      case 'admin':
+        return <AdminPage />
     }
   }
 

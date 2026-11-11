@@ -5,6 +5,7 @@ import {
   CaretRight,
   CloudSlash,
   DownloadSimple,
+  GearSix,
   Images,
   Translate,
   MapPinLine,
@@ -238,6 +239,12 @@ export function ProfilePage() {
           title={t('profile.sync')}
           value={data.stats.pendingSync > 0 ? `${data.stats.pendingSync} 条待同步` : '未连接云端'}
           onClick={() => nav.navigate({ name: 'sync' })}
+        />
+        <SettingRow
+          icon={<GearSix size={17} />}
+          title={tr('管理面板')}
+          value={tr('用户、AI 接口与站点设置')}
+          onClick={() => nav.navigate({ name: 'admin' })}
         />
         <div className="flex w-full items-center gap-3 border-b border-line px-4 py-3.5">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-ink-2">

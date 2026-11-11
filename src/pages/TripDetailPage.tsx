@@ -6,6 +6,7 @@ import {
   CaretDown,
   CaretUp,
   Copy,
+  DotsThree,
   DownloadSimple,
   MapPin,
   PencilSimple,
@@ -117,6 +118,7 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
   const [newCheck, setNewCheck] = useState('')
   const [newMember, setNewMember] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
   const [checklistTemplateOpen, setChecklistTemplateOpen] = useState(false)
   const [lightbox, setLightbox] = useState<{ photos: Photo[]; index: number } | null>(null)
 
@@ -297,10 +299,18 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
           type="button"
           onClick={exportMarkdown}
           aria-label={tr('导出为 Markdown')}
-          className="press ml-auto flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-line px-2.5 text-caption text-ink-2 hover:text-ink"
+          className="press ml-auto hidden h-8 shrink-0 items-center gap-1.5 rounded-full border border-line px-2.5 text-caption text-ink-2 hover:text-ink sm:flex"
         >
           <DownloadSimple size={13} />
           {tr('导出')}
+        </button>
+        <button
+          type="button"
+          onClick={() => setMenuOpen(true)}
+          aria-label={tr('更多操作')}
+          className="press ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-line text-ink-2 hover:text-ink sm:ml-1"
+        >
+          <DotsThree size={18} weight="bold" />
         </button>
       </div>
 
@@ -554,6 +564,56 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
           </button>
         </aside>
       </div>
+
+      <Sheet open={menuOpen} title={tr('旅程操作')} onClose={() => setMenuOpen(false)}>
+        <div className="space-y-1.5">
+          <button
+            type="button"
+            onClick={() => {
+              setMenuOpen(false)
+              nav.navigate({ name: 'tripEditor', id: trip.id })
+            }}
+            className="press flex w-full items-center gap-2.5 rounded-xl px-3 py-3 text-left text-body text-ink hover:bg-paper-2"
+          >
+            <PencilSimple size={16} className="text-ink-3" />
+            {tr('编辑旅程')}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMenuOpen(false)
+              exportMarkdown()
+            }}
+            className="press flex w-full items-center gap-2.5 rounded-xl px-3 py-3 text-left text-body text-ink hover:bg-paper-2"
+          >
+            <DownloadSimple size={16} className="text-ink-3" />
+            {tr('导出 Markdown')}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMenuOpen(false)
+              copyTrip()
+            }}
+            className="press flex w-full items-center gap-2.5 rounded-xl px-3 py-3 text-left text-body text-ink hover:bg-paper-2"
+          >
+            <Copy size={16} className="text-ink-3" />
+            {tr('复制这段旅程')}
+          </button>
+          <div className="my-1 h-px bg-line" />
+          <button
+            type="button"
+            onClick={() => {
+              setMenuOpen(false)
+              setConfirmDelete(true)
+            }}
+            className="press flex w-full items-center gap-2.5 rounded-xl px-3 py-3 text-left text-body text-danger hover:bg-danger/10"
+          >
+            <Trash size={16} />
+            {tr('删除这段旅程')}
+          </button>
+        </div>
+      </Sheet>
 
       <ConfirmDialog
         open={confirmDelete}

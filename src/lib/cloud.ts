@@ -67,18 +67,25 @@ export class ApiError extends Error {
 
 export async function api<T>(
   path: string,
-  options: { method?: 'GET' | 'POST'; body?: unknown; auth?: boolean; timeoutMs?: number } = {},
+  options: {
+    method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+    body?: unknown
+    auth?: boolean
+    token?: string
+    timeoutMs?: number
+  } = {},
 ): Promise<T> {
   const config = getCloudConfig()
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), options.timeoutMs ?? 20000)
 
   try {
+    const bearer = options.token ?? (options.auth === false ? '' : config.token)
     const response = await fetch(`${apiOrigin()}${path}`, {
       method: options.method ?? 'GET',
       headers: {
         'content-type': 'application/json',
-        ...(options.auth === false || !config.token ? {} : { authorization: `Bearer ${config.token}` }),
+        ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
       },
       body: options.body ? JSON.stringify(options.body) : undefined,
       signal: controller.signal,
@@ -211,4 +218,136 @@ export async function geocode(query: string): Promise<{
   longitude?: number
 }> {
   return api(`/geocode?q=${encodeURIComponent(query)}`, { auth: false })
+}
+
+/* ---------------- 管理面板 ---------------- */
+
+const ADMIN_KEY = 'travelog.admin'
+
+export interface AdminSession {
+  token: string
+  username: string
+}
+
+export function getAdminSession(): AdminSession | null {
+  try {
+    const raw = localStorage.getItem(ADMIN_KEY)
+    return raw ? (JSON.parse(raw) as AdminSession) : null
+  } catch {
+    return null
+  }
+}
+
+export function saveAdminSession(session: AdminSession | null): void {
+  if (!session) localStorage.removeItem(ADMIN_KEY)
+  else localStorage.setItem(ADMIN_KEY, JSON.stringify(session))
+}
+
+function adminApi<T>(
+  path: string,
+  options: Parameters<typeof api>[1] = {},
+): Promise<T> {
+  return api<T>(path, { ...options, token: getAdminSession()?.token ?? '' })
+}
+
+export interface AdminOverview {
+  site: string
+  users: number
+  active7Days: number
+  entities: number
+  ai: {
+    enabled: boolean
+    provider: 'openai' | 'workers'
+    model: string
+    workersBound: boolean
+  }
+  time: number
+}
+
+export interface AdminUser {
+  id: string
+  nickname: string | null
+  syncCode: string
+  createdAt: number
+  lastSeenAt: number
+  status: 'active' | 'disabled'
+  entityCount: number
+}
+
+export interface AdminSettings {
+  site: { name: string }
+  ai: {
+    enabled: boolean
+    provider: 'openai' | 'workers'
+    openaiKey: string
+    hasOpenaiKey: boolean
+    openaiBase: string
+    openaiModel: string
+    workersModel: string
+    temperature: number
+    workersBound: boolean
+  }
+}
+
+export async function adminLogin(username: string, password: string): Promise<AdminSession> {
+  const result = await api<{ token: string; username: string }>('/admin/login', {
+    method: 'POST',
+    auth: false,
+    body: { username, password },
+  })
+  const session = { token: result.token, username: result.username }
+  saveAdminSession(session)
+  return session
+}
+
+export async function adminLogout(): Promise<void> {
+  try {
+    await adminApi('/admin/logout', { method: 'POST' })
+  } catch {
+    /* 退出失败也清本地 */
+  }
+  saveAdminSession(null)
+}
+
+export function adminOverview(): Promise<AdminOverview> {
+  return adminApi('/admin/overview')
+}
+
+export function adminListUsers(query: string, limit = 50, offset = 0): Promise<{ total: number; users: AdminUser[] }> {
+  const params = new URLSearchParams({ q: query, limit: String(limit), offset: String(offset) })
+  return adminApi(`/admin/users?${params.toString()}`)
+}
+
+export function adminPatchUser(
+  id: string,
+  patch: { status?: 'active' | 'disabled'; nickname?: string; note?: string },
+): Promise<{ ok: boolean }> {
+  return adminApi(`/admin/users/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch })
+}
+
+export function adminDeleteUser(id: string): Promise<{ ok: boolean }> {
+  return adminApi(`/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export function adminResetSyncCode(id: string): Promise<{ syncCode: string }> {
+  return adminApi(`/admin/users/${encodeURIComponent(id)}/reset-code`, { method: 'POST' })
+}
+
+export function adminGetSettings(): Promise<AdminSettings> {
+  return adminApi('/admin/settings')
+}
+
+export function adminSaveSettings(payload: {
+  site?: { name?: string }
+  ai?: Partial<AdminSettings['ai']> & { clearOpenaiKey?: boolean }
+}): Promise<{ ok: boolean }> {
+  return adminApi('/admin/settings', { method: 'PUT', body: payload })
+}
+
+export function adminTestAI(): Promise<{ ok: boolean; model: string; sample: string }> {
+  return adminApi('/admin/ai/test', { method: 'POST' })
+}
+
+export function adminChangePassword(password: string): Promise<{ ok: boolean }> {
+  return adminApi('/admin/password', { method: 'POST', body: { password } })
 }

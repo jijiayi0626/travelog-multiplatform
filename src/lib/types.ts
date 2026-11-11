@@ -165,6 +165,7 @@ export type View =
   | { name: 'footprintEditor' }
   | { name: 'planEditor'; tripId: string; planId?: string; dayIndex?: number }
   | { name: 'sync' }
+  | { name: 'admin' }
 
 export interface SearchResult {
   kind: 'trip' | 'moment' | 'expense' | 'footprint' | 'plan'

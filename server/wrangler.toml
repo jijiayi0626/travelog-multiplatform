@@ -1,26 +1,28 @@
-name = "travelog-api"
+name = "travelog"
 main = "src/index.js"
 compatibility_date = "2025-01-01"
 
-# 首次部署：
-#   wrangler d1 create travelog
-# 把返回的 database_id 填到下面
+# 前端构建产物由同一个 Worker 托管，前后端不再分开部署。
+# 部署前先在仓库根执行：npm run build
+[assets]
+directory = "../dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "travelog"
 database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
 
-# Workers AI（可选）：删除这段则走 OPENAI_API_KEY
 [ai]
 binding = "AI"
 
 [vars]
-# 允许的前端来源，部署时改成你的域名，或保持 * 便于调试
 CORS_ORIGIN = "*"
-# Workers AI 默认模型
-AI_MODEL = "@cf/meta/llama-3.1-8b-instruct"
+SITE_NAME = "旅记 Travelog"
+# 管理面板首次登录的引导口令：登录后立即在面板里改掉，然后删除此变量并重新部署
+ADMIN_USER = "admin"
+ADMIN_TOKEN = "change-me-now"
 
-# 如果要接 OpenAI 兼容接口：
-#   wrangler secret put OPENAI_API_KEY
-#   wrangler secret put OPENAI_BASE_URL   （默认 https://api.openai.com/v1）
-#   wrangler secret put OPENAI_MODEL      （默认 gpt-4o-mini）
+# AI 配置不写在这里：登录管理面板 →「AI 接口」填写，保存在 D1 的 settings 表。
