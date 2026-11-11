@@ -1,10 +1,18 @@
 import { useCallback, useMemo, useState } from 'react'
 import { ArrowRight, ArrowsDownUp, MagnifyingGlass, Plus, Sparkle, X } from '@phosphor-icons/react'
-import type { Moment, TripStatus, TripTemplate, TripView } from '../lib/types'
-import { listAllMoments, listTrips, memoriesOf } from '../lib/repo'
+import type { Moment, Plan, TripStatus, TripTemplate, TripView } from '../lib/types'
+import { listAllMoments, listAllPlans, listTrips, memoriesOf } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
 import { useNav, useSearch } from '../lib/app-context'
-import { formatCny, formatDateCn, tripDayCount, tripStatusOf } from '../lib/utils'
+import {
+  daysUntil,
+  dayIndexOfDate,
+  formatCny,
+  formatDateCn,
+  PLAN_KIND_COLOR,
+  tripDayCount,
+  tripStatusOf,
+} from '../lib/utils'
 import { cn } from '../lib/cn'
 import { TripCard } from '../components/cards'
 import { EmptyState, IconButton, Sheet, SkeletonList } from '../components/ui'
@@ -27,12 +35,12 @@ const STATUS_FILTERS: Array<{ value: 'all' | TripStatus; label: string }> = [
 
 export function TripsPage() {
   const loader = useCallback(async () => {
-    const [trips, moments] = await Promise.all([listTrips(), listAllMoments()])
-    return { trips, moments }
+    const [trips, moments, plans] = await Promise.all([listTrips(), listAllMoments(), listAllPlans()])
+    return { trips, moments, plans }
   }, [])
   const { data, loading } = useLoader(
     loader,
-    { trips: [] as TripView[], moments: [] as Moment[] },
+    { trips: [] as TripView[], moments: [] as Moment[], plans: [] as Plan[] },
     'trips',
   )
   const nav = useNav()
@@ -58,6 +66,31 @@ export function TripsPage() {
 
   const totalDays = trips.reduce((sum, trip) => sum + tripDayCount(trip.startDate, trip.endDate), 0)
   const totalSpent = trips.reduce((sum, trip) => sum + trip.expenseTotalCny, 0)
+
+  // 正在进行的旅程优先；否则挑 30 天内最近出发的一段
+  const contextTrip = useMemo(() => {
+    const ongoing = trips.find((trip) => tripStatusOf(trip.startDate, trip.endDate) === 'ongoing')
+    if (ongoing) return { trip: ongoing, kind: 'ongoing' as const }
+    const upcoming = trips
+      .filter((trip) => {
+        const status = tripStatusOf(trip.startDate, trip.endDate)
+        const left = daysUntil(trip.startDate)
+        return status === 'planned' && left >= 0 && left <= 30
+      })
+      .sort((a, b) => a.startDate - b.startDate)[0]
+    return upcoming ? { trip: upcoming, kind: 'upcoming' as const } : null
+  }, [trips])
+
+  const contextPlans = useMemo(() => {
+    if (!contextTrip) return []
+    const day =
+      contextTrip.kind === 'ongoing'
+        ? dayIndexOfDate(contextTrip.trip.startDate)
+        : 1
+    return data.plans
+      .filter((plan) => plan.tripId === contextTrip.trip.id && plan.dayIndex === day)
+      .slice(0, 3)
+  }, [contextTrip, data.plans])
 
   return (
     <div className="space-y-5">
@@ -104,6 +137,65 @@ export function TripsPage() {
         </div>
       ) : null}
 
+      {!loading && contextTrip ? (
+        <button
+          type="button"
+          onClick={() =>
+            nav.navigate({ name: 'trip', id: contextTrip.trip.id, tab: 'plan' })
+          }
+          className="press w-full overflow-hidden rounded-[1.3rem] border border-line bg-surface text-left shadow-lift"
+        >
+          <span className="flex items-center gap-2 border-b border-line bg-paper-2/50 px-4 py-2.5">
+            <span
+              className={cn(
+                'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium',
+                contextTrip.kind === 'ongoing'
+                  ? 'bg-accent text-white'
+                  : 'bg-accent-soft text-accent',
+              )}
+            >
+              {contextTrip.kind === 'ongoing'
+                ? `今天 · 第 ${Math.max(dayIndexOfDate(contextTrip.trip.startDate), 1)} 天`
+                : `还有 ${daysUntil(contextTrip.trip.startDate)} 天出发`}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink">
+              {contextTrip.trip.title}
+            </span>
+            <ArrowRight size={13} className="shrink-0 text-ink-3" />
+          </span>
+          <span className="block space-y-2 px-4 py-3">
+            {contextPlans.length > 0 ? (
+              contextPlans.map((plan) => (
+                <span key={plan.id} className="flex items-center gap-2.5 text-[12px]">
+                  <span className="w-[36px] shrink-0 tabular-nums text-ink-3">
+                    {plan.time || '—'}
+                  </span>
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: PLAN_KIND_COLOR[plan.kind] }}
+                  />
+                  <span
+                    className={cn(
+                      'min-w-0 flex-1 truncate',
+                      plan.done ? 'text-ink-3 line-through' : 'text-ink',
+                    )}
+                  >
+                    {plan.title}
+                  </span>
+                  {plan.place ? (
+                    <span className="shrink-0 truncate text-[10.5px] text-ink-3">{plan.place}</span>
+                  ) : null}
+                </span>
+              ))
+            ) : (
+              <span className="block text-[12px] text-ink-3">
+                {contextTrip.kind === 'ongoing' ? '今天还没有安排，点开补一条' : '还没排日程，点开套用模板'}
+              </span>
+            )}
+          </span>
+        </button>
+      ) : null}
+
       {!loading && memories.length > 0 ? (
         <section className="space-y-2">
           <div className="flex items-baseline justify-between gap-2">
@@ -131,7 +223,10 @@ export function TripsPage() {
                   onClick={() =>
                     nav.navigate({ name: 'trip', id: item.moment.tripId, tab: 'timeline' })
                   }
-                  className="press relative w-[228px] shrink-0 snap-start overflow-hidden rounded-[1.15rem] border border-line bg-surface text-left"
+                  className={cn(
+                    'press relative shrink-0 snap-start overflow-hidden rounded-[1.15rem] border border-line bg-surface text-left',
+                    memories.length === 1 ? 'w-full' : 'w-[228px]',
+                  )}
                 >
                   <span className="relative block h-[104px] w-full overflow-hidden bg-paper-2">
                     {cover ? (

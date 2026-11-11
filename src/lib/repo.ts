@@ -82,22 +82,27 @@ export async function ensureReady(): Promise<void> {
 /* ---------------- 旅行 ---------------- */
 
 export async function listTrips(): Promise<TripView[]> {
-  const [rawTrips, rawMoments, rawExpenses] = await Promise.all([
+  const [rawTrips, rawMoments, rawExpenses, rawPlans] = await Promise.all([
     getAll<Trip>('trips'),
     getAll<Moment>('moments'),
     getAll<Expense>('expenses'),
+    getAll<Plan>('plans'),
   ])
   const trips = rawTrips.map(normalizeTrip)
   const moments = rawMoments.map(normalizeMoment)
   const expenses = rawExpenses.map(normalizeExpense)
+  const plans = rawPlans.map(normalizePlan)
   const views = trips.map((trip) => {
     const tripMoments = moments.filter((item) => item.tripId === trip.id)
     const tripExpenses = expenses.filter((item) => item.tripId === trip.id)
+    const tripPlans = plans.filter((item) => item.tripId === trip.id)
     return {
       ...trip,
       momentCount: tripMoments.length,
       expenseTotal: tripExpenses.reduce((sum, item) => sum + item.amount, 0),
       expenseTotalCny: tripExpenses.reduce((sum, item) => sum + (item.amountCny ?? 0), 0),
+      planCount: tripPlans.length,
+      planDoneCount: tripPlans.filter((item) => item.done).length,
     }
   })
   return views.sort((a, b) => (b.startDate || b.createdAt) - (a.startDate || a.createdAt))
@@ -286,6 +291,12 @@ export async function listPlans(tripId: string): Promise<Plan[]> {
         a.order - b.order ||
         a.createdAt - b.createdAt,
     )
+}
+
+/** 全部计划（首页的今日 / 出发前提示用） */
+export async function listAllPlans(): Promise<Plan[]> {
+  const all = await getAll<Plan>('plans')
+  return all.map(normalizePlan).sort((a, b) => a.dayIndex - b.dayIndex || clockToMinutes(a.time) - clockToMinutes(b.time))
 }
 
 export async function savePlan(plan: Plan): Promise<Plan> {

@@ -111,6 +111,11 @@ export function TripCard({
           {countdown ? (
             <span className="rounded-full bg-white/15 px-2 py-0.5 text-white/90">{countdown}</span>
           ) : null}
+          {trip.planCount > 0 ? (
+            <span>
+              日程 {trip.planDoneCount}/{trip.planCount}
+            </span>
+          ) : null}
           <span>{trip.momentCount} 条记录</span>
           <span className="h-3 w-px bg-white/20" />
           <span>¥ {formatMoney(trip.expenseTotalCny)}</span>

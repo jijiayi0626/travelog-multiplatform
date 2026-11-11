@@ -28,6 +28,8 @@ export interface TripView extends Trip {
   momentCount: number
   expenseTotal: number
   expenseTotalCny: number
+  planCount: number
+  planDoneCount: number
 }
 
 export interface Photo {
