@@ -38,7 +38,7 @@ export function SyncPage() {
         <IconButton label="返回" onClick={() => nav.back()}>
           <ArrowLeft size={18} />
         </IconButton>
-        <span className="text-[12px] text-ink-3">我的 / 云同步</span>
+        <span className="text-note text-ink-3">我的 / 云同步</span>
       </div>
 
       <div className="mx-auto mt-4 w-full max-w-[640px] space-y-4">
@@ -48,14 +48,14 @@ export function SyncPage() {
               <CloudSlash size={20} />
             </span>
             <div className="min-w-0 flex-1">
-              <h1 className="text-[16px] font-semibold tracking-tight text-ink">未连接云端</h1>
-              <p className="mt-1 text-[12px] leading-5 text-ink-3">
+              <h1 className="text-title font-semibold tracking-tight text-ink">未连接云端</h1>
+              <p className="mt-1 text-note leading-5 text-ink-3">
                 当前所有数据都保存在这台设备。接入后端后，同一段旅程可以在手机、平板和网页之间同步。
               </p>
             </div>
           </div>
 
-          <dl className="mt-4 space-y-2.5 border-t border-line pt-3.5 text-[12.5px]">
+          <dl className="mt-4 space-y-2.5 border-t border-line pt-3.5 text-body-sm">
             <div className="flex items-center justify-between">
               <dt className="text-ink-3">状态</dt>
               <dd className="text-ink">仅本地</dd>
@@ -80,30 +80,30 @@ export function SyncPage() {
         </section>
 
         <section className="card p-5">
-          <h2 className="flex items-center gap-1.5 text-[13px] font-semibold tracking-tight text-ink">
+          <h2 className="flex items-center gap-1.5 text-body-sm font-semibold tracking-tight text-ink">
             <Link size={15} />
             同步接口契约
           </h2>
-          <p className="mt-1.5 text-[11.5px] leading-5 text-ink-3">
+          <p className="mt-1.5 text-note leading-5 text-ink-3">
             客户端通过 Repository 与 SyncService 两个抽象访问数据。后端实现同一组接口后，替换注入点即可，页面无需改动。
           </p>
           <ul className="mt-3 divide-y divide-line">
             {ENDPOINTS.map((item) => (
-              <li key={item.path} className="flex items-center gap-2.5 py-2.5 text-[11.5px]">
-                <span className="w-[38px] shrink-0 font-mono text-[10px] text-accent">{item.method}</span>
-                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-2">{item.path}</span>
-                <span className="shrink-0 text-[10.5px] text-ink-3">{item.note}</span>
+              <li key={item.path} className="flex items-center gap-2.5 py-2.5 text-note">
+                <span className="w-[38px] shrink-0 font-mono text-caption text-accent">{item.method}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-caption text-ink-2">{item.path}</span>
+                <span className="shrink-0 text-caption text-ink-3">{item.note}</span>
               </li>
             ))}
           </ul>
         </section>
 
         <section className="rounded-2xl border border-line bg-surface p-4">
-          <p className="flex items-center gap-1.5 text-[12px] font-medium text-ink">
+          <p className="flex items-center gap-1.5 text-note font-medium text-ink">
             <ShieldCheck size={15} className="text-accent" />
             本地优先
           </p>
-          <p className="mt-1.5 text-[11.5px] leading-4 text-ink-3">
+          <p className="mt-1.5 text-note leading-4 text-ink-3">
             读写先落本地，网络失败不影响记录；同步以 updatedAt 较新者为准，删除通过墓碑记录避免回滚。
           </p>
         </section>

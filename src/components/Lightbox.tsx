@@ -47,7 +47,7 @@ export function Lightbox({
       aria-modal="true"
     >
       <header className="flex items-center justify-between px-4 pb-3 pt-[max(12px,env(safe-area-inset-top))]">
-        <span className="text-[12px] tabular-nums text-white/60">
+        <span className="text-note tabular-nums text-[var(--on-cover-muted)]">
           {index + 1} / {total}
         </span>
         <div className="flex items-center gap-2">
@@ -114,7 +114,7 @@ export function Lightbox({
 
       <footer className="safe-bottom px-4 pb-4">
         {photo.caption ? (
-          <p className="mb-2 text-center text-[12px] text-white/70">{photo.caption}</p>
+          <p className="mb-2 text-center text-note text-[var(--on-cover-muted)]">{photo.caption}</p>
         ) : null}
         {total > 1 ? (
           <div className="hide-scrollbar flex justify-center gap-2 overflow-x-auto">

@@ -27,12 +27,12 @@ export function EditorScreen({
         <IconButton label="返回" onClick={onBack}>
           <ArrowLeft size={18} />
         </IconButton>
-        <h1 className="min-w-0 flex-1 truncate text-[16px] font-semibold tracking-tight text-ink">
+        <h1 className="min-w-0 flex-1 truncate text-title font-semibold tracking-tight text-ink">
           {title}
         </h1>
         <button
           type="button"
-          className="btn-primary h-9 px-4 text-[13px]"
+          className="btn-primary h-9 px-4 text-body-sm"
           disabled={saveDisabled || saving}
           onClick={onSave}
         >
@@ -61,8 +61,8 @@ export function FormBlock({
     <section className="card space-y-3.5 p-4 sm:p-5">
       {title ? (
         <div className="flex items-baseline justify-between gap-2">
-          <h2 className="text-[13px] font-semibold tracking-tight text-ink">{title}</h2>
-          {hint ? <span className="text-[11px] text-ink-3">{hint}</span> : null}
+          <h2 className="text-body-sm font-semibold tracking-tight text-ink">{title}</h2>
+          {hint ? <span className="text-caption text-ink-3">{hint}</span> : null}
         </div>
       ) : null}
       {children}

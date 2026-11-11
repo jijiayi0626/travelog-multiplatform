@@ -122,8 +122,8 @@ export function AlbumPage() {
     <div className="space-y-5">
       <header className="flex items-end justify-between gap-3 pt-4">
         <div className="min-w-0">
-          <p className="text-[10.5px] uppercase tracking-[0.22em] text-ink-3">Album</p>
-          <h1 className="mt-1.5 text-[27px] font-semibold leading-none tracking-tight text-ink sm:text-[32px]">
+          <p className="text-caption uppercase tracking-[0.22em] text-ink-3">Album</p>
+          <h1 className="mt-1.5 text-heading font-semibold leading-none tracking-tight text-ink sm:text-display">
             相册
           </h1>
         </div>
@@ -134,7 +134,7 @@ export function AlbumPage() {
               type="button"
               onClick={() => setMode(item.value)}
               className={cn(
-                'press rounded-full px-3 py-1.5 text-[12px]',
+                'press rounded-full px-3 py-1.5 text-note',
                 mode === item.value ? 'bg-surface text-ink shadow-sm' : 'text-ink-3',
               )}
             >
@@ -147,22 +147,22 @@ export function AlbumPage() {
       {!loading && allPhotos.length > 0 ? (
         <div className="flex divide-x divide-line border-y border-line py-3.5">
           <div className="min-w-0 flex-1 pr-3">
-            <p className="text-[10.5px] tracking-wide text-ink-3">照片</p>
-            <p className="mt-1 text-[17px] font-semibold tabular-nums tracking-tight text-ink">
+            <p className="text-caption tracking-wide text-ink-3">照片</p>
+            <p className="mt-1 text-title font-semibold tabular-nums tracking-tight text-ink">
               {allPhotos.length}
-              <span className="ml-0.5 text-[11px] font-normal text-ink-3">张</span>
+              <span className="ml-0.5 text-caption font-normal text-ink-3">张</span>
             </p>
           </div>
           <div className="min-w-0 flex-1 px-3">
-            <p className="text-[10.5px] tracking-wide text-ink-3">旅程</p>
-            <p className="mt-1 text-[17px] font-semibold tabular-nums tracking-tight text-ink">
+            <p className="text-caption tracking-wide text-ink-3">旅程</p>
+            <p className="mt-1 text-title font-semibold tabular-nums tracking-tight text-ink">
               {tripCount}
-              <span className="ml-0.5 text-[11px] font-normal text-ink-3">段</span>
+              <span className="ml-0.5 text-caption font-normal text-ink-3">段</span>
             </p>
           </div>
           <div className="min-w-0 flex-1 pl-3">
-            <p className="text-[10.5px] tracking-wide text-ink-3">最近一张</p>
-            <p className="mt-1 truncate text-[13px] font-medium text-ink">
+            <p className="text-caption tracking-wide text-ink-3">最近一张</p>
+            <p className="mt-1 truncate text-body-sm font-medium text-ink">
               {allPhotos[0] ? formatDateCn(allPhotos[0].takenAt) : '—'}
             </p>
           </div>
@@ -193,16 +193,16 @@ export function AlbumPage() {
             <section key={group.key}>
               <div className="mb-2 flex items-baseline justify-between gap-3">
                 <div className="min-w-0">
-                  <h2 className="truncate text-[13px] font-semibold tracking-tight text-ink">
+                  <h2 className="truncate text-body-sm font-semibold tracking-tight text-ink">
                     {group.title}
                   </h2>
-                  <p className="mt-0.5 text-[11px] text-ink-3">{group.subtitle}</p>
+                  <p className="mt-0.5 text-caption text-ink-3">{group.subtitle}</p>
                 </div>
                 {group.tripId ? (
                   <button
                     type="button"
                     onClick={() => nav.navigate({ name: 'trip', id: group.tripId as string, tab: 'timeline' })}
-                    className="press shrink-0 rounded-full border border-line px-2.5 py-1 text-[11px] text-ink-2"
+                    className="press shrink-0 rounded-full border border-line px-2.5 py-1 text-caption text-ink-2"
                   >
                     查看旅程
                   </button>
@@ -225,7 +225,7 @@ export function AlbumPage() {
                       className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
                     />
                     {photo.caption ? (
-                      <span className="absolute inset-x-0 bottom-0 line-clamp-1 bg-gradient-to-t from-black/55 to-transparent px-2 pb-1.5 pt-4 text-left text-[10px] text-white/90 opacity-0 transition-opacity group-hover:opacity-100">
+                      <span className="absolute inset-x-0 bottom-0 line-clamp-1 bg-gradient-to-t from-black/55 to-transparent px-2 pb-1.5 pt-4 text-left text-caption text-[var(--on-cover-strong)] opacity-0 transition-opacity group-hover:opacity-100">
                         {photo.caption}
                       </span>
                     ) : null}
@@ -235,7 +235,7 @@ export function AlbumPage() {
             </section>
           ))}
 
-          <p className="flex items-center justify-center gap-1.5 pb-2 text-[10.5px] text-ink-3">
+          <p className="flex items-center justify-center gap-1.5 pb-2 text-caption text-ink-3">
             <ImageSquare size={12} />
             照片压缩后存在本机，导出备份时会一并带走
           </p>

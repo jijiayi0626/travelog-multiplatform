@@ -268,7 +268,7 @@ export default function App() {
           <SearchContext.Provider value={openSearch}>
             <ShortcutsContext.Provider value={openShortcuts}>
               {!online ? (
-                <div className="fixed inset-x-0 top-0 z-[65] flex items-center justify-center gap-2 bg-ink/90 px-4 py-1.5 text-[11.5px] text-paper backdrop-blur">
+                <div className="fixed inset-x-0 top-0 z-[65] flex items-center justify-center gap-2 bg-ink/90 px-4 py-1.5 text-note text-paper backdrop-blur">
                   <span className="h-1.5 w-1.5 rounded-full bg-warn" />
                   离线模式 · 数据仍会保存在本机
                 </div>
@@ -290,7 +290,7 @@ export default function App() {
                 {toasts.map((item) => (
                   <div
                     key={item.id}
-                    className="fade-in flex items-center gap-2 rounded-full border border-line bg-ink px-4 py-2 text-[12.5px] text-paper shadow-[var(--shadow-float)]"
+                    className="fade-in flex items-center gap-2 rounded-full border border-line bg-ink px-4 py-2 text-body-sm text-paper shadow-[var(--shadow-float)]"
                   >
                     <span
                       className={

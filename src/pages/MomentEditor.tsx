@@ -127,7 +127,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
       saving={saving}
       saveDisabled={loading || uploading}
     >
-      <div className="flex items-center gap-2 text-[11.5px] text-ink-3">
+      <div className="flex items-center gap-2 text-note text-ink-3">
         <span className="rounded-full bg-accent-soft px-2.5 py-1 font-medium text-accent">
           第 {dayIndex} 天
         </span>
@@ -168,14 +168,14 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
                     previous.includes(tag) ? previous.filter((item) => item !== tag) : [...previous, tag],
                   )
                 }
-                className={cn('chip px-2.5 py-1 text-[11.5px]', tags.includes(tag) && 'chip-active')}
+                className={cn('chip px-2.5 py-1 text-note', tags.includes(tag) && 'chip-active')}
               >
                 #{tag}
               </button>
             ))}
           </div>
           <input
-            className="input h-10 text-[13px]"
+            className="input h-10 text-body-sm"
             value={customTag}
             placeholder="自定义标签，回车添加"
             onChange={(event) => setCustomTag(event.target.value)}
@@ -193,7 +193,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
               {tags.map((tag) => (
                 <span
                   key={tag}
-                  className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[10.5px] text-ink-2"
+                  className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-caption text-ink-2"
                 >
                   #{tag}
                   <button
@@ -230,7 +230,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
           type="button"
           disabled={photos.length >= MAX_PHOTOS || uploading}
           onClick={() => fileRef.current?.click()}
-          className="press flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line bg-paper-2/40 py-3 text-[12.5px] text-ink-2 disabled:opacity-50"
+          className="press flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line bg-paper-2/40 py-3 text-body-sm text-ink-2 disabled:opacity-50"
         >
           {uploading ? (
             <>
@@ -244,7 +244,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
             </>
           )}
         </button>
-        <p className="text-[11px] leading-4 text-ink-3">
+        <p className="text-caption leading-4 text-ink-3">
           照片会压缩后保存在本地，不会上传到任何服务器。
         </p>
       </FormBlock>
@@ -253,7 +253,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
         <button
           type="button"
           onClick={() => setConfirmDelete(true)}
-          className="press mx-auto flex items-center gap-1.5 rounded-full border border-line px-4 py-2 text-[12.5px] text-ink-3 hover:text-danger"
+          className="press mx-auto flex items-center gap-1.5 rounded-full border border-line px-4 py-2 text-body-sm text-ink-3 hover:text-danger"
         >
           <Trash size={14} />
           删除这条记录

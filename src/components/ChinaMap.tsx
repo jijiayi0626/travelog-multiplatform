@@ -76,13 +76,13 @@ export function ChinaMap({
 
       <div className="pointer-events-none absolute inset-x-3 bottom-3 flex items-end justify-between gap-3">
         <div className="min-w-0 rounded-lg bg-surface/90 px-2 py-1 backdrop-blur-sm">
-          <p className="truncate text-[12px] text-ink">
+          <p className="truncate text-note text-ink">
             {activeProvince
               ? `${activeProvince.short}${activeVisit ? ` · ${activeVisit.places.length} 个地点` : ' · 还没去过'}`
               : '悬停查看省份，点亮的地方是去过的地方'}
           </p>
         </div>
-        <span className="shrink-0 rounded-full border border-line bg-surface/90 px-2.5 py-1 text-[10px] tabular-nums text-ink-3 backdrop-blur-sm">
+        <span className="shrink-0 rounded-full border border-line bg-surface/90 px-2.5 py-1 text-caption tabular-nums text-ink-3 backdrop-blur-sm">
           {visits.size} / {PROVINCES.length}
         </span>
       </div>

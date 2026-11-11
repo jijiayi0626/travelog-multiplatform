@@ -113,9 +113,9 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
       <FormBlock title={trip ? trip.title : '全部旅行'}>
         <Field label="金额" error={error}>
           <div className="flex items-end gap-2 border-b border-line pb-2">
-            <span className="pb-1.5 text-[22px] font-normal text-ink-3">{CURRENCY_SYMBOL[currency]}</span>
+            <span className="pb-1.5 text-heading-sm font-normal text-ink-3">{CURRENCY_SYMBOL[currency]}</span>
             <input
-              className="w-full bg-transparent text-[38px] font-semibold leading-none tabular-nums tracking-tight text-ink outline-none placeholder:text-ink-3/60"
+              className="w-full bg-transparent text-display-lg font-semibold leading-none tabular-nums tracking-tight text-ink outline-none placeholder:text-ink-3/60"
               inputMode="decimal"
               value={amountText}
               placeholder="0.00"
@@ -133,14 +133,14 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
               key={item}
               type="button"
               onClick={() => setCurrency(item)}
-              className={cn('chip px-2.5 py-1 text-[11.5px]', currency === item && 'chip-active')}
+              className={cn('chip px-2.5 py-1 text-note', currency === item && 'chip-active')}
             >
               {item}
             </button>
           ))}
         </div>
         {currency !== 'CNY' && amountText ? (
-          <p className="text-[11.5px] text-ink-3">
+          <p className="text-note text-ink-3">
             约 ¥{formatMoney(Number.parseFloat(amountText || '0') * CURRENCY_RATE_TO_CNY[currency])} ·{' '}
             {CURRENCY_LABEL[currency]}按离线汇率折算
           </p>
@@ -157,7 +157,7 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
                 type="button"
                 onClick={() => setCategory(item)}
                 className={cn(
-                  'press inline-flex items-center gap-1.5 rounded-full border px-3 py-2 text-[12.5px]',
+                  'press inline-flex items-center gap-1.5 rounded-full border px-3 py-2 text-body-sm',
                   active ? 'border-transparent text-white' : 'border-line bg-surface text-ink-2',
                 )}
                 style={active ? { backgroundColor: CATEGORY_COLOR[item] } : undefined}
@@ -194,7 +194,7 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
         <button
           type="button"
           onClick={() => setConfirmDelete(true)}
-          className="press mx-auto flex items-center gap-1.5 rounded-full border border-line px-4 py-2 text-[12.5px] text-ink-3 hover:text-danger"
+          className="press mx-auto flex items-center gap-1.5 rounded-full border border-line px-4 py-2 text-body-sm text-ink-3 hover:text-danger"
         >
           <Trash size={14} />
           删除这笔账目

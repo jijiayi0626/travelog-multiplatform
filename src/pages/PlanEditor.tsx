@@ -120,7 +120,7 @@ export function PlanEditor({
       saving={saving}
       saveDisabled={loading}
     >
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-ink-3">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-note text-ink-3">
         <span className="rounded-full bg-accent-soft px-2.5 py-1 font-medium text-accent">
           第 {day} 天
         </span>
@@ -158,7 +158,7 @@ export function PlanEditor({
               >
                 −
               </button>
-              <span className="w-10 text-center text-[16px] font-semibold tabular-nums text-ink">
+              <span className="w-10 text-center text-title font-semibold tabular-nums text-ink">
                 {day}
               </span>
               <button
@@ -187,7 +187,7 @@ export function PlanEditor({
               key={item}
               type="button"
               onClick={() => setTime(item)}
-              className={cn('chip px-2.5 py-1 text-[11.5px]', time === item && 'chip-active')}
+              className={cn('chip px-2.5 py-1 text-note', time === item && 'chip-active')}
             >
               {item}
             </button>
@@ -204,7 +204,7 @@ export function PlanEditor({
                   type="button"
                   onClick={() => setDay(value)}
                   className={cn(
-                    'press h-7 w-7 rounded-full text-[11.5px] tabular-nums',
+                    'press h-7 w-7 rounded-full text-note tabular-nums',
                     day === value ? 'bg-accent text-white' : 'bg-paper-2 text-ink-2',
                   )}
                 >
@@ -226,7 +226,7 @@ export function PlanEditor({
                 type="button"
                 onClick={() => setKind(item)}
                 className={cn(
-                  'press inline-flex items-center gap-1.5 rounded-full border px-3 py-2 text-[12.5px]',
+                  'press inline-flex items-center gap-1.5 rounded-full border px-3 py-2 text-body-sm',
                   active ? 'border-transparent text-white' : 'border-line bg-surface text-ink-2',
                 )}
                 style={active ? { backgroundColor: PLAN_KIND_COLOR[item] } : undefined}
@@ -267,7 +267,7 @@ export function PlanEditor({
             type="button"
             onClick={() => setDone((value) => !value)}
             className={cn(
-              'press mx-auto flex items-center gap-2 rounded-full border px-4 py-2 text-[12.5px]',
+              'press mx-auto flex items-center gap-2 rounded-full border px-4 py-2 text-body-sm',
               done ? 'border-transparent bg-accent text-white' : 'border-line text-ink-2',
             )}
           >
@@ -278,7 +278,7 @@ export function PlanEditor({
           <button
             type="button"
             onClick={() => setConfirmDelete(true)}
-            className="press mx-auto flex items-center gap-1.5 rounded-full border border-line px-4 py-2 text-[12.5px] text-ink-3 hover:text-danger"
+            className="press mx-auto flex items-center gap-1.5 rounded-full border border-line px-4 py-2 text-body-sm text-ink-3 hover:text-danger"
           >
             <Trash size={14} />
             删除这条计划

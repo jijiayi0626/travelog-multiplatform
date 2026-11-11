@@ -130,10 +130,10 @@ export function FootprintEditor() {
             )}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-[13px] font-medium text-ink">
+            <span className="block text-body-sm font-medium text-ink">
               {locating ? '定位中…' : '使用当前位置'}
             </span>
-            <span className="mt-0.5 block text-[11.5px] tabular-nums text-ink-3">
+            <span className="mt-0.5 block text-note tabular-nums text-ink-3">
               {hasCoord
                 ? `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`
                 : '允许定位后可在地图中查看这个地点'}
@@ -148,7 +148,7 @@ export function FootprintEditor() {
               setLatitude(0)
               setLongitude(0)
             }}
-            className="press self-start text-[11.5px] text-ink-3 underline-offset-2 hover:text-danger hover:underline"
+            className="press self-start text-note text-ink-3 underline-offset-2 hover:text-danger hover:underline"
           >
             清除坐标
           </button>

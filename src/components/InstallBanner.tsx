@@ -29,12 +29,12 @@ export function InstallBanner() {
         <DownloadSimple size={17} />
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-[12.5px] font-medium text-ink">安装旅记到桌面</p>
-        <p className="truncate text-[11px] text-ink-3">离线也能查看过往旅程</p>
+        <p className="text-body-sm font-medium text-ink">安装旅记到桌面</p>
+        <p className="truncate text-caption text-ink-3">离线也能查看过往旅程</p>
       </div>
       <button
         type="button"
-        className="press shrink-0 rounded-full bg-accent px-3 py-1.5 text-[11.5px] font-medium text-white"
+        className="press shrink-0 rounded-full bg-accent px-3 py-1.5 text-note font-medium text-white"
         onClick={async () => {
           if (!promptEvent) return
           await promptEvent.prompt()

@@ -96,8 +96,8 @@ export function TripsPage() {
     <div className="space-y-5">
       <header className="flex items-end justify-between gap-3 pt-4">
         <div className="min-w-0">
-          <p className="text-[10.5px] uppercase tracking-[0.22em] text-ink-3">Your journeys</p>
-          <h1 className="mt-1.5 text-[27px] font-semibold leading-none tracking-tight text-ink sm:text-[32px]">
+          <p className="text-caption uppercase tracking-[0.22em] text-ink-3">Your journeys</p>
+          <h1 className="mt-1.5 text-heading font-semibold leading-none tracking-tight text-ink sm:text-display">
             我的旅行
           </h1>
         </div>
@@ -115,22 +115,22 @@ export function TripsPage() {
       {!loading && trips.length > 0 ? (
         <div className="flex divide-x divide-line border-y border-line py-3.5">
           <div className="min-w-0 flex-1 pr-3">
-            <p className="text-[10.5px] tracking-wide text-ink-3">旅程</p>
-            <p className="mt-1 text-[17px] font-semibold tabular-nums tracking-tight text-ink">
+            <p className="text-caption tracking-wide text-ink-3">旅程</p>
+            <p className="mt-1 text-title font-semibold tabular-nums tracking-tight text-ink">
               {trips.length}
-              <span className="ml-0.5 text-[11px] font-normal text-ink-3">段</span>
+              <span className="ml-0.5 text-caption font-normal text-ink-3">段</span>
             </p>
           </div>
           <div className="min-w-0 flex-1 px-3">
-            <p className="text-[10.5px] tracking-wide text-ink-3">在路上</p>
-            <p className="mt-1 text-[17px] font-semibold tabular-nums tracking-tight text-ink">
+            <p className="text-caption tracking-wide text-ink-3">在路上</p>
+            <p className="mt-1 text-title font-semibold tabular-nums tracking-tight text-ink">
               {totalDays}
-              <span className="ml-0.5 text-[11px] font-normal text-ink-3">天</span>
+              <span className="ml-0.5 text-caption font-normal text-ink-3">天</span>
             </p>
           </div>
           <div className="min-w-0 flex-1 pl-3">
-            <p className="text-[10.5px] tracking-wide text-ink-3">总花费</p>
-            <p className="mt-1 truncate text-[17px] font-semibold tabular-nums tracking-tight text-ink">
+            <p className="text-caption tracking-wide text-ink-3">总花费</p>
+            <p className="mt-1 truncate text-title font-semibold tabular-nums tracking-tight text-ink">
               {formatCny(totalSpent)}
             </p>
           </div>
@@ -148,7 +148,7 @@ export function TripsPage() {
           <span className="flex items-center gap-2 border-b border-line bg-paper-2/50 px-4 py-2.5">
             <span
               className={cn(
-                'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium',
+                'shrink-0 rounded-full px-2 py-0.5 text-caption font-medium',
                 contextTrip.kind === 'ongoing'
                   ? 'bg-accent text-white'
                   : 'bg-accent-soft text-accent',
@@ -158,7 +158,7 @@ export function TripsPage() {
                 ? `今天 · 第 ${Math.max(dayIndexOfDate(contextTrip.trip.startDate), 1)} 天`
                 : `还有 ${daysUntil(contextTrip.trip.startDate)} 天出发`}
             </span>
-            <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink">
+            <span className="min-w-0 flex-1 truncate text-body-sm font-medium text-ink">
               {contextTrip.trip.title}
             </span>
             <ArrowRight size={13} className="shrink-0 text-ink-3" />
@@ -166,7 +166,7 @@ export function TripsPage() {
           <span className="block space-y-2 px-4 py-3">
             {contextPlans.length > 0 ? (
               contextPlans.map((plan) => (
-                <span key={plan.id} className="flex items-center gap-2.5 text-[12px]">
+                <span key={plan.id} className="flex items-center gap-2.5 text-note">
                   <span className="w-[36px] shrink-0 tabular-nums text-ink-3">
                     {plan.time || '—'}
                   </span>
@@ -183,12 +183,12 @@ export function TripsPage() {
                     {plan.title}
                   </span>
                   {plan.place ? (
-                    <span className="shrink-0 truncate text-[10.5px] text-ink-3">{plan.place}</span>
+                    <span className="shrink-0 truncate text-caption text-ink-3">{plan.place}</span>
                   ) : null}
                 </span>
               ))
             ) : (
-              <span className="block text-[12px] text-ink-3">
+              <span className="block text-note text-ink-3">
                 {contextTrip.kind === 'ongoing' ? '今天还没有安排，点开补一条' : '还没排日程，点开套用模板'}
               </span>
             )}
@@ -199,14 +199,14 @@ export function TripsPage() {
       {!loading && memories.length > 0 ? (
         <section className="space-y-2">
           <div className="flex items-baseline justify-between gap-2">
-            <h2 className="flex items-center gap-1.5 text-[12px] font-semibold tracking-tight text-ink">
+            <h2 className="flex items-center gap-1.5 text-note font-semibold tracking-tight text-ink">
               <Sparkle size={13} className="text-warn" weight="fill" />
               {memories[0]?.yearsAgo > 0 ? '往年今日' : '最近的回忆'}
             </h2>
             <button
               type="button"
               onClick={() => nav.navigate({ name: 'album' })}
-              className="press inline-flex items-center gap-0.5 text-[11px] text-ink-3 hover:text-ink"
+              className="press inline-flex items-center gap-0.5 text-caption text-ink-3 hover:text-ink"
             >
               相册
               <ArrowRight size={11} />
@@ -234,15 +234,15 @@ export function TripsPage() {
                     ) : (
                       <span className="cover-texture absolute inset-0 block bg-accent/20" />
                     )}
-                    <span className="absolute left-2 top-2 rounded-full bg-black/45 px-2 py-0.5 text-[9.5px] text-white/90 backdrop-blur-sm">
+                    <span className="absolute left-2 top-2 rounded-full bg-black/45 px-2 py-0.5 text-caption text-[var(--on-cover-strong)] backdrop-blur-sm">
                       {item.yearsAgo > 0 ? `${item.yearsAgo} 年前` : formatDateCn(item.moment.createdAt)}
                     </span>
                   </span>
                   <span className="block p-3">
-                    <span className="block truncate text-[13px] font-medium text-ink">
+                    <span className="block truncate text-body-sm font-medium text-ink">
                       {item.moment.locationName || item.trip?.title || '一段回忆'}
                     </span>
-                    <span className="mt-0.5 block truncate text-[10.5px] text-ink-3">
+                    <span className="mt-0.5 block truncate text-caption text-ink-3">
                       {item.trip?.destination || item.trip?.title}
                     </span>
                   </span>
@@ -272,7 +272,7 @@ export function TripsPage() {
             value={sortBy}
             onChange={(event) => setSortBy(event.target.value as 'date' | 'spend' | 'title')}
             aria-label="排序方式"
-            className="cursor-pointer appearance-none bg-transparent pr-1 text-[12px] text-ink-3 outline-none"
+            className="cursor-pointer appearance-none bg-transparent pr-1 text-note text-ink-3 outline-none"
           >
             <option value="date">按日期</option>
             <option value="spend">按花费</option>
@@ -333,14 +333,14 @@ export function TripsPage() {
             >
               <span className={cn('h-12 w-12 shrink-0 rounded-xl', `cover-${item.cover}`)} aria-hidden="true" />
               <span className="min-w-0 flex-1">
-                <span className="block text-[14px] font-medium text-ink">{item.label}</span>
-                <span className="block text-[11.5px] text-ink-3">{item.hint}</span>
+                <span className="block text-body font-medium text-ink">{item.label}</span>
+                <span className="block text-note text-ink-3">{item.hint}</span>
               </span>
               <Plus size={15} className="shrink-0 text-ink-3" />
             </button>
           ))}
         </div>
-        <p className="px-1 pt-3 text-[11px] leading-4 text-ink-3">
+        <p className="px-1 pt-3 text-caption leading-4 text-ink-3">
           选模板会自动套用对应的日程与打包清单，之后都能单独修改。
         </p>
       </Sheet>

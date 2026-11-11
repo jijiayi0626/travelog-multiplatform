@@ -7,12 +7,25 @@
     'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   --font-mono: 'Geist Variable', ui-monospace, 'SFMono-Regular', Menlo, monospace;
 
+  /* 字号阶（10 档，替代原先 24 种任意值）。所有字号只能取自这里。§4.1 */
+  --text-caption: 0.6875rem; /* 11 */
+  --text-note: 0.75rem; /* 12 */
+  --text-body-sm: 0.8125rem; /* 13 */
+  --text-body: 0.875rem; /* 14 */
+  --text-body-lg: 0.9375rem; /* 15 */
+  --text-title: 1.0625rem; /* 17 */
+  --text-heading-sm: 1.375rem; /* 22 */
+  --text-heading: 1.6875rem; /* 27 */
+  --text-display: 2rem; /* 32 */
+  --text-display-lg: 2.375rem; /* 38 */
+
   --color-paper: #faf9f6;
   --color-paper-2: #f2f0e8;
   --color-surface: #ffffff;
   --color-ink: #1b1b19;
   --color-ink-2: #57534e;
-  --color-ink-3: #8a857c;
+  /* 对比度：paper 5.10 · surface 5.37 · paper-2 4.71，均 ≥ 4.5:1 */
+  --color-ink-3: #6f6a61;
   --color-line: #e7e3d9;
   --color-accent: #0f766e;
   --color-accent-2: #115e59;
@@ -20,9 +33,15 @@
   --color-danger: #b91c1c;
   --color-warn: #b45309;
 
+  /* 封面 / 深色渐变上的文字：两档语义色，替代 8 种 text-white/NN */
+  --on-cover-strong: rgba(255, 255, 255, 0.88);
+  --on-cover-muted: rgba(255, 255, 255, 0.72);
+
   --radius-xl2: 1.35rem;
   --shadow-lift: 0 1px 2px rgba(27, 27, 25, 0.04), 0 14px 34px -24px rgba(27, 27, 25, 0.45);
   --shadow-float: 0 28px 64px -30px rgba(27, 27, 25, 0.38);
+  /* 底部导航这类贴边浮层：只向下投影，避免和内容糊在一起 */
+  --shadow-edge: 0 -8px 24px -24px rgba(27, 27, 25, 0.6);
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -33,7 +52,7 @@ html[data-theme='dark'] {
   --color-surface: #191c1a;
   --color-ink: #f0efe9;
   --color-ink-2: #b6b3aa;
-  --color-ink-3: #85837b;
+  --color-ink-3: #8f8c84;
   --color-line: #2a2f2b;
   --color-accent: #45ac9e;
   --color-accent-2: #2f8378;
@@ -105,23 +124,23 @@ html[data-theme='dark'] {
   }
 
   .input {
-    @apply w-full rounded-xl border border-line bg-paper-2 px-3.5 text-[15px] text-ink placeholder:text-ink-3 focus:border-accent focus:ring-2 focus:ring-accent/15 focus:outline-none;
+    @apply w-full rounded-xl border border-line bg-paper-2 px-3.5 text-body-lg text-ink placeholder:text-ink-3 focus:border-accent focus:ring-2 focus:ring-accent/15 focus:outline-none;
     height: 46px;
     transition: border-color 0.18s, box-shadow 0.18s;
   }
 
   .input-area {
-    @apply w-full rounded-xl border border-line bg-paper-2 px-3.5 py-3 text-[15px] leading-6 text-ink placeholder:text-ink-3 focus:border-accent focus:ring-2 focus:ring-accent/15 focus:outline-none;
+    @apply w-full rounded-xl border border-line bg-paper-2 px-3.5 py-3 text-body-lg leading-6 text-ink placeholder:text-ink-3 focus:border-accent focus:ring-2 focus:ring-accent/15 focus:outline-none;
     resize: none;
     transition: border-color 0.18s, box-shadow 0.18s;
   }
 
   .field-label {
-    @apply text-[12px] font-medium tracking-wide text-ink-2;
+    @apply text-note font-medium tracking-wide text-ink-2;
   }
 
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-full bg-accent px-5 text-[14px] font-medium text-white;
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-accent px-5 text-body font-medium text-white;
     height: 44px;
     transition: transform 0.18s var(--ease-out-expo), opacity 0.18s;
     box-shadow: 0 10px 24px -16px rgba(15, 118, 110, 0.9);
@@ -138,14 +157,27 @@ html[data-theme='dark'] {
     cursor: not-allowed;
   }
 
+  /* 桌面端的悬停反馈：按下态在各端都保留，悬停只在支持 hover 的设备上生效 */
+  @media (hover: hover) {
+    .btn-primary:not(:disabled):hover {
+      background: var(--color-accent-2);
+    }
+
+    .btn-ghost:hover,
+    .chip:not(.chip-active):hover {
+      background: var(--color-paper-2);
+      color: var(--color-ink);
+    }
+  }
+
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 rounded-full border border-line bg-surface px-4 text-[13px] font-medium text-ink-2;
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-line bg-surface px-4 text-body-sm font-medium text-ink-2;
     height: 40px;
     transition: transform 0.18s var(--ease-out-expo), background-color 0.18s;
   }
 
   .chip {
-    @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-2 text-[13px] text-ink-2;
+    @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-2 text-body-sm text-ink-2;
     transition: transform 0.18s var(--ease-out-expo), background-color 0.18s;
   }
 
@@ -154,7 +186,7 @@ html[data-theme='dark'] {
   }
 
   .tab-pill {
-    @apply relative flex-1 rounded-full py-2 text-[13px] font-medium text-ink-3 transition-colors;
+    @apply relative flex-1 rounded-full py-2 text-body-sm font-medium text-ink-3 transition-colors;
   }
 
   .tab-pill[data-active='true'] {

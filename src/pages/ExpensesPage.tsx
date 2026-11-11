@@ -90,8 +90,8 @@ export function ExpensesPage() {
     <div className="space-y-5">
       <header className="flex items-end justify-between gap-3 pt-4">
         <div className="min-w-0">
-          <p className="text-[10.5px] uppercase tracking-[0.22em] text-ink-3">Ledger</p>
-          <h1 className="mt-1.5 text-[27px] font-semibold leading-none tracking-tight text-ink sm:text-[32px]">
+          <p className="text-caption uppercase tracking-[0.22em] text-ink-3">Ledger</p>
+          <h1 className="mt-1.5 text-heading font-semibold leading-none tracking-tight text-ink sm:text-display">
             账本
           </h1>
         </div>
@@ -113,12 +113,12 @@ export function ExpensesPage() {
       <section className="border-y border-line py-4">
         <div className="flex items-end justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[11px] tracking-wide text-ink-3">当前筛选合计</p>
-            <p className="mt-1 truncate text-[34px] font-semibold leading-none tabular-nums tracking-tight text-ink sm:text-[42px]">
+            <p className="text-caption tracking-wide text-ink-3">当前筛选合计</p>
+            <p className="mt-1 truncate text-display font-semibold leading-none tabular-nums tracking-tight text-ink sm:text-display-lg">
               {formatCny(total)}
             </p>
           </div>
-          <p className="shrink-0 text-right text-[11.5px] leading-4 text-ink-3">
+          <p className="shrink-0 text-right text-note leading-4 text-ink-3">
             {filtered.length} 笔
             <br />
             共 {data.trips.length} 段旅程
@@ -128,7 +128,7 @@ export function ExpensesPage() {
 
       <div className="space-y-2.5">
         <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
-          <span className="shrink-0 text-[11px] text-ink-3">旅行</span>
+          <span className="shrink-0 text-caption text-ink-3">旅行</span>
           <select
             value={tripFilter}
             onChange={(event) => setTripFilter(event.target.value)}
@@ -157,7 +157,7 @@ export function ExpensesPage() {
           </select>
           <span className="ml-auto flex shrink-0 items-center gap-1 text-ink-3">
             <ArrowsDownUp size={13} />
-            <span className="text-[11px]">按时间</span>
+            <span className="text-caption">按时间</span>
           </span>
         </div>
 
@@ -193,7 +193,7 @@ export function ExpensesPage() {
           {filtered.length > 0 ? (
             <div className="grid gap-3 lg:grid-cols-2">
               <section className="card p-4">
-                <h2 className="text-[12px] font-semibold tracking-tight text-ink">分类占比</h2>
+                <h2 className="text-note font-semibold tracking-tight text-ink">分类占比</h2>
                 <div className="mt-3 flex items-center gap-4">
                   <DonutChart stats={stats} total={total} size={132} thickness={12} />
                   <CategoryLegend stats={stats} />
@@ -202,8 +202,8 @@ export function ExpensesPage() {
 
               <section className="card p-4">
                 <div className="flex items-baseline justify-between">
-                  <h2 className="text-[12px] font-semibold tracking-tight text-ink">近 6 个月</h2>
-                  <span className="text-[10.5px] text-ink-3">人民币</span>
+                  <h2 className="text-note font-semibold tracking-tight text-ink">近 6 个月</h2>
+                  <span className="text-caption text-ink-3">人民币</span>
                 </div>
                 <div className="mt-4">
                   <MonthBars data={months} />
@@ -214,7 +214,7 @@ export function ExpensesPage() {
 
           <div className="lg:grid lg:grid-cols-[1.6fr_1fr] lg:gap-6">
             <section className="min-w-0">
-              <h2 className="text-[12px] font-semibold tracking-tight text-ink">明细</h2>
+              <h2 className="text-note font-semibold tracking-tight text-ink">明细</h2>
               {filtered.length === 0 ? (
                 <EmptyState
                   icon={<EmptyArt variant="wallet" />}
@@ -245,7 +245,7 @@ export function ExpensesPage() {
                           })
                         }
                       />
-                      <p className="pl-[52px] text-[10.5px] text-ink-3">
+                      <p className="pl-[52px] text-caption text-ink-3">
                         {tripTitle.get(expense.tripId) ?? '未关联旅程'} · {formatDateCn(expense.spentAt)}
                         {expense.currency && expense.currency !== 'CNY'
                           ? ` · 折合 ${formatCny(expense.amountCny ?? 0)}`
@@ -259,10 +259,10 @@ export function ExpensesPage() {
 
             <aside className="mt-5 space-y-3 lg:mt-0">
               <div className="card p-4">
-                <h2 className="text-[12px] font-semibold tracking-tight text-ink">分类明细</h2>
+                <h2 className="text-note font-semibold tracking-tight text-ink">分类明细</h2>
                 <div className="mt-3 space-y-3">
                   {stats.length === 0 ? (
-                    <p className="text-[12px] text-ink-3">还没有账目。</p>
+                    <p className="text-note text-ink-3">还没有账目。</p>
                   ) : (
                     stats.map((stat) => (
                       <CategoryBar
@@ -279,7 +279,7 @@ export function ExpensesPage() {
               </div>
 
               <div className="rounded-2xl border border-line bg-surface p-4">
-                <p className="text-[11.5px] leading-4 text-ink-3">
+                <p className="text-note leading-4 text-ink-3">
                   多币种按固定离线汇率折算：1 JPY ≈ ¥0.048，1 USD ≈ ¥7.2。
                   只用于本地统计，不参与真实结算。
                 </p>

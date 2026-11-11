@@ -118,8 +118,8 @@ export function ProfilePage() {
   return (
     <div className="mx-auto w-full max-w-[820px] space-y-5">
       <header className="pt-4">
-        <p className="text-[10.5px] uppercase tracking-[0.22em] text-ink-3">Account</p>
-        <h1 className="mt-1.5 text-[27px] font-semibold leading-none tracking-tight text-ink sm:text-[32px]">
+        <p className="text-caption uppercase tracking-[0.22em] text-ink-3">Account</p>
+        <h1 className="mt-1.5 text-heading font-semibold leading-none tracking-tight text-ink sm:text-display">
           我的
         </h1>
       </header>
@@ -127,12 +127,12 @@ export function ProfilePage() {
       <section className="flex items-center gap-3.5 border-y border-line py-4">
         <Avatar name={profile?.nickname ?? '旅人'} size={56} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[17px] font-semibold tracking-tight text-ink">
+          <p className="truncate text-title font-semibold tracking-tight text-ink">
             {loading ? '加载中…' : profile?.nickname}
           </p>
-          <p className="mt-0.5 text-[11.5px] text-ink-3">本地账号 · 数据保存在这台设备</p>
+          <p className="mt-0.5 text-note text-ink-3">本地账号 · 数据保存在这台设备</p>
         </div>
-        <button type="button" className="btn-ghost h-9 shrink-0 px-3 text-[12px]" onClick={() => setEditing(true)}>
+        <button type="button" className="btn-ghost h-9 shrink-0 px-3 text-note" onClick={() => setEditing(true)}>
           <PencilSimple size={14} />
           编辑
         </button>
@@ -155,8 +155,8 @@ export function ProfilePage() {
 
       <section className="card p-4">
         <div className="flex items-baseline justify-between">
-          <h2 className="text-[12px] font-semibold tracking-tight text-ink">年度回顾</h2>
-          <span className="text-[10.5px] text-ink-3">全部旅程累计</span>
+          <h2 className="text-note font-semibold tracking-tight text-ink">年度回顾</h2>
+          <span className="text-caption text-ink-3">全部旅程累计</span>
         </div>
         <div className="mt-3 grid grid-cols-2 gap-4">
           <StatTile label="在路上" value={`${data.stats.totalDays} 天`} />
@@ -165,7 +165,7 @@ export function ProfilePage() {
           <StatTile label="总花费" value={formatCny(data.stats.totalCny)} />
         </div>
         <div className="mt-3 border-t border-line pt-3">
-          <div className="flex items-baseline justify-between text-[11.5px]">
+          <div className="flex items-baseline justify-between text-note">
             <span className="text-ink-3">日程完成度</span>
             <span className="tabular-nums text-ink-2">
               {data.stats.planDoneCount}/{data.stats.planCount} · {planRatio}%
@@ -203,7 +203,7 @@ export function ProfilePage() {
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-ink-2">
             <PaintBrush size={17} />
           </span>
-          <span className="min-w-0 flex-1 text-[13.5px] text-ink">主题色</span>
+          <span className="min-w-0 flex-1 text-body text-ink">主题色</span>
           <div className="flex shrink-0 gap-2">
             {ACCENTS.map((item) => (
               <button
@@ -243,7 +243,7 @@ export function ProfilePage() {
         onChange={(event) => doImport(event.target.files?.[0])}
       />
 
-      <p className="pb-2 text-center text-[10.5px] uppercase tracking-[0.18em] text-ink-3">
+      <p className="pb-2 text-center text-caption uppercase tracking-[0.18em] text-ink-3">
         Travelog · Web / Android / iOS
       </p>
 
@@ -260,7 +260,7 @@ export function ProfilePage() {
         <div className="space-y-4">
           <div className="flex items-center gap-3">
             <Avatar name={nickname || '旅人'} size={52} />
-            <p className="text-[12px] leading-5 text-ink-3">
+            <p className="text-note leading-5 text-ink-3">
               头像目前用名字首字生成。
               <br />
               接入账号体系后可上传真实头像。
@@ -310,8 +310,8 @@ function SettingRow({
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-ink-2">
         {icon}
       </span>
-      <span className="min-w-0 flex-1 text-[13.5px] text-ink">{title}</span>
-      <span className="shrink-0 text-[11.5px] text-ink-3">{value}</span>
+      <span className="min-w-0 flex-1 text-body text-ink">{title}</span>
+      <span className="shrink-0 text-note text-ink-3">{value}</span>
       <CaretRight size={14} className="shrink-0 text-ink-3" />
     </button>
   )

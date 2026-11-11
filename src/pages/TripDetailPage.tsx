@@ -226,7 +226,7 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
         <IconButton label="返回" onClick={() => nav.navigate({ name: 'trips' })}>
           <ArrowLeft size={18} />
         </IconButton>
-        <span className="min-w-0 truncate text-[12px] text-ink-3">
+        <span className="min-w-0 truncate text-note text-ink-3">
           行程 / <span className="text-ink-2">{trip.title}</span>
         </span>
       </div>
@@ -236,18 +236,18 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
         <div className="relative flex flex-wrap items-center gap-2">
           <span
             className={cn(
-              'inline-flex items-center rounded-full px-2.5 py-1 text-[10.5px] font-medium tracking-wide',
-              status === 'ongoing' ? 'bg-accent text-white' : 'bg-white/15 text-white/85',
+              'inline-flex items-center rounded-full px-2.5 py-1 text-caption font-medium tracking-wide',
+              status === 'ongoing' ? 'bg-accent text-white' : 'bg-white/15 text-[var(--on-cover-strong)]',
             )}
           >
             {STATUS_LABEL[status]}
           </span>
-          {days > 0 ? <span className="text-[11.5px] text-white/60">共 {days} 天</span> : null}
+          {days > 0 ? <span className="text-note text-[var(--on-cover-muted)]">共 {days} 天</span> : null}
         </div>
-        <h1 className="relative mt-8 max-w-[22ch] text-[25px] font-semibold leading-tight tracking-tight sm:text-[30px]">
+        <h1 className="relative mt-8 max-w-[22ch] text-heading font-semibold leading-tight tracking-tight sm:text-display">
           {trip.title || '未命名旅程'}
         </h1>
-        <div className="relative mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-white/70">
+        <div className="relative mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-note text-[var(--on-cover-muted)]">
           <span className="inline-flex items-center gap-1">
             <MapPin size={13} />
             {trip.destination || '目的地待定'}
@@ -260,12 +260,12 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
           ) : null}
         </div>
         {trip.note ? (
-          <p className="relative mt-3 max-w-[60ch] text-[12.5px] leading-5 text-white/65">{trip.note}</p>
+          <p className="relative mt-3 max-w-[60ch] text-body-sm leading-5 text-[var(--on-cover-muted)]">{trip.note}</p>
         ) : null}
         <button
           type="button"
           onClick={() => nav.navigate({ name: 'tripEditor', id: trip.id })}
-          className="press absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-[11.5px] text-white backdrop-blur-sm"
+          className="press absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-note text-white backdrop-blur-sm"
         >
           <PencilSimple size={13} />
           编辑
@@ -375,8 +375,8 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
 
         <aside className="hidden space-y-3 lg:block">
           <div className="card p-4">
-            <h2 className="text-[12px] font-semibold tracking-tight text-ink">旅程概览</h2>
-            <dl className="mt-3 space-y-2.5 text-[12.5px]">
+            <h2 className="text-note font-semibold tracking-tight text-ink">旅程概览</h2>
+            <dl className="mt-3 space-y-2.5 text-body-sm">
               <div className="flex items-center justify-between">
                 <dt className="text-ink-3">日程完成</dt>
                 <dd className="tabular-nums text-ink">
@@ -410,11 +410,11 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
           </div>
 
           <div className="card p-4">
-            <h2 className="flex items-center gap-1.5 text-[12px] font-semibold tracking-tight text-ink">
+            <h2 className="flex items-center gap-1.5 text-note font-semibold tracking-tight text-ink">
               <UsersThree size={14} />
               一起编辑
             </h2>
-            <p className="mt-1.5 text-[11.5px] leading-4 text-ink-3">
+            <p className="mt-1.5 text-note leading-4 text-ink-3">
               把邀请码发给旅伴。本地模式下会先记录在设备上，接入云端后即可同步。
             </p>
             <button
@@ -422,7 +422,7 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
               onClick={copyInvite}
               className="press mt-3 flex w-full items-center justify-between rounded-xl border border-line bg-paper-2 px-3 py-2.5 text-left"
             >
-              <span className="font-mono text-[15px] tracking-[0.18em] text-ink">{trip.inviteCode}</span>
+              <span className="font-mono text-body-lg tracking-[0.18em] text-ink">{trip.inviteCode}</span>
               <Copy size={14} className="text-ink-3" />
             </button>
           </div>
@@ -430,7 +430,7 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
           <button
             type="button"
             onClick={copyTrip}
-            className="press flex w-full items-center justify-center gap-1.5 rounded-full border border-line py-2.5 text-[12.5px] text-ink-2 hover:text-ink"
+            className="press flex w-full items-center justify-center gap-1.5 rounded-full border border-line py-2.5 text-body-sm text-ink-2 hover:text-ink"
           >
             <Copy size={14} />
             复制这段旅程
@@ -439,7 +439,7 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
           <button
             type="button"
             onClick={() => setConfirmDelete(true)}
-            className="press flex w-full items-center justify-center gap-1.5 rounded-full border border-line py-2.5 text-[12.5px] text-ink-3 hover:text-danger"
+            className="press flex w-full items-center justify-center gap-1.5 rounded-full border border-line py-2.5 text-body-sm text-ink-3 hover:text-danger"
           >
             <Trash size={14} />
             删除这段旅程
@@ -473,8 +473,8 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
               }}
               className="press w-full rounded-2xl border border-line bg-surface p-3 text-left"
             >
-              <span className="block text-[14px] font-medium text-ink">{item.label}</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-ink-3">{item.items.join(' · ')}</span>
+              <span className="block text-body font-medium text-ink">{item.label}</span>
+              <span className="mt-0.5 block truncate text-note text-ink-3">{item.items.join(' · ')}</span>
             </button>
           ))}
         </div>
@@ -542,15 +542,15 @@ function PlanTab({
           onClick={() => onOpen(next.id)}
           className="press relative w-full overflow-hidden rounded-[1.25rem] border border-accent/25 bg-accent-soft/70 p-4 text-left"
         >
-          <span className="flex items-center gap-1.5 text-[10.5px] uppercase tracking-[0.16em] text-accent">
+          <span className="flex items-center gap-1.5 text-caption uppercase tracking-[0.16em] text-accent">
             <Sparkle size={12} weight="fill" />
             下一步
           </span>
-          <p className="mt-1.5 flex items-baseline gap-2 text-[16px] font-semibold tracking-tight text-ink">
+          <p className="mt-1.5 flex items-baseline gap-2 text-title font-semibold tracking-tight text-ink">
             {next.time ? <span className="tabular-nums text-accent">{next.time}</span> : null}
             <span className="min-w-0 truncate">{next.title}</span>
           </p>
-          <p className="mt-0.5 truncate text-[11.5px] text-ink-2">
+          <p className="mt-0.5 truncate text-note text-ink-2">
             第 {next.dayIndex} 天
             {next.place ? ` · ${next.place}` : ''}
             {next.note ? ` · ${next.note}` : ''}
@@ -559,7 +559,7 @@ function PlanTab({
       ) : null}
 
       <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2 text-[11.5px] text-ink-3">
+        <div className="flex min-w-0 items-center gap-2 text-note text-ink-3">
           <CalendarCheck size={14} className="shrink-0" />
           <span className="shrink-0 tabular-nums">
             {progress.done}/{progress.total} 已完成
@@ -575,11 +575,11 @@ function PlanTab({
           <button
             type="button"
             onClick={() => setTemplateOpen(true)}
-            className="press rounded-full border border-line px-2.5 py-1.5 text-[11.5px] text-ink-2 hover:text-ink"
+            className="press rounded-full border border-line px-2.5 py-1.5 text-note text-ink-2 hover:text-ink"
           >
             套用模板
           </button>
-          <button type="button" className="btn-ghost h-8 px-3 text-[12px]" onClick={() => onAdd(defaultDay)}>
+          <button type="button" className="btn-ghost h-8 px-3 text-note" onClick={() => onAdd(defaultDay)}>
             <Plus size={13} weight="bold" />
             添加
           </button>
@@ -589,8 +589,8 @@ function PlanTab({
       {plans.length > 0 ? (
         <div className="rounded-xl border border-line bg-surface px-3 pb-2 pt-3">
           <div className="mb-2 flex items-baseline justify-between">
-            <span className="text-[10.5px] tracking-wide text-ink-3">每日安排密度</span>
-            <span className="text-[10px] text-ink-3">{dayCount} 天</span>
+            <span className="text-caption tracking-wide text-ink-3">每日安排密度</span>
+            <span className="text-caption text-ink-3">{dayCount} 天</span>
           </div>
           <HeatStrip
             values={heat}
@@ -625,19 +625,19 @@ function PlanTab({
             return (
               <section key={group.dayIndex}>
                 <div className="mb-1 flex items-center gap-2">
-                  <h3 className="shrink-0 text-[12.5px] font-semibold text-accent">第 {group.dayIndex} 天</h3>
+                  <h3 className="shrink-0 text-body-sm font-semibold text-accent">第 {group.dayIndex} 天</h3>
                   {isToday ? (
-                    <span className="shrink-0 rounded-full bg-accent px-2 py-0.5 text-[9.5px] font-medium text-white">
+                    <span className="shrink-0 rounded-full bg-accent px-2 py-0.5 text-caption font-medium text-white">
                       今天
                     </span>
                   ) : null}
                   {startDate > 0 ? (
-                    <span className="shrink-0 text-[10.5px] tabular-nums text-ink-3">
+                    <span className="shrink-0 text-caption tabular-nums text-ink-3">
                       {formatDateCn(startDate + (group.dayIndex - 1) * DAY_MS)}
                     </span>
                   ) : null}
                   <span className="h-px flex-1 bg-line" />
-                  <span className="shrink-0 text-[10.5px] tabular-nums text-ink-3">
+                  <span className="shrink-0 text-caption tabular-nums text-ink-3">
                     {doneCount}/{group.items.length}
                   </span>
                   <button
@@ -684,13 +684,13 @@ function PlanTab({
               className="press w-full rounded-2xl border border-line bg-surface p-3 text-left"
             >
               <span className="flex items-center justify-between gap-2">
-                <span className="text-[14px] font-medium text-ink">{item.label}</span>
-                <span className="shrink-0 text-[10.5px] text-ink-3">{item.items.length} 条</span>
+                <span className="text-body font-medium text-ink">{item.label}</span>
+                <span className="shrink-0 text-caption text-ink-3">{item.items.length} 条</span>
               </span>
-              <span className="mt-0.5 block text-[11.5px] text-ink-3">{item.hint}</span>
+              <span className="mt-0.5 block text-note text-ink-3">{item.hint}</span>
             </button>
           ))}
-          <p className="px-1 pt-1 text-[11px] leading-4 text-ink-3">
+          <p className="px-1 pt-1 text-caption leading-4 text-ink-3">
             模板只会补进已有的计划，不会覆盖你手动添加的内容。
           </p>
         </div>
@@ -722,7 +722,7 @@ function PlanRow({
   return (
     <li className="group relative flex gap-2.5">
       <div className="flex w-[46px] shrink-0 justify-end pt-1.5">
-        <span className={cn('text-[11px] tabular-nums', plan.done ? 'text-ink-3/70 line-through' : 'text-ink-3')}>
+        <span className={cn('text-caption tabular-nums', plan.done ? 'text-ink-3/70 line-through' : 'text-ink-3')}>
           {plan.time || '—'}
         </span>
       </div>
@@ -739,13 +739,13 @@ function PlanRow({
         <button type="button" onClick={onOpen} className="block w-full text-left">
           <span
             className={cn(
-              'block truncate text-[13.5px] font-medium',
+              'block truncate text-body font-medium',
               plan.done ? 'text-ink-3 line-through' : 'text-ink',
             )}
           >
             {plan.title}
           </span>
-          <span className="mt-0.5 flex items-center gap-1.5 text-[11px]">
+          <span className="mt-0.5 flex items-center gap-1.5 text-caption">
             <span
               className="inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5"
               style={{ backgroundColor: `${color}16`, color }}
@@ -756,7 +756,7 @@ function PlanRow({
             {plan.place ? <span className="truncate text-ink-3">{plan.place}</span> : null}
           </span>
           {plan.note ? (
-            <span className="mt-1 block line-clamp-2 text-[11px] leading-4 text-ink-3">{plan.note}</span>
+            <span className="mt-1 block line-clamp-2 text-caption leading-4 text-ink-3">{plan.note}</span>
           ) : null}
         </button>
       </div>
@@ -767,7 +767,7 @@ function PlanRow({
             type="button"
             aria-label="写一条记录"
             onClick={onRecord}
-            className="press flex h-7 items-center gap-1 rounded-full border border-line px-2 text-[10.5px] text-ink-2 hover:text-accent"
+            className="press flex h-7 items-center gap-1 rounded-full border border-line px-2 text-caption text-ink-2 hover:text-accent"
           >
             <PencilSimple size={10} />
             记录
@@ -845,7 +845,7 @@ function TimelineTab({
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="shrink-0 text-[11.5px] text-ink-3">
+          <span className="shrink-0 text-note text-ink-3">
             {groups.length > 0 ? `${groups.length} 天有记录` : '还没有记录'}
           </span>
           {groups.length > 0 ? (
@@ -861,7 +861,7 @@ function TimelineTab({
             </span>
           ) : null}
         </div>
-        <button type="button" className="btn-ghost h-8 shrink-0 px-3 text-[12px]" onClick={onAdd}>
+        <button type="button" className="btn-ghost h-8 shrink-0 px-3 text-note" onClick={onAdd}>
           <Plus size={13} weight="bold" />
           添加记录
         </button>
@@ -890,8 +890,8 @@ function TimelineTab({
                 className="group flex w-full items-center gap-3 py-0.5 text-left"
                 aria-expanded={!isCollapsed}
               >
-                <span className="shrink-0 text-[12px] font-medium text-accent">第 {group.dayIndex} 天</span>
-                <span className="shrink-0 text-[10.5px] text-ink-3">{group.moments.length} 条</span>
+                <span className="shrink-0 text-note font-medium text-accent">第 {group.dayIndex} 天</span>
+                <span className="shrink-0 text-caption text-ink-3">{group.moments.length} 条</span>
                 <span className="h-px flex-1 bg-line" />
                 <CaretDown
                   size={13}
@@ -940,13 +940,13 @@ function LedgerTab({
     <div className="space-y-4">
       <div className="flex items-end justify-between gap-3 border-b border-line pb-3">
         <div>
-          <p className="text-[11px] tracking-wide text-ink-3">总支出</p>
-          <p className="mt-1 text-[30px] font-semibold leading-none tabular-nums tracking-tight text-ink">
-            <span className="mr-1 text-[15px] font-normal text-ink-3">¥</span>
+          <p className="text-caption tracking-wide text-ink-3">总支出</p>
+          <p className="mt-1 text-display font-semibold leading-none tabular-nums tracking-tight text-ink">
+            <span className="mr-1 text-body-lg font-normal text-ink-3">¥</span>
             {formatMoney(total)}
           </p>
         </div>
-        <button type="button" className="btn-ghost h-8 px-3 text-[12px]" onClick={onAdd}>
+        <button type="button" className="btn-ghost h-8 px-3 text-note" onClick={onAdd}>
           <Wallet size={13} />
           记一笔
         </button>
@@ -1013,14 +1013,14 @@ function ChecklistTab({
 }) {
   return (
     <div className="space-y-3.5">
-      <div className="flex items-center justify-between text-[11.5px] text-ink-3">
+      <div className="flex items-center justify-between text-note text-ink-3">
         <span>
           已完成 {progress.done}/{progress.total}
         </span>
         <button
           type="button"
           onClick={onTemplate}
-          className="press rounded-full border border-line px-2.5 py-1 text-[11px] text-ink-2 hover:text-ink"
+          className="press rounded-full border border-line px-2.5 py-1 text-caption text-ink-2 hover:text-ink"
         >
           套用模板
         </button>
@@ -1090,8 +1090,8 @@ function MembersTab({
         className="press flex w-full items-center justify-between rounded-2xl border border-line bg-paper-2 px-3.5 py-3 text-left"
       >
         <span>
-          <span className="block text-[11px] text-ink-3">邀请码</span>
-          <span className="mt-0.5 block font-mono text-[16px] tracking-[0.2em] text-ink">{inviteCode}</span>
+          <span className="block text-caption text-ink-3">邀请码</span>
+          <span className="mt-0.5 block font-mono text-title tracking-[0.2em] text-ink">{inviteCode}</span>
         </span>
         <Copy size={15} className="text-ink-3" />
       </button>
@@ -1130,11 +1130,11 @@ function MembersTab({
       )}
 
       <div className="rounded-2xl border border-line bg-surface p-3.5">
-        <p className="flex items-center gap-2 text-[12px] font-medium text-ink">
+        <p className="flex items-center gap-2 text-note font-medium text-ink">
           <Avatar name="云端" size={22} />
           多人同步
         </p>
-        <p className="mt-1.5 text-[11.5px] leading-4 text-ink-3">
+        <p className="mt-1.5 text-note leading-4 text-ink-3">
           当前为本地档案，成员与邀请码保存在本机。接入后端后，旅伴可通过邀请码加入并实时同步。
         </p>
       </div>

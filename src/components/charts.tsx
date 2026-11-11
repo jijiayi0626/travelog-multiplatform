@@ -52,8 +52,8 @@ export function DonutChart({
         ))}
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-[10px] tracking-wide text-ink-3">合计</span>
-        <span className="mt-0.5 text-[15px] font-semibold tabular-nums tracking-tight text-ink">
+        <span className="text-caption tracking-wide text-ink-3">合计</span>
+        <span className="mt-0.5 text-body-lg font-semibold tabular-nums tracking-tight text-ink">
           ¥{formatMoney(total)}
         </span>
       </div>
@@ -66,7 +66,7 @@ export function CategoryLegend({ stats }: { stats: CategoryStat[] }) {
   return (
     <ul className="min-w-0 flex-1 space-y-1.5">
       {stats.slice(0, 6).map((stat) => (
-        <li key={stat.category} className="flex items-center gap-2 text-[12px]">
+        <li key={stat.category} className="flex items-center gap-2 text-note">
           <span
             className="h-2 w-2 shrink-0 rounded-full"
             style={{ backgroundColor: CATEGORY_COLOR[stat.category] }}
@@ -108,7 +108,7 @@ export function MonthBars({ data, height = 96 }: { data: MonthStat[]; height?: n
                 <div className="h-[2px] w-full max-w-[26px] rounded-full bg-line" />
               )}
             </div>
-            <span className={cn('text-[9.5px]', isCurrent ? 'text-accent' : 'text-ink-3')}>
+            <span className={cn('text-caption', isCurrent ? 'text-accent' : 'text-ink-3')}>
               {item.label}
             </span>
           </div>
@@ -125,7 +125,7 @@ export function BudgetBar({ spent, budget }: { spent: number; budget: number }) 
   const remain = budget - spent
   return (
     <div className="space-y-1.5">
-      <div className="flex items-baseline justify-between gap-2 text-[11px]">
+      <div className="flex items-baseline justify-between gap-2 text-caption">
         <span className="text-ink-3">预算 ¥{formatMoney(budget)}</span>
         <span className={cn('tabular-nums', over ? 'text-danger' : 'text-ink-2')}>
           {over ? `超支 ¥${formatMoney(Math.abs(remain))}` : `剩余 ¥${formatMoney(remain)}`}
@@ -173,8 +173,8 @@ export function HeatStrip({
               )}
               style={{ height }}
             />
-            {labels ? <span className="text-[8.5px] text-ink-3">{labels[index]}</span> : null}
-            <span className="pointer-events-none absolute -top-7 z-10 hidden whitespace-nowrap rounded-md bg-ink px-1.5 py-0.5 text-[9.5px] text-paper group-hover:block">
+            {labels ? <span className="text-caption text-ink-3">{labels[index]}</span> : null}
+            <span className="pointer-events-none absolute -top-7 z-10 hidden whitespace-nowrap rounded-md bg-ink px-1.5 py-0.5 text-caption text-paper group-hover:block">
               第 {index + 1} 天 · {value} 条
             </span>
           </div>

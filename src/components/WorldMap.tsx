@@ -113,8 +113,8 @@ export function WorldMap({
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-[#0b1a17] via-[#0b1a17]/70 to-transparent px-4 pb-3 pt-8">
         <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-[0.2em] text-[#5eead4]/60">Footprint map</p>
-          <p className="mt-0.5 truncate text-[12.5px] text-white/80">
+          <p className="text-caption uppercase tracking-[0.2em] text-[#5eead4]/60">Footprint map</p>
+          <p className="mt-0.5 truncate text-body-sm text-[var(--on-cover-strong)]">
             {active
               ? `${active.footprint.placeName}${active.footprint.city ? ' · ' + active.footprint.city : ''}`
               : points.length > 0
@@ -122,7 +122,7 @@ export function WorldMap({
                 : '打卡后，地点会落在星图上'}
           </p>
         </div>
-        <span className="shrink-0 rounded-full bg-white/10 px-2.5 py-1 text-[10px] tabular-nums text-white/50">
+        <span className="shrink-0 rounded-full bg-white/10 px-2.5 py-1 text-caption tabular-nums text-[var(--on-cover-muted)]">
           {points.length} pts
         </span>
       </div>

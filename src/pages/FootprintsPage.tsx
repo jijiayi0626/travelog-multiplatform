@@ -49,8 +49,8 @@ export function FootprintsPage() {
     <div className="space-y-5">
       <header className="flex items-end justify-between gap-3 pt-4">
         <div className="min-w-0">
-          <p className="text-[10.5px] uppercase tracking-[0.22em] text-ink-3">Footprints</p>
-          <h1 className="mt-1.5 text-[27px] font-semibold leading-none tracking-tight text-ink sm:text-[32px]">
+          <p className="text-caption uppercase tracking-[0.22em] text-ink-3">Footprints</p>
+          <h1 className="mt-1.5 text-heading font-semibold leading-none tracking-tight text-ink sm:text-display">
             我的足迹
           </h1>
         </div>
@@ -67,22 +67,22 @@ export function FootprintsPage() {
 
       <div className="flex divide-x divide-line border-y border-line py-3.5">
         <div className="min-w-0 flex-1 pr-3">
-          <p className="text-[10.5px] tracking-wide text-ink-3">地点</p>
-          <p className="mt-1 text-[17px] font-semibold tabular-nums tracking-tight text-ink">
+          <p className="text-caption tracking-wide text-ink-3">地点</p>
+          <p className="mt-1 text-title font-semibold tabular-nums tracking-tight text-ink">
             {footprints.length}
-            <span className="ml-0.5 text-[11px] font-normal text-ink-3">个</span>
+            <span className="ml-0.5 text-caption font-normal text-ink-3">个</span>
           </p>
         </div>
         <div className="min-w-0 flex-1 px-3">
-          <p className="text-[10.5px] tracking-wide text-ink-3">省份</p>
-          <p className="mt-1 text-[17px] font-semibold tabular-nums tracking-tight text-ink">
+          <p className="text-caption tracking-wide text-ink-3">省份</p>
+          <p className="mt-1 text-title font-semibold tabular-nums tracking-tight text-ink">
             {visitedProvinceCount}
-            <span className="ml-0.5 text-[11px] font-normal text-ink-3">个</span>
+            <span className="ml-0.5 text-caption font-normal text-ink-3">个</span>
           </p>
         </div>
         <div className="min-w-0 flex-1 pl-3">
-          <p className="text-[10.5px] tracking-wide text-ink-3">最近</p>
-          <p className="mt-1 truncate text-[13px] font-medium text-ink">
+          <p className="text-caption tracking-wide text-ink-3">最近</p>
+          <p className="mt-1 truncate text-body-sm font-medium text-ink">
             {footprints[0]?.placeName ?? '—'}
           </p>
         </div>
@@ -94,7 +94,7 @@ export function FootprintsPage() {
             type="button"
             onClick={() => setMode('china')}
             className={cn(
-              'press flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px]',
+              'press flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-note',
               mode === 'china' ? 'bg-surface text-ink shadow-sm' : 'text-ink-3',
             )}
           >
@@ -105,7 +105,7 @@ export function FootprintsPage() {
             type="button"
             onClick={() => setMode('map')}
             className={cn(
-              'press flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px]',
+              'press flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-note',
               mode === 'map' ? 'bg-surface text-ink shadow-sm' : 'text-ink-3',
             )}
           >
@@ -116,7 +116,7 @@ export function FootprintsPage() {
             type="button"
             onClick={() => setMode('list')}
             className={cn(
-              'press flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px]',
+              'press flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-note',
               mode === 'list' ? 'bg-surface text-ink shadow-sm' : 'text-ink-3',
             )}
           >
@@ -129,7 +129,7 @@ export function FootprintsPage() {
             {cityStats.slice(0, 8).map(([city, count]) => (
               <span
                 key={city}
-                className="shrink-0 rounded-full border border-line px-2.5 py-1 text-[11px] text-ink-3"
+                className="shrink-0 rounded-full border border-line px-2.5 py-1 text-caption text-ink-3"
               >
                 {city} · {count}
               </span>
@@ -168,7 +168,7 @@ export function FootprintsPage() {
                     key={visit.short}
                     type="button"
                     onClick={() => setSelected(visit)}
-                    className="press chip px-2.5 py-1 text-[11.5px]"
+                    className="press chip px-2.5 py-1 text-note"
                   >
                     {visit.short}
                     <span className="ml-0.5 tabular-nums text-ink-3">{visit.places.length}</span>
@@ -176,13 +176,13 @@ export function FootprintsPage() {
                 ))}
             </div>
           ) : (
-            <p className="text-center text-[11.5px] text-ink-3">
+            <p className="text-center text-note text-ink-3">
               给足迹补上城市或坐标，地图会自动点亮去过的省份
             </p>
           )}
           {visits.overseas.length > 0 || visits.unknown.length > 0 ? (
             <div className="rounded-xl border border-line bg-surface px-3 py-2.5">
-              <p className="text-[11.5px] text-ink-3">
+              <p className="text-note text-ink-3">
                 另有
                 {visits.overseas.length > 0 ? ` ${visits.overseas.length} 个境外地点` : ''}
                 {visits.unknown.length > 0

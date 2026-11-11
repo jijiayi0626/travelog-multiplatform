@@ -90,7 +90,7 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
         className="fade-in absolute inset-0 bg-[#0b0b0a]/40 backdrop-blur-[3px]"
       />
       <div
-        className="fade-in relative w-full max-w-[620px] overflow-hidden rounded-[1.4rem] border border-line bg-surface"
+        className="fade-in relative w-full max-w-[620px] overflow-hidden rounded-[1.35rem] border border-line bg-surface"
         style={{ boxShadow: 'var(--shadow-float)' }}
       >
         <div className="flex items-center gap-2.5 border-b border-line px-4 py-3">
@@ -114,9 +114,9 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
               }
             }}
             placeholder="搜索旅行、日程、记录、账目、足迹…"
-            className="min-w-0 flex-1 bg-transparent text-[15px] text-ink outline-none placeholder:text-ink-3"
+            className="min-w-0 flex-1 bg-transparent text-body-lg text-ink outline-none placeholder:text-ink-3"
           />
-          <kbd className="hidden shrink-0 rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-3 sm:block">
+          <kbd className="hidden shrink-0 rounded border border-line px-1.5 py-0.5 text-caption text-ink-3 sm:block">
             ESC
           </kbd>
         </div>
@@ -124,11 +124,11 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
         <div className="max-h-[52dvh] overflow-y-auto p-2">
           {!query.trim() ? (
             <div className="px-3 py-7 text-center">
-              <p className="text-[12.5px] text-ink-3">输入关键词试试</p>
-              <p className="mt-1 text-[11.5px] text-ink-3/80">「直岛」「拉面」「住宿」「清水寺」</p>
+              <p className="text-body-sm text-ink-3">输入关键词试试</p>
+              <p className="mt-1 text-note text-ink-3/80">「直岛」「拉面」「住宿」「清水寺」</p>
             </div>
           ) : results.length === 0 ? (
-            <div className="px-3 py-7 text-center text-[12.5px] text-ink-3">没有找到匹配的内容</div>
+            <div className="px-3 py-7 text-center text-body-sm text-ink-3">没有找到匹配的内容</div>
           ) : (
             results.map((item, index) => (
               <button
@@ -145,10 +145,10 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
                   <ResultIcon kind={item.kind} />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13.5px] text-ink">{item.title}</span>
-                  <span className="block truncate text-[11px] text-ink-3">{item.subtitle}</span>
+                  <span className="block truncate text-body text-ink">{item.title}</span>
+                  <span className="block truncate text-caption text-ink-3">{item.subtitle}</span>
                 </span>
-                <span className="shrink-0 text-[10px] uppercase tracking-wide text-ink-3">
+                <span className="shrink-0 text-caption uppercase tracking-wide text-ink-3">
                   {KIND_LABEL[item.kind]}
                 </span>
               </button>
@@ -156,7 +156,7 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
           )}
         </div>
 
-        <div className="flex items-center gap-4 border-t border-line px-4 py-2 text-[10.5px] text-ink-3">
+        <div className="flex items-center gap-4 border-t border-line px-4 py-2 text-caption text-ink-3">
           <span>↑↓ 选择</span>
           <span>↵ 打开</span>
           <span>ESC 关闭</span>

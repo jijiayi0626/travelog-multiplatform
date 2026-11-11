@@ -175,7 +175,7 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
             />
           </Field>
         </div>
-        <p className="text-[11.5px] text-ink-3">
+        <p className="text-note text-ink-3">
           {startDate > 0 && endDate > 0
             ? `${formatDate(startDate)} — ${formatDate(endDate)} · 约 ${Math.max(Math.floor((endDate - startDate) / 864e5) + 1, 1)} 天`
             : '设置日期后，记录会自动按天归组'}
@@ -207,7 +207,7 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
             </select>
           </Field>
         </div>
-        <p className="text-[11.5px] leading-4 text-ink-3">
+        <p className="text-note leading-4 text-ink-3">
           账目按当地货币录入，会按离线汇率折算成人民币汇总；预算进度会显示在旅程概览里。
         </p>
       </FormBlock>
@@ -245,8 +245,8 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
 
       {!id && template && template !== 'blank' ? (
         <div className="rounded-2xl border border-line bg-surface p-3.5">
-          <p className="text-[12px] font-medium text-ink">已选择模板</p>
-          <p className="mt-1 text-[11.5px] leading-4 text-ink-3">
+          <p className="text-note font-medium text-ink">已选择模板</p>
+          <p className="mt-1 text-note leading-4 text-ink-3">
             保存后会自动排入「{template === 'city' ? '城市漫步' : template === 'beach' ? '海岛度假' : template === 'road' ? '自驾公路' : '滑雪'}」的日程与打包清单，之后都能单独修改。
           </p>
         </div>
@@ -256,7 +256,7 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
         <button
           type="button"
           onClick={() => setConfirmDelete(true)}
-          className="press mx-auto flex items-center gap-1.5 rounded-full border border-line px-4 py-2 text-[12.5px] text-ink-3 hover:text-danger"
+          className="press mx-auto flex items-center gap-1.5 rounded-full border border-line px-4 py-2 text-body-sm text-ink-3 hover:text-danger"
         >
           <Trash size={14} />
           删除这段旅程

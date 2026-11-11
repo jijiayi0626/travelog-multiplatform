@@ -89,19 +89,19 @@ export function AppShell({
               <MapTrifold size={19} weight="fill" />
             </span>
             <span>
-              <span className="block text-[15px] font-semibold leading-tight tracking-tight text-ink">旅记</span>
-              <span className="block text-[10px] uppercase tracking-[0.18em] text-ink-3">Travelog</span>
+              <span className="block text-body-lg font-semibold leading-tight tracking-tight text-ink">旅记</span>
+              <span className="block text-caption uppercase tracking-[0.18em] text-ink-3">Travelog</span>
             </span>
           </div>
 
           <button
             type="button"
             onClick={openSearch}
-            className="press mt-6 flex w-full items-center gap-2 rounded-xl border border-line bg-paper-2/60 px-3 py-2 text-left text-[12.5px] text-ink-3 hover:text-ink"
+            className="press mt-6 flex w-full items-center gap-2 rounded-xl border border-line bg-paper-2/60 px-3 py-2 text-left text-body-sm text-ink-3 hover:text-ink"
           >
             <MagnifyingGlass size={15} />
             <span className="flex-1">搜索</span>
-            <kbd className="rounded border border-line px-1 py-0.5 text-[9.5px]">⌘K</kbd>
+            <kbd className="rounded border border-line px-1 py-0.5 text-caption">⌘K</kbd>
           </button>
 
           <nav className="mt-4 flex flex-col gap-1">
@@ -114,7 +114,7 @@ export function AppShell({
                   onClick={() => onRootChange(key)}
                   aria-current={isActive ? 'page' : undefined}
                   className={cn(
-                    'press flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-[13.5px] transition-colors',
+                    'press flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-body transition-colors',
                     isActive
                       ? 'bg-accent-soft font-medium text-accent'
                       : 'text-ink-2 hover:bg-paper-2 hover:text-ink',
@@ -129,15 +129,15 @@ export function AppShell({
 
           <div className="mt-auto space-y-3">
             <div className="rounded-xl border border-line bg-paper-2/60 p-3">
-              <p className="text-[11.5px] font-medium text-ink-2">本地优先</p>
-              <p className="mt-1 text-[11px] leading-4 text-ink-3">
+              <p className="text-note font-medium text-ink-2">本地优先</p>
+              <p className="mt-1 text-caption leading-4 text-ink-3">
                 日程、照片与账目都存在本机。导出 JSON 就能带走全部数据。
               </p>
             </div>
             <button
               type="button"
               onClick={toggleTheme}
-              className="press flex w-full items-center gap-2 rounded-xl px-3 py-2 text-[12.5px] text-ink-2 hover:bg-paper-2"
+              className="press flex w-full items-center gap-2 rounded-xl px-3 py-2 text-body-sm text-ink-2 hover:bg-paper-2"
             >
               <ThemeGlyph size={16} />
               {theme === 'dark' ? '切换到浅色' : '切换到深色'}
@@ -145,13 +145,13 @@ export function AppShell({
             <button
               type="button"
               onClick={openShortcuts}
-              className="press flex w-full items-center gap-2 rounded-xl px-3 py-2 text-[12.5px] text-ink-2 hover:bg-paper-2"
+              className="press flex w-full items-center gap-2 rounded-xl px-3 py-2 text-body-sm text-ink-2 hover:bg-paper-2"
             >
               <Keyboard size={16} />
               快捷键
-              <kbd className="ml-auto rounded border border-line px-1 py-0.5 text-[9.5px] text-ink-3">?</kbd>
+              <kbd className="ml-auto rounded border border-line px-1 py-0.5 text-caption text-ink-3">?</kbd>
             </button>
-            <p className="px-3 text-[10px] uppercase tracking-[0.16em] text-ink-3">v1.1</p>
+            <p className="px-3 text-caption uppercase tracking-[0.16em] text-ink-3">v1.1</p>
           </div>
         </aside>
       ) : null}
@@ -168,7 +168,7 @@ export function AppShell({
         </main>
 
         {!isDesktop && isRoot(view) ? (
-          <nav className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/97 backdrop-blur-2xl shadow-[0_-8px_24px_-24px_rgba(27,27,25,0.6)]">
+          <nav className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/97 backdrop-blur-2xl shadow-edge">
             <div className="mx-auto grid max-w-[600px] grid-cols-5 px-1 pt-1.5">
               {TABS.map(({ key, label, Icon }) => {
                 const isActive = active === key
@@ -184,7 +184,7 @@ export function AppShell({
                     )}
                   >
                     <Icon size={20} weight={isActive ? 'fill' : 'regular'} />
-                    <span className={cn('text-[10px]', isActive && 'font-medium')}>{label}</span>
+                    <span className={cn('text-caption', isActive && 'font-medium')}>{label}</span>
                     <span
                       aria-hidden="true"
                       className={cn(

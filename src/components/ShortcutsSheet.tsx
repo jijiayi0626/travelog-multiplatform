@@ -55,12 +55,12 @@ export function ShortcutsSheet({ open, onClose }: { open: boolean; onClose: () =
         className="fade-in absolute inset-0 bg-[#0b0b0a]/40 backdrop-blur-[3px]"
       />
       <div
-        className="fade-in relative w-full max-w-[460px] overflow-hidden rounded-[1.4rem] border border-line bg-surface"
+        className="fade-in relative w-full max-w-[460px] overflow-hidden rounded-[1.35rem] border border-line bg-surface"
         style={{ boxShadow: 'var(--shadow-float)' }}
       >
         <header className="flex items-center gap-2 border-b border-line px-5 py-3.5">
           <Keyboard size={17} className="text-accent" />
-          <h2 className="flex-1 text-[15px] font-semibold tracking-tight text-ink">键盘快捷键</h2>
+          <h2 className="flex-1 text-body-lg font-semibold tracking-tight text-ink">键盘快捷键</h2>
           <button
             type="button"
             onClick={onClose}
@@ -74,15 +74,15 @@ export function ShortcutsSheet({ open, onClose }: { open: boolean; onClose: () =
         <div className="max-h-[60dvh] space-y-4 overflow-y-auto p-5">
           {GROUPS.map((group) => (
             <section key={group.title}>
-              <h3 className="text-[10.5px] uppercase tracking-[0.16em] text-ink-3">{group.title}</h3>
+              <h3 className="text-caption uppercase tracking-[0.16em] text-ink-3">{group.title}</h3>
               <ul className="mt-2 space-y-1.5">
                 {group.items.map((item) => (
-                  <li key={item.label} className="flex items-center gap-2 text-[12.5px]">
+                  <li key={item.label} className="flex items-center gap-2 text-body-sm">
                     <span className="flex gap-1">
                       {item.keys.map((key) => (
                         <kbd
                           key={key}
-                          className="min-w-[22px] rounded-md border border-line bg-paper-2 px-1.5 py-0.5 text-center text-[10.5px] text-ink-2"
+                          className="min-w-[22px] rounded-md border border-line bg-paper-2 px-1.5 py-0.5 text-center text-caption text-ink-2"
                         >
                           {key}
                         </kbd>
@@ -96,7 +96,7 @@ export function ShortcutsSheet({ open, onClose }: { open: boolean; onClose: () =
           ))}
         </div>
 
-        <footer className="border-t border-line px-5 py-2.5 text-[10.5px] text-ink-3">
+        <footer className="border-t border-line px-5 py-2.5 text-caption text-ink-3">
           桌面端可用；移动端长按 / 点击右上角搜索图标同样能打开搜索。
         </footer>
       </div>
