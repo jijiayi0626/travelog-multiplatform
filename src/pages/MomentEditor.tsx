@@ -23,7 +23,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
   const { tr } = useI18n()
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(Boolean(momentId))
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -47,29 +47,34 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const loadedTrip = await getTrip(tripId)
-      if (!alive) return
-      setTrip(loadedTrip)
+      try {
+        const loadedTrip = await getTrip(tripId)
+        if (!alive) return
+        setTrip(loadedTrip)
 
-      if (momentId) {
-        const moments = await listMoments(tripId)
-        const target = moments.find((item) => item.id === momentId)
-        if (target) {
-          setOriginal(target)
-          setContent(target.content)
-          setLocationName(target.locationName)
-          if (target.latitude !== 0 || target.longitude !== 0) {
-            setCoords({ lat: target.latitude, lng: target.longitude })
+        if (momentId) {
+          const moments = await listMoments(tripId)
+          const target = moments.find((item) => item.id === momentId)
+          if (target) {
+            setOriginal(target)
+            setContent(target.content)
+            setLocationName(target.locationName)
+            if (target.latitude !== 0 || target.longitude !== 0) {
+              setCoords({ lat: target.latitude, lng: target.longitude })
+            }
+            setPhotos(target.photos ?? [])
+            setDayIndex(target.dayIndex || 1)
+            setTags(target.tags ?? [])
           }
-          setPhotos(target.photos ?? [])
-          setDayIndex(target.dayIndex || 1)
-          setTags(target.tags ?? [])
+        } else if (loadedTrip) {
+          const day = dayIndexInTrip(loadedTrip.startDate, Date.now())
+          setDayIndex(day > 0 ? day : 1)
         }
-      } else if (loadedTrip) {
-        const day = dayIndexInTrip(loadedTrip.startDate, Date.now())
-        setDayIndex(day > 0 ? day : 1)
+      } catch {
+        // 读取失败也要放开保存，避免按钮永久禁用
+      } finally {
+        if (alive) setLoading(false)
       }
-      if (alive) setLoading(false)
     })()
     return () => {
       alive = false

@@ -663,4 +663,7 @@ export const EN_TEXT: Record<string, string> = {
   '复制邀请码 {code}': 'Copy code {code}',
   '未登录云同步时邀请码只在本地，登录后才会真正同步给对方。':
     'Without cloud sync the code only lives on this device; sign in to actually share it.',
+  '目的地天气': 'Destination weather',
+  '未来 3 天预报，出行前再确认一次': 'Next 3 days — check again before you go',
+  '风速 {v} km/h · 湿度 {h}%': 'Wind {v} km/h · humidity {h}%',
 }

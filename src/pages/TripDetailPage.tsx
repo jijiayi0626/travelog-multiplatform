@@ -67,6 +67,7 @@ import {
 } from '../lib/utils'
 import { cn } from '../lib/cn'
 import { CategoryBar, ChecklistRow, ExpenseRow, MemberRow, MomentCard } from '../components/cards'
+import { WeatherCard } from '../components/WeatherCard'
 import { BudgetBar, HeatStrip } from '../components/charts'
 import { Lightbox } from '../components/Lightbox'
 import { EmptyArt } from '../components/EmptyArt'
@@ -394,6 +395,8 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
           {tr('编辑')}
         </button>
       </section>
+
+      <WeatherCard destination={trip.destination} className="mt-4" />
 
       <div className="mt-4 grid grid-cols-2 gap-4 border-y border-line py-4 lg:hidden">
         <StatTile

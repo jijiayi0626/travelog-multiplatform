@@ -68,7 +68,7 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
         setBudgetText(trip.budget && trip.budget > 0 ? String(trip.budget) : '')
       }
       setLoading(false)
-    })
+    }).catch(() => setLoading(false))
     return () => {
       alive = false
     }
