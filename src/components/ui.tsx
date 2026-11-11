@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { X } from '@phosphor-icons/react'
 import { cn } from '../lib/cn'
 import { initials } from '../lib/utils'
@@ -198,19 +198,23 @@ export function Sheet({
   wide?: boolean
 }) {
   const { tr } = useI18n()
+  // onClose 多为内联函数，放进依赖会让 effect 反复重建，导致遮罩/滚动锁残留
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
   useEffect(() => {
     if (!open) return
     const previous = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') onCloseRef.current()
     }
     window.addEventListener('keydown', onKey)
     return () => {
       document.body.style.overflow = previous
       window.removeEventListener('keydown', onKey)
     }
-  }, [open, onClose])
+  }, [open])
 
   if (!open) return null
 

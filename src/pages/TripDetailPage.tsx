@@ -1032,10 +1032,11 @@ function PlanTab({
               setAiBusy(true)
               try {
                 await onAIPlan(aiStyle)
-                setAiOpen(false)
               } catch (error) {
                 toast(error instanceof Error ? error.message : tr('生成失败'))
               } finally {
+                // 无论成功还是失败都要关闭，否则遮罩会一直盖住页面
+                setAiOpen(false)
                 setAiBusy(false)
               }
             }}

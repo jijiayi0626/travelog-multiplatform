@@ -261,11 +261,14 @@ export default function App() {
   }, [navigate])
 
   const back = useCallback(() => {
-    if (window.history.length > 1) {
-      window.history.back()
-    } else {
-      window.location.hash = '#/trips'
-    }
+    // SPA 里 history.length 始终 > 1，直接 back 会落到 about:blank
+    const before = window.location.href
+    window.history.back()
+    window.setTimeout(() => {
+      if (window.location.href === before) {
+        window.location.hash = '#/trips'
+      }
+    }, 250)
   }, [])
 
   const toast = useCallback((message: string) => {
