@@ -11,13 +11,22 @@
 | 回忆 | 首页「往年今日」横滑卡片，不足时用最近 30 天记录补齐 |
 | 时间线 | 按天归组的图文记录，文字 + 最多 9 张照片（本地压缩后保存）、标签、灯箱翻页 |
 | 相册 | 跨旅程照片聚合，按旅程 / 按时间分组，灯箱左右翻页与单张下载 |
-| 足迹 | 地点打卡、浏览器定位、城市统计、星图可视化、点击跳转地图查看坐标、删除 |
+| 足迹 | 地点打卡、浏览器定位、城市统计、星图可视化、**中国省份地图**（本地内置矢量边界，点亮去过的省份，点击省份看该省地点）、点击跳转地图查看坐标、删除 |
 | 账本 | 金额 / 分类 / 备注 / 日期 / 币种，分类占比环形图、近 6 个月柱状图、CSV 导出 |
 | 清单 | 行前待办、勾选与进度、5 套模板 |
 | 旅伴 | 成员列表、添加与移除、邀请码复制 |
 | 我的 | 昵称、年度统计、日程完成度、深色模式、4 套主题色、JSON 备份导入导出 |
 | 全局 | `⌘K` / `/` 搜索、`?` 快捷键面板、`N` 新建旅程、离线提示、PWA 安装 |
 | 云同步 | 本地优先；提供接口契约与替换注入点，后端接入后即可多端同步 |
+
+## 省份地图说明
+
+足迹页的「中国」视图使用**本地内置**的省级矢量边界，运行时**不请求任何外部地图服务**：
+
+- 边界数据经 Albers 等积圆锥投影（φ1=25°、φ2=47°、λ0=105°）简化后打包为 `src/lib/chinaGeo.ts`（34 个省级行政区，约 6.5k 个坐标点、77 KB）
+- 省份归属优先用坐标做点在多边形内判定，没有坐标时用城市名兜底（`src/lib/province.ts`）
+- 未收录的境外坐标会单独提示，不计入中国地图
+- 由于是简化边界，极少数紧贴省界的地点可能归错省份，可在足迹编辑里补上城市名纠正
 
 ## 技术栈
 
@@ -43,6 +52,7 @@ src/
 │   ├── ShortcutsSheet.tsx  # 快捷键面板
 │   ├── Lightbox.tsx        # 图片灯箱（翻页 / 滑动 / 下载）
 │   ├── WorldMap.tsx        # 足迹星图
+│   ├── ChinaMap.tsx        # 中国省份足迹地图
 │   ├── EmptyArt.tsx        # 空态插画
 │   └── InstallBanner.tsx   # PWA 安装提示
 ├── pages/                  # 行程 / 详情（日程·时间线·账本·清单·旅伴）/ 相册 / 足迹 / 账本 / 我的 / 各编辑器
@@ -51,6 +61,8 @@ src/
     ├── db.ts               # IndexedDB 封装
     ├── repo.ts             # 领域数据操作、搜索、备份、模板
     ├── seed.ts             # 首次启动示例数据
+    ├── chinaGeo.ts         # 内置中国省级矢量边界 + 投影函数
+    ├── province.ts         # 坐标 → 省份判定、城市兜底、足迹聚合
     ├── theme.ts / hooks.ts / utils.ts
 android/                    # Capacitor 生成的 Android 工程（可直接用 Android Studio 打开）
 public/                     # 图标、manifest、service worker、示例插画
@@ -78,10 +90,10 @@ npm run preview    # 本地预览生产构建
 
 ## 下载 APK
 
-由 GitHub Actions（`ubuntu-latest` / x86_64）自动构建，产物见 [Releases · v1.1.0](https://github.com/jijiayi0626/travelog-multiplatform/releases/tag/v1.1.0)：
+由 GitHub Actions（`ubuntu-latest` / x86_64）自动构建，产物见 [Releases · v1.2.0](https://github.com/jijiayi0626/travelog-multiplatform/releases/tag/v1.2.0)：
 
-- [Debug APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v1.1.0/travelog-1.1.0-debug.apk)（约 4 MB，可直接安装）
-- [Release APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v1.1.0/travelog-1.1.0-release.apk)（约 3 MB，CI 临时签名，正式发布请换成自有 keystore）
+- [Debug APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v1.2.0/travelog-1.2.0-debug.apk)（约 4 MB，可直接安装）
+- [Release APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v1.2.0/travelog-1.2.0-release.apk)（约 3 MB，CI 临时签名，正式发布请换成自有 keystore）
 
 包名 `com.travellog.app`，minSdk 23 / targetSdk 35，versionCode 2 / versionName 1.1。应用为 WebView + Java 实现，**不含 native 库**，单个 APK 兼容 `arm64-v8a` / `armeabi-v7a` / `x86_64`。
 

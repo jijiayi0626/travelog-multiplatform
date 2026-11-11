@@ -89,13 +89,21 @@ export function FootprintEditor() {
             }}
           />
         </Field>
-        <Field label="城市" hint="用于统计去过的城市数量">
+        <Field label="城市" hint="填写城市名会自动归入省份，点亮足迹地图">
           <input
             className="input"
             value={city}
-            placeholder="例如「函馆」"
+            placeholder="例如「杭州」「大理」"
             onChange={(event) => setCity(event.target.value)}
+            list="city-suggestions"
           />
+          <datalist id="city-suggestions">
+            {['北京', '上海', '广州', '深圳', '杭州', '成都', '大理', '厦门', '西安', '南京', '重庆', '青岛', '长沙', '武汉'].map(
+              (item) => (
+                <option key={item} value={item} />
+              ),
+            )}
+          </datalist>
         </Field>
         <Field label="备注">
           <input

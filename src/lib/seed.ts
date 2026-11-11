@@ -12,7 +12,7 @@ import { getMeta, putOne, setMeta } from './db'
 import { addDays, assetUrl, todayStart } from './utils'
 
 const SEEDED_KEY = 'seeded'
-const SEED_TAG = 'seed-v3'
+const SEED_TAG = 'seed-v4'
 
 async function alreadySeeded(): Promise<boolean> {
   return (await getMeta(SEEDED_KEY)) === SEED_TAG
@@ -394,6 +394,62 @@ export async function seedIfNeeded(force = false): Promise<void> {
       note: '清晨六点最安静',
       visitedAt: oneYearAgo,
       createdAt: oneYearAgo,
+    },
+    // 国内足迹：用于点亮省份地图
+    {
+      id: 'foot-5',
+      tripId: '',
+      placeName: '西湖断桥',
+      city: '杭州',
+      latitude: 30.2489,
+      longitude: 120.1424,
+      note: '下过雨的清晨',
+      visitedAt: now - 210 * 864e5,
+      createdAt: now - 210 * 864e5,
+    },
+    {
+      id: 'foot-6',
+      tripId: '',
+      placeName: '宽窄巷子',
+      city: '成都',
+      latitude: 30.6699,
+      longitude: 104.0529,
+      note: '一碗甜水面',
+      visitedAt: now - 160 * 864e5,
+      createdAt: now - 160 * 864e5,
+    },
+    {
+      id: 'foot-7',
+      tripId: '',
+      placeName: '洱海生态廊道',
+      city: '大理',
+      latitude: 25.6065,
+      longitude: 100.2676,
+      note: '骑行半圈，风很大',
+      visitedAt: now - 120 * 864e5,
+      createdAt: now - 120 * 864e5,
+    },
+    {
+      id: 'foot-8',
+      tripId: '',
+      placeName: '鼓浪屿',
+      city: '厦门',
+      latitude: 24.4455,
+      longitude: 118.0663,
+      note: '岛上没有车',
+      visitedAt: now - 80 * 864e5,
+      createdAt: now - 80 * 864e5,
+    },
+    {
+      id: 'foot-9',
+      tripId: '',
+      placeName: '什刹海',
+      city: '北京',
+      latitude: 39.9403,
+      longitude: 116.3866,
+      note: '冬天结冰',
+      visitedAt: now - 45 * 864e5,
+      createdAt: now - 45 * 864e5,
     },
   ]
   for (const footprint of footprints) {

@@ -1,15 +1,17 @@
 import { useMemo, useState } from 'react'
 import { Browser } from '@capacitor/browser'
 import { Capacitor } from '@capacitor/core'
-import { ListBullets, MagnifyingGlass, MapTrifold, Plus } from '@phosphor-icons/react'
+import { ListBullets, MagnifyingGlass, MapPin, MapTrifold, Plus } from '@phosphor-icons/react'
 import type { Footprint } from '../lib/types'
 import { deleteFootprint, listFootprints } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
 import { useNav, useRefresh, useSearch, useToast } from '../lib/app-context'
+import { summarizeVisits, type ProvinceVisit } from '../lib/province'
 import { cn } from '../lib/cn'
 import { FootprintRow } from '../components/cards'
+import { ChinaMap } from '../components/ChinaMap'
 import { WorldMap } from '../components/WorldMap'
-import { ConfirmDialog, EmptyState, IconButton, SkeletonList } from '../components/ui'
+import { ConfirmDialog, EmptyState, IconButton, Sheet, SkeletonList } from '../components/ui'
 import { EmptyArt } from '../components/EmptyArt'
 
 export function FootprintsPage() {
@@ -19,7 +21,11 @@ export function FootprintsPage() {
   const { bump } = useRefresh()
   const { data: footprints, loading } = useLoader(() => listFootprints(), [] as Footprint[], 'footprints')
   const [pendingDelete, setPendingDelete] = useState<Footprint | null>(null)
-  const [mode, setMode] = useState<'map' | 'list'>('map')
+  const [mode, setMode] = useState<'china' | 'map' | 'list'>('china')
+  const [selected, setSelected] = useState<ProvinceVisit | null>(null)
+
+  const visits = useMemo(() => summarizeVisits(footprints), [footprints])
+  const visitedProvinceCount = visits.visited.size
 
   const cityStats = useMemo(() => {
     const counter = new Map<string, number>()
@@ -68,10 +74,10 @@ export function FootprintsPage() {
           </p>
         </div>
         <div className="min-w-0 flex-1 px-3">
-          <p className="text-[10.5px] tracking-wide text-ink-3">城市</p>
+          <p className="text-[10.5px] tracking-wide text-ink-3">省份</p>
           <p className="mt-1 text-[17px] font-semibold tabular-nums tracking-tight text-ink">
-            {cityStats.length}
-            <span className="ml-0.5 text-[11px] font-normal text-ink-3">座</span>
+            {visitedProvinceCount}
+            <span className="ml-0.5 text-[11px] font-normal text-ink-3">个</span>
           </p>
         </div>
         <div className="min-w-0 flex-1 pl-3">
@@ -86,9 +92,20 @@ export function FootprintsPage() {
         <div className="flex shrink-0 gap-1 rounded-full border border-line bg-paper-2 p-1">
           <button
             type="button"
+            onClick={() => setMode('china')}
+            className={cn(
+              'press flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px]',
+              mode === 'china' ? 'bg-surface text-ink shadow-sm' : 'text-ink-3',
+            )}
+          >
+            <MapPin size={14} />
+            中国
+          </button>
+          <button
+            type="button"
             onClick={() => setMode('map')}
             className={cn(
-              'press flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px]',
+              'press flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px]',
               mode === 'map' ? 'bg-surface text-ink shadow-sm' : 'text-ink-3',
             )}
           >
@@ -99,7 +116,7 @@ export function FootprintsPage() {
             type="button"
             onClick={() => setMode('list')}
             className={cn(
-              'press flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px]',
+              'press flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px]',
               mode === 'list' ? 'bg-surface text-ink shadow-sm' : 'text-ink-3',
             )}
           >
@@ -107,7 +124,7 @@ export function FootprintsPage() {
             列表
           </button>
         </div>
-        {cityStats.length > 0 ? (
+        {cityStats.length > 0 && mode !== 'china' ? (
           <div className="hide-scrollbar flex min-w-0 flex-1 gap-1.5 overflow-x-auto">
             {cityStats.slice(0, 8).map(([city, count]) => (
               <span
@@ -139,6 +156,43 @@ export function FootprintsPage() {
             </button>
           }
         />
+      ) : mode === 'china' ? (
+        <div className="space-y-3">
+          <ChinaMap visits={visits.visited} onSelect={setSelected} />
+          {visits.visited.size > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {[...visits.visited.values()]
+                .sort((a, b) => b.places.length - a.places.length)
+                .map((visit) => (
+                  <button
+                    key={visit.short}
+                    type="button"
+                    onClick={() => setSelected(visit)}
+                    className="press chip px-2.5 py-1 text-[11.5px]"
+                  >
+                    {visit.short}
+                    <span className="ml-0.5 tabular-nums text-ink-3">{visit.places.length}</span>
+                  </button>
+                ))}
+            </div>
+          ) : (
+            <p className="text-center text-[11.5px] text-ink-3">
+              给足迹补上城市或坐标，地图会自动点亮去过的省份
+            </p>
+          )}
+          {visits.overseas.length > 0 || visits.unknown.length > 0 ? (
+            <div className="rounded-xl border border-line bg-surface px-3 py-2.5">
+              <p className="text-[11.5px] text-ink-3">
+                另有
+                {visits.overseas.length > 0 ? ` ${visits.overseas.length} 个境外地点` : ''}
+                {visits.unknown.length > 0
+                  ? `${visits.overseas.length > 0 ? '、' : ''}${visits.unknown.length} 个待归类地点`
+                  : ''}
+                ，不计入中国省份地图。
+              </p>
+            </div>
+          ) : null}
+        </div>
       ) : mode === 'map' ? (
         <WorldMap footprints={footprints} onSelect={openMap} />
       ) : (
@@ -166,6 +220,26 @@ export function FootprintsPage() {
           ))}
         </div>
       ) : null}
+
+      <Sheet
+        open={selected !== null}
+        title={selected ? `${selected.name} · ${selected.places.length} 个地点` : ''}
+        onClose={() => setSelected(null)}
+      >
+        <div className="space-y-2">
+          {selected?.places.map((footprint) => (
+            <FootprintRow
+              key={footprint.id}
+              footprint={footprint}
+              onOpenMap={() => openMap(footprint)}
+              onDelete={() => {
+                setSelected(null)
+                setPendingDelete(footprint)
+              }}
+            />
+          ))}
+        </div>
+      </Sheet>
 
       <ConfirmDialog
         open={pendingDelete !== null}
