@@ -10,7 +10,8 @@ import {
 } from './lib/app-context'
 import { getLang, setLang as persistLang, translate, translateText, type Lang } from './lib/i18n'
 import { ensureReady } from './lib/repo'
-import { scheduleAutoSync } from './lib/sync-engine'
+import { runSync, scheduleAutoSync } from './lib/sync-engine'
+import { getCloudConfig } from './lib/cloud'
 import { startAutoCheckin } from './lib/autocheckin'
 import { AppShell, type RootKey } from './components/AppShell'
 import { SearchPalette } from './components/SearchPalette'
@@ -185,6 +186,24 @@ export default function App() {
     return () => {
       window.removeEventListener('online', onOnline)
       window.removeEventListener('offline', onOffline)
+    }
+  }, [])
+
+  // 双端自动同步：登录后启动即拉一次，回到前台/窗口聚焦再同步
+  useEffect(() => {
+    if (!getCloudConfig().token) return
+    const sync = () => {
+      void runSync().catch(() => {})
+    }
+    sync()
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') sync()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
     }
   }, [])
 

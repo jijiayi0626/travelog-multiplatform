@@ -28,7 +28,8 @@
   --color-ink-2: #4b5563;
   /* 对比度：paper 4.83 · surface 5.22 · paper-2 4.57，均 ≥ 4.5:1 */
   --color-ink-3: #666d78;
-  --color-line: #e5e7eb;
+  /* 分割线/描边：比原来的 #e5e7eb 更清晰一点，对齐高德的卡片边界 */
+  --color-line: #dde3ea;
   /* primary 色阶（50–900）：hover / 按下 / 浅底 / 描边都从这里取 */
   --color-primary-50: #eff6ff;
   --color-primary-100: #dbeafe;
@@ -67,7 +68,7 @@ html[data-theme='dark'] {
   --color-ink: #f3f4f6;
   --color-ink-2: #b4b8c0;
   --color-ink-3: #8b9099;
-  --color-line: #262a33;
+  --color-line: #303643;
   --color-primary-50: #172554;
   --color-primary-100: #1e3a8a;
   --color-primary-200: #1e40af;
@@ -150,13 +151,15 @@ html[data-theme='dark'] {
   }
 
   .input {
-    @apply w-full rounded-xl border border-line bg-paper-2 px-3.5 text-body-lg text-ink placeholder:text-ink-3 focus:border-accent focus:ring-2 focus:ring-accent/15 focus:outline-none;
+    @apply w-full rounded-xl border border-line bg-surface px-3.5 text-body-lg text-ink placeholder:text-ink-3 focus:border-accent focus:ring-2 focus:ring-accent/15 focus:outline-none;
     height: 46px;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
     transition: border-color 0.18s, box-shadow 0.18s;
   }
 
   .input-area {
-    @apply w-full rounded-xl border border-line bg-paper-2 px-3.5 py-3 text-body-lg leading-6 text-ink placeholder:text-ink-3 focus:border-accent focus:ring-2 focus:ring-accent/15 focus:outline-none;
+    @apply w-full rounded-xl border border-line bg-surface px-3.5 py-3 text-body-lg leading-6 text-ink placeholder:text-ink-3 focus:border-accent focus:ring-2 focus:ring-accent/15 focus:outline-none;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
     resize: none;
     transition: border-color 0.18s, box-shadow 0.18s;
   }
