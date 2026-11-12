@@ -90,6 +90,8 @@ export interface Plan {
   kind: PlanKind
   note: string
   done: boolean
+  /** 是否在开始前发送提醒（旧数据未设置时按全局偏好处理） */
+  remind?: boolean
   /** 同一天内的排序，越小越靠前 */
   order: number
   createdAt: number

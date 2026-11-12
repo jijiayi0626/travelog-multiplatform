@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowLeft,
   CalendarBlank,
@@ -11,6 +11,7 @@ import {
   MapPin,
   PencilSimple,
   Plus,
+  SignOut,
   Sparkle,
   Trash,
   UsersThree,
@@ -48,6 +49,7 @@ import {
 } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
 import { answerTripQuestion, generatePlan, generatePackingList } from '../lib/ai'
+import { isSignedIn, leaveTripShare, listTripShares } from '../lib/cloud'
 import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import {
   CATEGORY_COLOR,
@@ -129,6 +131,27 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
   const [qaBusy, setQaBusy] = useState(false)
   const [checklistTemplateOpen, setChecklistTemplateOpen] = useState(false)
   const [lightbox, setLightbox] = useState<{ photos: Photo[]; index: number } | null>(null)
+  // 只有「别人共享给我」的旅程才显示退出入口
+  const [joinedShare, setJoinedShare] = useState<{ owner: string } | null>(null)
+  const [confirmLeaveShare, setConfirmLeaveShare] = useState(false)
+  const [leaveBusy, setLeaveBusy] = useState(false)
+
+  useEffect(() => {
+    if (!menuOpen || !isSignedIn()) return
+    let cancelled = false
+    listTripShares()
+      .then(({ shares }) => {
+        if (cancelled) return
+        const match = shares.find((share) => share.tripId === tripId)
+        setJoinedShare(match ? { owner: match.owner } : null)
+      })
+      .catch(() => {
+        if (!cancelled) setJoinedShare(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [menuOpen, tripId])
 
   const loader = useCallback(async (): Promise<DetailData> => {
     const [trip, moments, expenses, checklist, members, plans] = await Promise.all([
@@ -298,6 +321,29 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
     nav.navigate({ name: 'trips' })
   }
 
+  // 退出共享：先解除服务端成员关系，再删除本地副本，避免退出后又被推回自己的账号
+  const doLeaveShare = async () => {
+    if (!confirmLeaveShare) {
+      setConfirmLeaveShare(true)
+      toast(tr('再次点击确认退出共享旅程'))
+      return
+    }
+    setConfirmLeaveShare(false)
+    setLeaveBusy(true)
+    try {
+      await leaveTripShare(tripId)
+      await deleteTrip(tripId)
+      setMenuOpen(false)
+      bump()
+      toast(tr('已退出共享旅程'))
+      nav.navigate({ name: 'trips' })
+    } catch (error) {
+      toast(error instanceof Error ? error.message : tr('退出失败'))
+    } finally {
+      setLeaveBusy(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="space-y-4 pt-4">
@@ -356,6 +402,16 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
       </div>
 
       <section className={cn('relative mt-3 overflow-hidden rounded-[1.6rem] p-5 text-white', coverClass(trip.cover))}>
+        {trip.coverImage ? (
+          <>
+            <img
+              src={trip.coverImage}
+              alt=""
+              className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+            />
+            <span className="absolute inset-0 bg-black/40" />
+          </>
+        ) : null}
         <span className="cover-texture pointer-events-none absolute inset-0" />
         <div className="relative flex flex-wrap items-center gap-2">
           <span
@@ -614,7 +670,14 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
         </aside>
       </div>
 
-      <Sheet open={menuOpen} title={tr('旅程操作')} onClose={() => setMenuOpen(false)}>
+      <Sheet
+        open={menuOpen}
+        title={tr('旅程操作')}
+        onClose={() => {
+          setMenuOpen(false)
+          setConfirmLeaveShare(false)
+        }}
+      >
         <div className="space-y-1.5">
           <button
             type="button"
@@ -660,6 +723,24 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
             <Sparkle size={16} className="text-ink-3" />
             {tr('问问 AI')}
           </button>
+          {joinedShare ? (
+            <button
+              type="button"
+              onClick={doLeaveShare}
+              disabled={leaveBusy}
+              className="press flex w-full items-center gap-2.5 rounded-xl px-3 py-3 text-left text-body text-ink hover:bg-paper-2 disabled:opacity-60"
+            >
+              <SignOut size={16} className="text-ink-3" />
+              <span className="min-w-0 flex-1">
+                {confirmLeaveShare
+                  ? tr('确认退出共享旅程？')
+                  : tr('退出共享旅程')}
+                <span className="mt-0.5 block truncate text-caption text-ink-3">
+                  {tr('来自 {owner}', { owner: joinedShare.owner })}
+                </span>
+              </span>
+            </button>
+          ) : null}
           <div className="my-1 h-px bg-line" />
           <button
             type="button"

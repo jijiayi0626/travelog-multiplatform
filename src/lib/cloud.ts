@@ -156,6 +156,16 @@ export async function loginCloud(syncCode: string): Promise<AuthResult> {
   return result
 }
 
+/** 修改当前账号昵称；会同步到云端账号（旅伴、共享行程里的展示名） */
+export async function updateAccountNickname(nickname: string): Promise<{ nickname: string }> {
+  const result = await api<{ nickname: string }>('/account', {
+    method: 'PATCH',
+    body: { nickname },
+  })
+  saveCloudConfig({ nickname: result.nickname })
+  return result
+}
+
 export interface AIResult {
   text: string
   model: string

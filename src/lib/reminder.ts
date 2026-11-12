@@ -136,6 +136,9 @@ async function showWebNotification(title: string, body: string, tag: string): Pr
   }
 }
 
+/** 网页端提醒的定时器，便于编辑/关闭提醒时取消旧的 */
+const webTimers = new Map<string, number>()
+
 /** 给一条日程安排提醒；时间已过则跳过 */
 export async function schedulePlanReminder(
   plan: Plan,
@@ -163,17 +166,26 @@ export async function schedulePlanReminder(
 
   const delay = at - Date.now()
   if (delay <= 0 || delay > 2 ** 31 - 1) return false
-  window.setTimeout(() => {
+  const previous = webTimers.get(plan.id)
+  if (previous !== undefined) window.clearTimeout(previous)
+  const timer = window.setTimeout(() => {
+    webTimers.delete(plan.id)
     void showWebNotification(
       `${trip.title}`,
       `${plan.time} ${plan.title}${plan.place ? ` · ${plan.place}` : ''}`,
       plan.id,
     )
   }, delay)
+  webTimers.set(plan.id, timer)
   return true
 }
 
 export async function cancelPlanReminder(planId: string): Promise<void> {
+  const timer = webTimers.get(planId)
+  if (timer !== undefined) {
+    window.clearTimeout(timer)
+    webTimers.delete(planId)
+  }
   if (!native) return
   try {
     await LocalNotifications.cancel({ notifications: [{ id: numericId(planId) }] })

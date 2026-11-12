@@ -1,140 +1,144 @@
 # 同步与账号接口契约
 
-本文件定义客户端与后端之间的最小契约。客户端已按此契约抽象出 `ITravelRepository` 与 `ISyncService`，后端实现后只需替换注入点，页面代码零改动。
+本文件描述 **当前实际实现** 的客户端与后端契约，代码位置：
+
+- 客户端：`src/lib/repo.ts`（IndexedDB 本地仓库）、`src/lib/cloud.ts`（鉴权与 HTTP）、`src/lib/sync-engine.ts`（推送/拉取）
+- 服务端：`server/src/index.js`（Cloudflare Worker + D1）
 
 ## 1. 设计原则
 
-1. **本地优先**：所有读写先落本地 SQLite，网络失败不影响使用。
-2. **增量同步**：以服务端游标（cursor）拉取变更，以 `updated_at` 做本地增量推送。
-3. **软冲突策略**：同一实体以 `updated_at` 较新者为准（LWW）；删除用墓碑记录，避免"删了又被拉回"。
-4. **媒体单独通道**：图片先上传对象存储拿到 URL，再随实体同步。
+1. **本地优先**：读写先落 IndexedDB，网络失败不影响使用。
+2. **增量同步**：服务端按 `updated_at` 游标分页拉取，客户端推送全部待同步实体。
+3. **软冲突策略**：同一实体以 `updatedAt` 较新者为准（LWW），以逻辑删除墓碑避免“删了又被拉回”。
+4. **账号昵称**：本地 `profile` 实体参与同步；同时服务端 `users.nickname` 通过 `/api/account` 维护，用于旅伴、共享行程的展示名。
 
-## 2. 实体与字段
+## 2. 实体
 
-客户端本地表与远端 JSON 字段一一对应（时间均为毫秒时间戳，`sync_state` 仅客户端使用）。
+本地对象仓库与远端 `entities` 表一一对应，`kind` 取值见 `SYNC_KINDS`：
+
+```ts
+'trips' | 'moments' | 'expenses' | 'checklist' | 'footprints' | 'members' | 'plans' | 'profile'
+```
+
+同步载荷统一为：
+
+```jsonc
+{
+  "kind": "trips",
+  "id": "uuid",
+  "data": { /* 实体本身，时间均为毫秒时间戳 */ },
+  "updatedAt": 1760000000000,
+  "deleted": false
+}
+```
+
+客户端实体字段（摘要）：
 
 ```jsonc
 // Trip
-{
-  "id": "uuid",
-  "title": "北海道夏日之旅",
-  "destination": "日本 · 北海道",
-  "startDate": 1760000000000,
-  "endDate": 1760432000000,
-  "note": "从札幌到函馆",
-  "coverUri": "",
-  "ownerId": "user-uuid",
-  "inviteCode": "HK2026",
-  "createdAt": 1760000000000,
-  "updatedAt": 1760000000000,
-  "syncState": 0
-}
+{ "id": "uuid", "title": "北海道夏日之旅", "destination": "日本 · 北海道",
+  "startDate": 0, "endDate": 0, "note": "", "cover": "", "coverImage": "",
+  "budget": 0, "createdAt": 0, "updatedAt": 0 }
 
 // TripMember
-{ "id": "uuid", "tripId": "uuid", "userId": "uuid", "name": "小陈", "role": "owner|member", "joinedAt": 0 }
+{ "id": "uuid", "tripId": "uuid", "userId": "uuid", "name": "小陈",
+  "role": "owner|member", "joinedAt": 0, "contact": "", "note": "" }
 
 // Moment
-{
-  "id": "uuid", "tripId": "uuid", "dayIndex": 2,
-  "content": "函馆山的夜景",
+{ "id": "uuid", "tripId": "uuid", "dayIndex": 2, "content": "函馆山的夜景",
   "locationName": "函馆山", "latitude": 41.7597, "longitude": 140.7288,
-  "createdAt": 0, "updatedAt": 0, "syncState": 1,
-  "media": [ { "id": "uuid", "uri": "https://cdn/…/a.jpg", "mediaType": "image", "sortIndex": 0 } ]
-}
+  "createdAt": 0, "updatedAt": 0, "media": [] }
 
-// Expense
-{ "id": "uuid", "tripId": "uuid", "amount": 4200, "category": "food|transport|stay|ticket|shopping|other", "note": "海鲜烧烤", "spentAt": 0, "createdAt": 0, "syncState": 1 }
-
-// ChecklistItem
-{ "id": "uuid", "tripId": "uuid", "title": "护照", "done": false, "createdAt": 0 }
-
-// Footprint
-{ "id": "uuid", "tripId": "uuid", "placeName": "小樽运河", "city": "小樽", "latitude": 0, "longitude": 0, "note": "", "visitedAt": 0, "createdAt": 0 }
-
-// UserProfile（账号）
-{ "id": "uuid", "nickname": "我", "avatarUri": "", "createdAt": 0 }
+// Expense / ChecklistItem / Footprint / Plan / Profile
+// 分别见 src/lib/types.ts 中 Expense、ChecklistItem、Footprint、Plan、Profile
+{ "id": "local-user", "nickname": "我", "avatar": "", "createdAt": 0 }
 ```
 
 ## 3. 鉴权
 
-- `POST /v1/auth/login` → `{ "token": "<JWT>", "user": { "id", "nickname" } }`
-- 其余接口携带 `Authorization: Bearer <token>`。
-- 客户端落地位置：`UserSession.accountType = 'cloud'`，token 存入安全存储（`preferences` 加密或系统 key store），**不要**写进代码或明文文件。
+- `POST /api/auth/register` `{ "nickname": "旅人" }` → `{ "userId", "syncCode", "token", "nickname" }`
+- `POST /api/auth/login` `{ "syncCode": "ABCD2345" }` → `{ "userId", "token", "syncCode", "nickname" }`（登录会轮换 token）
+- 其余用户接口携带 `Authorization: Bearer <token>`。
+- 客户端保存位置：`localStorage` 的 `travelog.cloud`（`src/lib/cloud.ts`）。本应用为纯前端 + WebView，无系统安全存储；请勿把同步码/口令写进代码。
 
 ## 4. 接口
 
-### 4.1 拉取
+### 4.1 账号昵称
 
 ```
-GET /v1/sync/pull?cursor=<cursor>&userId=<uid>&tripId=<可选>
+PATCH /api/account
+{ "nickname": "新昵称" }          // 1–24 个字符
+200 { "userId": "uuid", "nickname": "新昵称" }
+```
+
+- 需要登录；只修改当前账号的 `users.nickname`。
+- 旅伴列表、共享行程的 `owner` 展示名会立即生效。
+- 客户端封装：`updateAccountNickname()`（`src/lib/cloud.ts`）。
+
+### 4.2 拉取
+
+```
+GET /api/sync/pull?cursor=<updatedAt>&limit=500
 200 {
-  "cursor": "<next-cursor>",
-  "trips": [...],
-  "members": [...],
-  "moments": [...],
-  "expenses": [...],
-  "checklist": [...],
-  "footprints": [...],
-  "deleted": [ { "entity": "moment", "id": "uuid", "updatedAt": 0 } ]
+  "cursor": 1760000000000,
+  "entities": [ { "kind", "id", "data", "updatedAt", "deleted" } ],
+  "hasMore": false
 }
 ```
 
-- 首次全量 `cursor=""`；之后带上次 `cursor`。
-- 返回数据的 `updatedAt` 与服务端一致，客户端按 LWW 合并。
+- 首次 `cursor=0`；之后带上次返回的 `cursor`。
+- 返回自己 + 已加入共享旅程（`trip_shares`）的实体；删除记录 `data = null`。
 
-### 4.2 推送
-
-```
-POST /v1/sync/push
-{ "cursor": "<last-cursor>", "changes": { "trips": [...], "moments": [...], ... } }
-200 { "cursor": "<next-cursor>", "applied": { "trips": ["id"], ... }, "rejected": [ { "entity": "trip", "id": "uuid", "reason": "forbidden|conflict" } ] }
-```
-
-- 客户端只推送 `syncState = 1` 的记录，成功后置 0。
-- 冲突时服务端返回 `rejected`，客户端下次 pull 覆盖本地。
-
-### 4.3 媒体
+### 4.3 推送
 
 ```
-POST /v1/media            // multipart/form-data
-200 { "url": "https://cdn/…/a.jpg" }
+POST /api/sync/push
+{ "entities": [ { "kind", "id", "data", "updatedAt" } ] }
+200 { "applied": 12, "skipped": 1, "cursor": 0 }
 ```
 
-- 客户端在推送 Moment 前，先把沙箱图片上传换 URL，再写回 `media[].uri`。
+- 单次最多 500 条，客户端按 150 条分批（`src/lib/sync-engine.ts`）。
+- 服务端按 `updatedAt` 做 LWW；已加入共享旅程的写入会重定向到 owner 的实体空间。
+- 客户端 `profile` 实体参与同步，昵称与头像随账号到其他设备。
 
-### 4.4 共享
+### 4.4 换机恢复
+
+- 客户端 `pullOverwrite()`：分页拉取全部实体，**以云端为准覆盖本机**，云端为空时保留本地。
+- 入口在「云同步」页：`从云端恢复本机数据`（两步确认）。
+
+### 4.5 共享
 
 ```
-POST /v1/trips/{tripId}/members   { "inviteCode": "HK2026" }  // 或 { "name": "小陈" }
-GET  /v1/trips/{tripId}/members
-DELETE /v1/trips/{tripId}/members/{memberId}
+POST   /api/trips/join                   { "inviteCode": "HK2026" }
+GET    /api/trips/shares
+DELETE /api/trips/shares/{tripId}
 ```
 
-- 权限：`owner` 可增删成员；`member` 仅可读写内容。
+### 4.6 其他
 
-## 5. 客户端接入步骤
+```
+GET  /api/health
+POST /api/ai/complete      { "prompt", "system", "temperature" }
+GET  /api/weather?lat=&lon=&days=
+GET  /api/geocode?q=
+GET  /api/poi?q=&lat=&lon=
+```
 
-1. 新建 `RemoteTravelRepository implements ITravelRepository`，内部调用上述接口并落本地缓存。
-2. 新建 `RemoteSyncService implements ISyncService`，实现 `configured = true` 与 `syncNow()`。
-3. 在 `EntryAbility.onCreate` 或应用启动流程中：
-   ```ts
-   RepositoryProvider.use(new RemoteTravelRepository());
-   SyncProvider.use(new RemoteSyncService());
-   ```
-4. 登录成功后写入 `UserSession`（`AppStorageV2` 键 `UserSession`），并触发一次全量 pull。
+## 5. 同步流程
 
-## 6. 本地字段与同步状态
+1. 写操作落 IndexedDB，并记为待同步（`putOne`）。
+2. `scheduleAutoSync()` 在写操作后 800ms 触发 `runSync()`（需登录且开启自动同步）。
+3. `runSync()`：全量分批推送 → 从当前 cursor 起分页拉取 → 应用远端实体。
+4. 登录/注册成功后，客户端把账号昵称写回本地 `profile`，保持本地与云端一致。
 
-- `sync_state = 0`：已同步；`1`：待同步（本地有改动）。
-- 任何写操作（保存旅行/记录/账目/清单/足迹/成员）都会把对应记录置为 `1`。
-- `AppStats.pendingSyncCount` 即三类实体的待同步计数，用于「云同步」页展示。
+## 6. 错误格式
 
-## 7. 错误码约定
+非 2xx 返回 `{ "error": "人类可读信息" }`。客户端 `api()` 会转成 `ApiError`（含 HTTP 状态码）：
 
-| HTTP | code | 含义 |
-| --- | --- | --- |
-| 401 | `unauthorized` | token 缺失或过期，客户端重新登录 |
-| 403 | `forbidden` | 无该旅行权限 |
-| 404 | `not_found` | 实体不存在（服务端已删除） |
-| 409 | `conflict` | 版本冲突，交由下次 pull 收敛 |
-| 5xx | `server_error` | 可重试，客户端指数退避 |
+| HTTP | 含义 |
+| --- | --- |
+| 401 | token 缺失或失效 |
+| 403 | 账号停用或无权限 |
+| 404 | 资源不存在 |
+| 413 | 单次推送超过 500 条 |
+| 5xx | 服务器错误，可重试 |

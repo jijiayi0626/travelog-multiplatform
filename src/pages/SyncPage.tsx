@@ -11,7 +11,7 @@ import {
   SignOut,
   ArrowsClockwise,
 } from '@phosphor-icons/react'
-import { useNav, useI18n, useToast } from '../lib/app-context'
+import { useNav, useI18n, useRefresh, useToast } from '../lib/app-context'
 import {
   checkHealth,
   clearCloudConfig,
@@ -21,7 +21,8 @@ import {
   saveCloudConfig,
   type HealthInfo,
 } from '../lib/cloud'
-import { runSync } from '../lib/sync-engine'
+import { pullOverwrite, runSync } from '../lib/sync-engine'
+import { getProfile, saveProfile } from '../lib/repo'
 import { copyText, relativeTime } from '../lib/utils'
 import { cn } from '../lib/cn'
 import { Field, IconButton } from '../components/ui'
@@ -29,6 +30,7 @@ import { Field, IconButton } from '../components/ui'
 const ENDPOINTS = [
   { method: 'POST', path: '/api/auth/register', note: '创建同步账号' },
   { method: 'POST', path: '/api/auth/login', note: '用同步码登录' },
+  { method: 'PATCH', path: '/api/account', note: '修改账号昵称' },
   { method: 'GET', path: '/api/sync/pull', note: '游标增量拉取' },
   { method: 'POST', path: '/api/sync/push', note: 'LWW 增量推送' },
   { method: 'POST', path: '/api/ai/complete', note: 'AI 调用代理' },
@@ -38,6 +40,7 @@ const ENDPOINTS = [
 export function SyncPage() {
   const nav = useNav()
   const toast = useToast()
+  const { bump } = useRefresh()
   const { tr } = useI18n()
 
   const [config, setConfig] = useState(() => getCloudConfig())
@@ -45,7 +48,8 @@ export function SyncPage() {
   const [nickname, setNickname] = useState('')
   const [code, setCode] = useState('')
   const [health, setHealth] = useState<HealthInfo | null>(null)
-  const [busy, setBusy] = useState<'health' | 'register' | 'login' | 'sync' | null>(null)
+  const [busy, setBusy] = useState<'health' | 'register' | 'login' | 'sync' | 'restore' | null>(null)
+  const [confirmRestore, setConfirmRestore] = useState(false)
   const [result, setResult] = useState('')
   // 中文输入法下 React state 可能滞后，注册时以输入框实际值为准
   const nicknameRef = useRef<HTMLInputElement>(null)
@@ -84,6 +88,12 @@ export function SyncPage() {
     try {
       saveCloudConfig({ baseUrl: baseUrl.trim() })
       const auth = await registerCloud(name)
+      // 账号昵称与本地资料保持一致，避免两个名字各说各话
+      const localProfile = await getProfile()
+      if (localProfile.nickname !== auth.nickname) {
+        await saveProfile({ ...localProfile, nickname: auth.nickname })
+        bump()
+      }
       setConfig(getCloudConfig())
       setResult(tr('同步码：{code}', { code: auth.syncCode }))
       toast(tr('账号已创建，请记下同步码'))
@@ -102,7 +112,13 @@ export function SyncPage() {
     setBusy('login')
     try {
       saveCloudConfig({ baseUrl: baseUrl.trim() })
-      await loginCloud(code.trim())
+      const auth = await loginCloud(code.trim())
+      // 登录后把云端账号昵称写回本地资料
+      const localProfile = await getProfile()
+      if (auth.nickname && localProfile.nickname !== auth.nickname) {
+        await saveProfile({ ...localProfile, nickname: auth.nickname })
+        bump()
+      }
       setConfig(getCloudConfig())
       toast(tr('登录成功，可以同步了'))
     } catch (error) {
@@ -113,6 +129,7 @@ export function SyncPage() {
   }
 
   const doSync = async () => {
+    setConfirmRestore(false)
     setBusy('sync')
     try {
       const sync = await runSync()
@@ -132,7 +149,30 @@ export function SyncPage() {
     }
   }
 
+  // 换机恢复：以云端为准覆盖本机，两步确认避免误触
+  const doRestore = async () => {
+    if (!confirmRestore) {
+      setConfirmRestore(true)
+      toast(tr('再次点击确认：用云端数据覆盖本机'))
+      return
+    }
+    setConfirmRestore(false)
+    setBusy('restore')
+    try {
+      const { pulled } = await pullOverwrite()
+      setConfig(getCloudConfig())
+      bump()
+      setResult(tr('已从云端恢复 {n} 条数据', { n: pulled }))
+      toast(pulled > 0 ? tr('已用云端数据覆盖本机') : tr('云端暂无数据，本机未改动'))
+    } catch (error) {
+      toast(error instanceof Error ? error.message : tr('恢复失败'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const doLogout = () => {
+    setConfirmRestore(false)
     clearCloudConfig()
     setConfig(getCloudConfig())
     setResult('')
@@ -247,19 +287,33 @@ export function SyncPage() {
           ) : null}
 
           {signedIn ? (
-            <div className="mt-4 flex gap-2">
+            <div className="mt-4 space-y-2">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="btn-primary flex-1"
+                  onClick={doSync}
+                  disabled={busy === 'sync' || busy === 'restore'}
+                >
+                  <ArrowsClockwise size={16} className={busy === 'sync' ? 'animate-spin' : undefined} />
+                  {busy === 'sync' ? tr('同步中…') : tr('立即同步')}
+                </button>
+                <button type="button" className="btn-ghost" onClick={doLogout}>
+                  <SignOut size={15} />
+                  {tr('退出')}
+                </button>
+              </div>
               <button
                 type="button"
-                className="btn-primary flex-1"
-                onClick={doSync}
-                disabled={busy === 'sync'}
+                className={cn('btn-ghost h-9 w-full text-body-sm', confirmRestore && 'border-danger text-danger')}
+                onClick={doRestore}
+                disabled={busy === 'sync' || busy === 'restore'}
               >
-                <ArrowsClockwise size={16} className={busy === 'sync' ? 'animate-spin' : undefined} />
-                {busy === 'sync' ? tr('同步中…') : tr('立即同步')}
-              </button>
-              <button type="button" className="btn-ghost" onClick={doLogout}>
-                <SignOut size={15} />
-                {tr('退出')}
+                {busy === 'restore'
+                  ? tr('恢复中…')
+                  : confirmRestore
+                    ? tr('确认覆盖本机数据？')
+                    : tr('从云端恢复本机数据')}
               </button>
             </div>
           ) : null}

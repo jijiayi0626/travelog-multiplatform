@@ -25,7 +25,7 @@ import { ACCENTS, type AccentName, currentTheme, getAccent, setAccent, setThemeM
 import { downloadText, formatCny, readTextFile } from '../lib/utils'
 import { getBestFix, isNative, shareTextFile } from '../lib/native'
 import { ensureExactAlarmPermission, ensureNotificationPermission } from '../lib/reminder'
-import { isSignedIn, saveCloudConfig } from '../lib/cloud'
+import { isSignedIn, saveCloudConfig, updateAccountNickname } from '../lib/cloud'
 import {
   getAutoCheckinSettings,
   getAutoCheckinStatus,
@@ -131,15 +131,28 @@ export function ProfilePage() {
       toast('昵称不能为空')
       return
     }
+    if (name.length > 24) {
+      toast('昵称最多 24 个字符')
+      return
+    }
     try {
       const base: Profile =
         data.profile ?? { id: 'local-user', nickname: name, avatar: '', createdAt: Date.now() }
       await saveProfile({ ...base, nickname: name })
-      if (isSignedIn()) saveCloudConfig({ nickname: name })
       setNickname(name)
       setEditing(false)
       bump()
-      toast('资料已更新')
+      if (isSignedIn()) {
+        try {
+          await updateAccountNickname(name)
+          toast('昵称已更新并同步到云端')
+        } catch (error) {
+          saveCloudConfig({ nickname: name })
+          toast(`昵称已保存到本机，云端同步失败：${error instanceof Error ? error.message : '请稍后重试'}`)
+        }
+      } else {
+        toast('昵称已更新；登录「云同步」后可同步到云端')
+      }
     } catch (error) {
       toast(`保存失败：${error instanceof Error ? error.message : '请稍后重试'}`)
     }

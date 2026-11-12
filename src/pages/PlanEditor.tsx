@@ -21,6 +21,7 @@ import {
   ensureNotificationPermission,
   getReminderPrefs,
   schedulePlanReminder,
+  setReminderPrefs,
 } from '../lib/reminder'
 
 const QUICK_TIMES = ['08:00', '09:30', '12:00', '15:00', '18:30', '21:00']
@@ -79,6 +80,7 @@ export function PlanEditor({
           setPlace(target.place)
           setNote(target.note)
           setDone(target.done)
+          setRemind(target.remind ?? getReminderPrefs().enabled)
         }
         if (alive) setLoading(false)
       }
@@ -108,6 +110,7 @@ export function PlanEditor({
         kind,
         note: note.trim(),
         done: original ? done : false,
+        remind,
         order: original?.order ?? Number.NaN,
         createdAt: original?.createdAt ?? 0,
       })
@@ -116,6 +119,7 @@ export function PlanEditor({
       nav.back()
       // 通知属于增强项：放到导航之后异步处理，避免权限弹窗阻塞保存
       if (remind && trip) {
+        setReminderPrefs({ leadMinutes: lead })
         void (async () => {
           try {
             const allowed = await ensureNotificationPermission()
@@ -124,6 +128,8 @@ export function PlanEditor({
             /* 忽略通知失败 */
           }
         })()
+      } else if (original) {
+        void cancelPlanReminder(original.id)
       }
     } finally {
       setSaving(false)

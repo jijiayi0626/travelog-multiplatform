@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 import {
   CHINA_HEIGHT,
   CHINA_WIDTH,
@@ -60,6 +61,39 @@ function fitPoints(points: Array<[number, number]>, pad = PAD, minSpan = 96): Fi
   return fitRect(minX, minY, width, height, pad)
 }
 
+interface MapView {
+  zoom: number
+  /** 视口中心（SVG 坐标） */
+  cx: number
+  cy: number
+}
+
+const MIN_ZOOM = 1
+const MAX_ZOOM = 6
+const DEFAULT_VIEW: MapView = { zoom: 1, cx: CHINA_WIDTH / 2, cy: CHINA_HEIGHT / 2 }
+
+/** 限制视口不出画布，避免拖出大片空白 */
+function clampView(view: MapView): MapView {
+  const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, view.zoom))
+  const width = CHINA_WIDTH / zoom
+  const height = CHINA_HEIGHT / zoom
+  const cx =
+    width >= CHINA_WIDTH
+      ? CHINA_WIDTH / 2
+      : Math.min(Math.max(view.cx, width / 2), CHINA_WIDTH - width / 2)
+  const cy =
+    height >= CHINA_HEIGHT
+      ? CHINA_HEIGHT / 2
+      : Math.min(Math.max(view.cy, height / 2), CHINA_HEIGHT - height / 2)
+  return { zoom, cx, cy }
+}
+
+function viewBoxOf(view: MapView): string {
+  const width = CHINA_WIDTH / view.zoom
+  const height = CHINA_HEIGHT / view.zoom
+  return `${(view.cx - width / 2).toFixed(2)} ${(view.cy - height / 2).toFixed(2)} ${width.toFixed(2)} ${height.toFixed(2)}`
+}
+
 export function ChinaMap({
   visits,
   onSelect,
@@ -72,9 +106,118 @@ export function ChinaMap({
   const [hoverProvince, setHoverProvince] = useState<string | null>(null)
   const [drillProvince, setDrillProvince] = useState<string | null>(null)
   const [drillCity, setDrillCity] = useState<string | null>(null)
-  // 全国视图的手动缩放，方便看清港澳、上海这类小面积区域
-  const [zoom, setZoom] = useState(1)
+  // 全国 / 省 / 市三级共用同一套缩放与平移
+  const [viewport, setViewport] = useState<MapView>(DEFAULT_VIEW)
+  const frameRef = useRef<HTMLDivElement>(null)
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>())
+  const pinchRef = useRef<{ dist: number } | null>(null)
+  const dragRef = useRef<{ x: number; y: number } | null>(null)
+  const suppressClickRef = useRef(false)
   const { tr } = useI18n()
+
+  useEffect(() => {
+    setViewport({ ...DEFAULT_VIEW })
+  }, [drillProvince, drillCity])
+
+  /** 以视口比例 (fx, fy) 为中心缩放 */
+  const zoomBy = (factor: number, fx = 0.5, fy = 0.5) => {
+    setViewport((prev) => {
+      const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prev.zoom * factor))
+      if (nextZoom === prev.zoom) return prev
+      const width = CHINA_WIDTH / prev.zoom
+      const height = CHINA_HEIGHT / prev.zoom
+      const focusX = prev.cx - width / 2 + fx * width
+      const focusY = prev.cy - height / 2 + fy * height
+      const nextWidth = CHINA_WIDTH / nextZoom
+      const nextHeight = CHINA_HEIGHT / nextZoom
+      return clampView({
+        zoom: nextZoom,
+        cx: focusX - fx * nextWidth + nextWidth / 2,
+        cy: focusY - fy * nextHeight + nextHeight / 2,
+      })
+    })
+  }
+
+  const resetViewport = () => setViewport({ ...DEFAULT_VIEW })
+
+  /** 拖动结束后不要误触下钻 */
+  const consumeSuppressedClick = (): boolean => {
+    if (!suppressClickRef.current) return false
+    suppressClickRef.current = false
+    return true
+  }
+
+  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    event.currentTarget.setPointerCapture(event.pointerId)
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    dragRef.current = { x: event.clientX, y: event.clientY }
+    suppressClickRef.current = false
+    if (pointersRef.current.size >= 2) {
+      const [a, b] = [...pointersRef.current.values()]
+      pinchRef.current = { dist: Math.hypot(a.x - b.x, a.y - b.y) }
+    }
+  }
+
+  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const pointers = pointersRef.current
+    if (!pointers.has(event.pointerId)) return
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    const rect = frameRef.current?.getBoundingClientRect()
+    if (!rect) return
+
+    if (pointers.size >= 2) {
+      const [a, b] = [...pointers.values()]
+      const dist = Math.hypot(a.x - b.x, a.y - b.y)
+      const last = pinchRef.current
+      if (last && last.dist > 0 && dist > 0) {
+        const fx = Math.min(1, Math.max(0, ((a.x + b.x) / 2 - rect.left) / rect.width))
+        const fy = Math.min(1, Math.max(0, ((a.y + b.y) / 2 - rect.top) / rect.height))
+        zoomBy(dist / last.dist, fx, fy)
+      }
+      pinchRef.current = { dist }
+      suppressClickRef.current = true
+      return
+    }
+
+    const prev = dragRef.current
+    if (!prev) return
+    const dx = event.clientX - prev.x
+    const dy = event.clientY - prev.y
+    if (Math.abs(dx) + Math.abs(dy) > 2) suppressClickRef.current = true
+    setViewport((current) =>
+      clampView({
+        zoom: current.zoom,
+        cx: current.cx - (dx * (CHINA_WIDTH / current.zoom)) / rect.width,
+        cy: current.cy - (dy * (CHINA_HEIGHT / current.zoom)) / rect.height,
+      }),
+    )
+    dragRef.current = { x: event.clientX, y: event.clientY }
+  }
+
+  const onPointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
+    pointersRef.current.delete(event.pointerId)
+    pinchRef.current = null
+    const rest = [...pointersRef.current.values()][0]
+    dragRef.current = rest ? { x: rest.x, y: rest.y } : null
+  }
+
+  // 滚轮缩放需要 preventDefault，React 的 onWheel 在某些浏览器里是被动监听
+  useEffect(() => {
+    const element = frameRef.current
+    if (!element) return
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault()
+      const rect = element.getBoundingClientRect()
+      const fx = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
+      const fy = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height))
+      zoomBy(Math.exp(-event.deltaY * 0.0015), fx, fy)
+    }
+    element.addEventListener('wheel', onWheel, { passive: false })
+    return () => element.removeEventListener('wheel', onWheel)
+    // zoomBy 每次渲染重建，但内部只依赖 setViewport，捕获首次实例即可
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const maxCount = useMemo(() => {
     let max = 0
@@ -103,13 +246,9 @@ export function ChinaMap({
   }
 
   /* ---------------- 全国视图 ---------------- */
-  const vbWidth = CHINA_WIDTH / zoom
-  const vbHeight = CHINA_HEIGHT / zoom
-  const vbX = (CHINA_WIDTH - vbWidth) / 2
-  const vbY = (CHINA_HEIGHT - vbHeight) / 2
   const countryView = (
     <svg
-      viewBox={`${vbX} ${vbY} ${vbWidth} ${vbHeight}`}
+      viewBox={viewBoxOf(viewport)}
       className="block w-full"
       role="img"
       aria-label={tr('中国省份足迹地图')}
@@ -133,7 +272,10 @@ export function ChinaMap({
             )}
             onMouseEnter={() => setHoverProvince(province.short)}
             onMouseLeave={() => setHoverProvince(null)}
-            onClick={() => visit && setDrillProvince(province.short)}
+            onClick={() => {
+              if (consumeSuppressedClick()) return
+              if (visit) setDrillProvince(province.short)
+            }}
           >
             <title>
               {visit
@@ -202,7 +344,7 @@ export function ChinaMap({
   const provinceView =
     province && provinceFit ? (
       <svg
-        viewBox={`0 0 ${CHINA_WIDTH} ${CHINA_HEIGHT}`}
+        viewBox={viewBoxOf(viewport)}
         className="block w-full"
         role="img"
         aria-label={tr('{province} 城市足迹地图', { province: province.short })}
@@ -242,7 +384,10 @@ export function ChinaMap({
                 data-city={city.name}
                 data-visited={hit ? '1' : undefined}
                 style={{ cursor: canDrill ? 'pointer' : 'default' }}
-                onClick={() => canDrill && setDrillCity(city.name)}
+                onClick={() => {
+                  if (consumeSuppressedClick()) return
+                  if (canDrill) setDrillCity(city.name)
+                }}
               >
                 <circle
                   cx={x}
@@ -297,7 +442,7 @@ export function ChinaMap({
   const cityView =
     province && currentCity ? (
       <svg
-        viewBox={`0 0 ${CHINA_WIDTH} ${CHINA_HEIGHT}`}
+        viewBox={viewBoxOf(viewport)}
         className="block w-full"
         role="img"
         aria-label={tr('{city} 区县足迹地图', { city: currentCity.name })}
@@ -410,29 +555,52 @@ export function ChinaMap({
         </div>
       ) : null}
 
-      {view}
+      {/* 全国 / 省 / 市三级共用：拖动平移、双指或滚轮缩放 */}
+      <div
+        ref={frameRef}
+        className="select-none"
+        style={{
+          cursor: viewport.zoom > 1.01 ? 'grab' : 'default',
+          // 未放大时保留页面纵向滚动，放大后再完全接管手势用于平移
+          touchAction: viewport.zoom > 1.01 ? 'none' : 'pan-y',
+        }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerEnd}
+        onPointerCancel={onPointerEnd}
+        onPointerLeave={onPointerEnd}
+      >
+        {view}
+      </div>
 
-      {/* 全国视图可用按钮缩放，看清港澳/上海这类小区域 */}
-      {!drillProvince ? (
-        <div className="absolute right-3 top-3 flex flex-col overflow-hidden rounded-full border border-line bg-surface/95 backdrop-blur-sm">
+      <div className="absolute right-3 top-3 z-10 flex flex-col overflow-hidden rounded-full border border-line bg-surface/95 backdrop-blur-sm">
+        <button
+          type="button"
+          aria-label={tr('放大')}
+          className="press flex h-8 w-8 items-center justify-center text-body text-ink-2 hover:text-ink"
+          onClick={() => zoomBy(1.35)}
+        >
+          +
+        </button>
+        <button
+          type="button"
+          aria-label={tr('缩小')}
+          className="press flex h-8 w-8 items-center justify-center border-t border-line text-body text-ink-2 hover:text-ink"
+          onClick={() => zoomBy(1 / 1.35)}
+        >
+          −
+        </button>
+        {viewport.zoom > 1.01 ? (
           <button
             type="button"
-            aria-label={tr('放大')}
-            className="press flex h-8 w-8 items-center justify-center text-body text-ink-2 hover:text-ink"
-            onClick={() => setZoom((value) => Math.min(4, Number((value * 1.35).toFixed(2))))}
+            aria-label={tr('复位')}
+            className="press flex h-8 w-8 items-center justify-center border-t border-line text-note text-ink-3 hover:text-ink"
+            onClick={resetViewport}
           >
-            +
+            ↺
           </button>
-          <button
-            type="button"
-            aria-label={tr('缩小')}
-            className="press flex h-8 w-8 items-center justify-center border-t border-line text-body text-ink-2 hover:text-ink"
-            onClick={() => setZoom((value) => Math.max(1, Number((value / 1.35).toFixed(2))))}
-          >
-            −
-          </button>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
 
       <div className="pointer-events-none absolute inset-x-3 bottom-3 flex items-end gap-2">
         <div className="min-w-0 max-w-[62%] rounded-lg bg-surface/90 px-2 py-1 backdrop-blur-sm">

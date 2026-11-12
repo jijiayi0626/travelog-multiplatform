@@ -500,6 +500,17 @@ async function handleLogin(request, env) {
   return json({ userId: row.id, token, nickname: row.nickname, syncCode: code }, 200, env, request)
 }
 
+/** 修改当前账号昵称（登录后可用，影响旅伴与共享行程中的展示名） */
+async function handleUpdateAccount(request, env) {
+  const user = await requireUser(request, env)
+  const body = await readJSON(request).catch(() => ({}))
+  const nickname = String(body.nickname || '').trim()
+  if (!nickname) throw new HttpError(400, '昵称不能为空')
+  if (nickname.length > 24) throw new HttpError(400, '昵称最多 24 个字符')
+  await env.DB.prepare('UPDATE users SET nickname = ? WHERE id = ?').bind(nickname, user.id).run()
+  return json({ userId: user.id, nickname }, 200, env, request)
+}
+
 async function handlePull(request, env, url) {
   const user = await requireUser(request, env)
   const cursor = Number(url.searchParams.get('cursor') || 0)
@@ -977,6 +988,7 @@ async function handleApi(request, env, url) {
 
   if (route === 'POST /api/auth/register') return await handleRegister(request, env)
   if (route === 'POST /api/auth/login') return await handleLogin(request, env)
+  if (route === 'PATCH /api/account') return await handleUpdateAccount(request, env)
   if (route === 'GET /api/sync/pull') return await handlePull(request, env, url)
   if (route === 'POST /api/sync/push') return await handlePush(request, env)
   if (route === 'GET /api/sync/stats') return await handleStats(request, env)
