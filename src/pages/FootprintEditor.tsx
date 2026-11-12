@@ -4,6 +4,7 @@ import { saveFootprint } from '../lib/repo'
 import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import { todayStart } from '../lib/utils'
 import { getBestFix, isNative } from '../lib/native'
+import { searchPoi, type PoiItem } from '../lib/cloud'
 import { EditorScreen, FormBlock } from '../components/EditorScreen'
 import { Field } from '../components/ui'
 
@@ -23,6 +24,27 @@ export function FootprintEditor() {
   const [error, setError] = useState('')
   // 输入法下 state 可能滞后，保存时以 DOM 值为准
   const placeRef = useRef<HTMLInputElement>(null)
+  const [poiQuery, setPoiQuery] = useState('')
+  const [poiResults, setPoiResults] = useState<PoiItem[]>([])
+  const [poiLoading, setPoiLoading] = useState(false)
+
+  const runPoiSearch = async () => {
+    const query = poiQuery.trim() || '景区'
+    setPoiLoading(true)
+    try {
+      const results = await searchPoi(
+        query,
+        latitude !== 0 ? latitude : undefined,
+        longitude !== 0 ? longitude : undefined,
+      )
+      setPoiResults(results)
+      if (results.length === 0) toast(tr('附近没搜到，换个关键词试试'))
+    } catch (error) {
+      toast(error instanceof Error ? error.message : tr('搜索失败'))
+    } finally {
+      setPoiLoading(false)
+    }
+  }
 
   const locate = async () => {
     setLocating(true)
@@ -114,6 +136,57 @@ export function FootprintEditor() {
             }}
           />
         </Field>
+        <div className="space-y-2 rounded-2xl border border-line bg-surface p-3">
+          <p className="text-note font-medium text-ink">{tr('搜索附近的地点')}</p>
+          <p className="text-caption leading-4 text-ink-3">
+            {latitude === 0 && longitude === 0
+              ? tr('先点下方「使用当前位置」，才能搜索周边景点、街道和建筑')
+              : tr('例如「宽窄巷子」「人民公园」「博物馆」')}
+          </p>
+          <div className="flex gap-2">
+            <input
+              className="input"
+              value={poiQuery}
+              placeholder={tr('景点 / 街道 / 建筑')}
+              onChange={(event) => setPoiQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void runPoiSearch()
+              }}
+            />
+            <button
+              type="button"
+              className="btn-ghost h-[46px] shrink-0 px-3"
+              disabled={poiLoading}
+              onClick={runPoiSearch}
+            >
+              {poiLoading ? tr('搜索中…') : tr('搜索')}
+            </button>
+          </div>
+          {poiResults.length > 0 ? (
+            <ul className="space-y-1">
+              {poiResults.map((item) => (
+                <li key={`${item.name}-${item.latitude}`}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPlaceName(item.name)
+                      setLatitude(item.latitude)
+                      setLongitude(item.longitude)
+                      setPoiResults([])
+                      toast(tr('已填入「{name}」', { name: item.name }))
+                    }}
+                    className="press w-full rounded-xl border border-line px-2.5 py-2 text-left"
+                  >
+                    <span className="block truncate text-body-sm text-ink">{item.name}</span>
+                    <span className="mt-0.5 block truncate text-caption text-ink-3">
+                      {item.displayName}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
         <Field
           label={tr('城市')}
           hint={tr('填写城市名会自动归入省份，点亮足迹地图')}

@@ -666,4 +666,13 @@ export const EN_TEXT: Record<string, string> = {
   '目的地天气': 'Destination weather',
   '未来 3 天预报，出行前再确认一次': 'Next 3 days — check again before you go',
   '风速 {v} km/h · 湿度 {h}%': 'Wind {v} km/h · humidity {h}%',
+  搜索附近的地点: 'Search nearby places',
+  '先点下方「使用当前位置」，才能搜索周边景点、街道和建筑':
+    'Tap "Use current location" first to search nearby sights, streets and buildings',
+  '例如「宽窄巷子」「人民公园」「博物馆」': 'e.g. "Kuanzhai Alley" "People\'s Park" "Museum"',
+  '景点 / 街道 / 建筑': 'Sight / street / building',
+  '搜索中…': 'Searching…',
+  '附近没搜到，换个关键词试试': 'Nothing nearby — try another keyword',
+  搜索失败: 'Search failed',
+  '已填入「{name}」': 'Filled in "{name}"',
 }

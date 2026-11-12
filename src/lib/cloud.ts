@@ -405,3 +405,31 @@ export async function listTripShares(): Promise<{ shares: TripShare[] }> {
 export async function leaveTripShare(tripId: string): Promise<{ ok: boolean }> {
   return api(`/trips/shares/${encodeURIComponent(tripId)}`, { method: 'DELETE' })
 }
+
+/* ---------------- 附近地点搜索 ---------------- */
+
+export interface PoiItem {
+  name: string
+  displayName: string
+  latitude: number
+  longitude: number
+  type: string
+}
+
+/**
+ * 搜索附近的地点（景区、街道、建筑）。
+ * 传 lat/lon 时只搜周边约 8 公里。
+ */
+export async function searchPoi(
+  query: string,
+  lat?: number,
+  lon?: number,
+): Promise<PoiItem[]> {
+  const params = new URLSearchParams({ q: query })
+  if (typeof lat === 'number' && typeof lon === 'number') {
+    params.set('lat', String(lat))
+    params.set('lon', String(lon))
+  }
+  const result = await api<{ results: PoiItem[] }>(`/poi?${params.toString()}`, { auth: false })
+  return result.results ?? []
+}

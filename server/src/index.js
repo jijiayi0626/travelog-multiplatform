@@ -887,6 +887,51 @@ async function handleGeocode(request, env, url) {
   )
 }
 
+/* ---------------- 地点搜索（POI） ---------------- */
+
+/**
+ * 附近地点搜索：代理 OpenStreetMap Nominatim。
+ * 带 viewbox 时只搜附近，适合「宽窄巷子」「人民公园」这类具体地点。
+ */
+async function handlePOI(request, env, url) {
+  const lat = Number(url.searchParams.get('lat'))
+  const lon = Number(url.searchParams.get('lon'))
+  const query = (url.searchParams.get('q') || '').trim().slice(0, 60)
+  if (!query) throw new HttpError(400, '缺少关键词')
+
+  const params = new URLSearchParams({
+    q: query,
+    format: 'jsonv2',
+    limit: '8',
+    'accept-language': 'zh',
+    addressdetails: '0',
+  })
+  if (Number.isFinite(lat) && Number.isFinite(lon)) {
+    const delta = 0.08
+    params.set('viewbox', `${lon - delta},${lat + delta},${lon + delta},${lat - delta}`)
+    params.set('bounded', '1')
+  }
+
+  const response = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+    headers: { 'User-Agent': 'Travelog/1.8 (personal travel diary)' },
+    cf: { cacheTtl: 3600 },
+  })
+  if (!response.ok) throw new HttpError(502, '地点搜索暂时不可用')
+
+  const data = await response.json()
+  const results = (Array.isArray(data) ? data : [])
+    .map((item) => ({
+      name: item.name || String(item.display_name || '').split(',')[0] || '',
+      displayName: item.display_name || '',
+      latitude: Number(item.lat),
+      longitude: Number(item.lon),
+      type: item.type || '',
+    }))
+    .filter((item) => item.name && Number.isFinite(item.latitude) && Number.isFinite(item.longitude))
+
+  return json({ results }, 200, env, request)
+}
+
 /* ---------------- 入口 ---------------- */
 
 async function handleApi(request, env, url) {
@@ -944,6 +989,7 @@ async function handleApi(request, env, url) {
   if (route === 'POST /api/ai/complete') return await handleAI(request, env)
   if (route === 'GET /api/weather') return await handleWeather(request, env, url)
   if (route === 'GET /api/geocode') return await handleGeocode(request, env, url)
+  if (route === 'GET /api/poi') return await handlePOI(request, env, url)
 
   return json({ error: 'Not Found', path: url.pathname }, 404, env, request)
 }
