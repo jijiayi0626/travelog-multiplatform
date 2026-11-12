@@ -149,13 +149,20 @@ export function ChinaMap({
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.pointerType === 'mouse' && event.button !== 0) return
-    event.currentTarget.setPointerCapture(event.pointerId)
     pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
     dragRef.current = { x: event.clientX, y: event.clientY }
     suppressClickRef.current = false
     if (pointersRef.current.size >= 2) {
       const [a, b] = [...pointersRef.current.values()]
       pinchRef.current = { dist: Math.hypot(a.x - b.x, a.y - b.y) }
+      // 双指手势需要持续跟踪，即使手指移出地图
+      for (const pointerId of pointersRef.current.keys()) {
+        try {
+          event.currentTarget.setPointerCapture(pointerId)
+        } catch {
+          /* 指针已失效时忽略 */
+        }
+      }
     }
   }
 
@@ -184,7 +191,17 @@ export function ChinaMap({
     if (!prev) return
     const dx = event.clientX - prev.x
     const dy = event.clientY - prev.y
-    if (Math.abs(dx) + Math.abs(dy) > 2) suppressClickRef.current = true
+    if (Math.abs(dx) + Math.abs(dy) > 2) {
+      if (!suppressClickRef.current) {
+        // 只有真正拖动后才捕获指针，轻点仍让 SVG 收到 click（下钻省份依赖它）
+        try {
+          event.currentTarget.setPointerCapture(event.pointerId)
+        } catch {
+          /* 指针已失效时忽略 */
+        }
+      }
+      suppressClickRef.current = true
+    }
     setViewport((current) =>
       clampView({
         zoom: current.zoom,
