@@ -4,7 +4,7 @@ import {
   saveCloudConfig,
   type CloudConfig,
 } from './cloud'
-import { applyRemoteEntities, exportAllEntities, type SyncEntity } from './repo'
+import { applyRemoteEntities, exportAllEntities, replaceAllWithRemote, type SyncEntity } from './repo'
 
 export interface SyncResult {
   pushed: number
@@ -88,10 +88,46 @@ export async function runSync(): Promise<SyncResult> {
   return { pushed, pulled, removed, skipped, at, cursor }
 }
 
+/**
+ * 登录 / 换设备后的首次同步：以云端为准，全量覆盖本地，**不推送**。
+ * 云端为空时保留本地数据，避免误清空。
+ */
+export async function pullOverwrite(): Promise<{ pulled: number }> {
+  const config = getCloudConfig()
+  if (!config.token) throw new Error('请先登录云同步')
+  if (!navigator.onLine) throw new Error('当前离线，联网后再同步')
+
+  let cursor = 0
+  const all: SyncEntity[] = []
+  for (let round = 0; round < 100; round++) {
+    const response = await fetch(`${apiOrigin()}/sync/pull?cursor=${cursor}&limit=1000`, {
+      headers: { authorization: `Bearer ${config.token}` },
+    })
+    if (!response.ok) {
+      const text = await response.text()
+      throw new Error(`拉取失败（${response.status}）${text.slice(0, 120)}`)
+    }
+    const data = (await response.json()) as PullResponse
+    all.push(...data.entities)
+    cursor = data.cursor
+    if (!data.hasMore) break
+  }
+
+  const live = all.filter((entity) => !entity.deleted)
+  const at = Date.now()
+  if (live.length === 0) {
+    saveCloudConfig({ cursor, lastSyncAt: at })
+    return { pulled: 0 }
+  }
+  const applied = await replaceAllWithRemote(live)
+  saveCloudConfig({ cursor, lastSyncAt: at })
+  return { pulled: applied }
+}
+
 let timer: number | null = null
 
-/** 写操作后延迟触发一次同步，避免连续保存时重复请求 */
-export function scheduleAutoSync(delay = 4000): void {
+/** 写操作后短延迟触发一次双向同步，接近实时 */
+export function scheduleAutoSync(delay = 800): void {
   const config = getCloudConfig()
   if (!config.autoSync || !config.token) return
   if (!navigator.onLine) return

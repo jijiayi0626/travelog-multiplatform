@@ -955,6 +955,23 @@ export interface SyncEntity {
   deleted?: boolean
 }
 
+/**
+ * 以云端为准全量覆盖本地。
+ * 用于「输入同步码登录后，先拉取云端数据」的场景——不做 LWW 比较，直接替换。
+ * 调用方需保证 entities 非空，避免误清空本地。
+ */
+export async function replaceAllWithRemote(entities: SyncEntity[]): Promise<number> {
+  for (const kind of SYNC_KINDS) await clearStore(kind)
+  await clearStore('tombstones')
+  let applied = 0
+  for (const entity of entities) {
+    if (entity.deleted || !entity.data || typeof entity.data !== 'object') continue
+    await putOne(entity.kind, entity.data as { id: string })
+    applied++
+  }
+  return applied
+}
+
 /** 导出本次需要推送的全部实体（含墓碑） */
 export async function exportAllEntities(): Promise<SyncEntity[]> {
   const out: SyncEntity[] = []

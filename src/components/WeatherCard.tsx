@@ -79,16 +79,44 @@ export function WeatherCard({ destination, className }: { destination: string; c
       .filter((item) => item.length >= 2)
     const countryKey = Object.keys(COUNTRY_HINT).find((key) => raw.includes(key))
     const country = countryKey ? COUNTRY_HINT[countryKey] : ''
-    const candidates = [...parts.reverse(), raw].filter((item, index, list) => list.indexOf(item) === index)
+
+    // 中文城市名在 open-meteo 常查不到、或错配到国内同名地点；
+    // 常见境外目的地补英文名，优先用它查询，能精确到市
+    const ALIAS: Record<string, string> = {
+      北海道: 'Hokkaido',
+      高松: 'Takamatsu',
+      直岛: 'Naoshima',
+      京都: 'Kyoto',
+      东京: 'Tokyo',
+      大阪: 'Osaka',
+      札幌: 'Sapporo',
+      冲绳: 'Okinawa',
+      福冈: 'Fukuoka',
+      首尔: 'Seoul',
+      釜山: 'Busan',
+      曼谷: 'Bangkok',
+      清迈: 'Chiang Mai',
+      台北: 'Taipei',
+      香港: 'Hong Kong',
+      澳门: 'Macau',
+    }
+    const cityCandidates: Array<{ query: string; label: string }> = []
+    for (const name of parts.reverse()) {
+      if (ALIAS[name]) cityCandidates.push({ query: ALIAS[name], label: name })
+      cityCandidates.push({ query: name, label: name })
+    }
+    const candidates = [...cityCandidates, { query: raw, label: raw }].filter(
+      (item, index, list) => list.findIndex((other) => other.query === item.query) === index,
+    )
 
     let alive = true
     setLoading(true)
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
-          for (const name of candidates) {
+          for (const candidate of candidates) {
             if (!alive) return
-            const geo = await geocode(name)
+            const geo = await geocode(candidate.query)
             if (!geo.found || geo.latitude == null || geo.longitude == null) continue
             if (countryKey) {
               // 后端用 language=zh，country 可能返回「日本」而不是「Japan」
@@ -98,7 +126,7 @@ export function WeatherCard({ destination, className }: { destination: string; c
             }
             const next = await fetchWeather(geo.latitude, geo.longitude, 5)
             if (!alive) return
-            setPlace(geo.name || name)
+            setPlace(geo.name || candidate.label)
             setWeather(next)
             return
           }

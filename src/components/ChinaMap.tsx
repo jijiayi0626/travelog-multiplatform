@@ -19,13 +19,23 @@ interface Fit {
   scale: number
 }
 
-/** 把 SVG 坐标系中的矩形铺满视口 */
-function fitRect(minX: number, minY: number, width: number, height: number, pad = PAD): Fit {
+/** 把 SVG 坐标系中的矩形铺满视口；minScale 保证下钻时不会反而缩小 */
+function fitRect(
+  minX: number,
+  minY: number,
+  width: number,
+  height: number,
+  pad = PAD,
+  minScale = 0,
+): Fit {
   const safeW = Math.max(width, 1)
   const safeH = Math.max(height, 1)
-  const scale = Math.min((CHINA_WIDTH - pad * 2) / safeW, (CHINA_HEIGHT - pad * 2) / safeH)
-  const tx = (CHINA_WIDTH - safeW * scale) / 2 - minX * scale
-  const ty = (CHINA_HEIGHT - safeH * scale) / 2 - minY * scale
+  let scale = Math.min((CHINA_WIDTH - pad * 2) / safeW, (CHINA_HEIGHT - pad * 2) / safeH)
+  if (minScale > 0 && scale < minScale) scale = minScale
+  const centerX = minX + safeW / 2
+  const centerY = minY + safeH / 2
+  const tx = CHINA_WIDTH / 2 - centerX * scale
+  const ty = CHINA_HEIGHT / 2 - centerY * scale
   return {
     transform: `translate(${tx.toFixed(2)} ${ty.toFixed(2)}) scale(${scale.toFixed(4)})`,
     scale,
@@ -33,8 +43,8 @@ function fitRect(minX: number, minY: number, width: number, height: number, pad 
 }
 
 /** 把一组点铺满视口，跨度不足 minSpan 时以中心对称撑开 */
-function fitPoints(points: Array<[number, number]>, pad = PAD, minSpan = 96): Fit {
-  if (points.length === 0) return fitRect(0, 0, CHINA_WIDTH, CHINA_HEIGHT, pad)
+function fitPoints(points: Array<[number, number]>, pad = PAD, minSpan = 96, minScale = 0): Fit {
+  if (points.length === 0) return fitRect(0, 0, CHINA_WIDTH, CHINA_HEIGHT, pad, minScale)
   let minX = Number.POSITIVE_INFINITY
   let minY = Number.POSITIVE_INFINITY
   let maxX = Number.NEGATIVE_INFINITY
@@ -57,7 +67,7 @@ function fitPoints(points: Array<[number, number]>, pad = PAD, minSpan = 96): Fi
     minY = center - minSpan / 2
     height = minSpan
   }
-  return fitRect(minX, minY, width, height, pad)
+  return fitRect(minX, minY, width, height, pad, minScale)
 }
 
 export function ChinaMap({
@@ -264,8 +274,15 @@ export function ChinaMap({
     : undefined
   const cityDistricts = currentCity?.districts ?? []
   const cityPointFit = useMemo(
-    () => fitPoints(cityDistricts.map((item) => projectLngLat(item.lng, item.lat)), PAD, 120),
-    [cityDistricts],
+    () =>
+      fitPoints(
+        cityDistricts.map((item) => projectLngLat(item.lng, item.lat)),
+        PAD,
+        120,
+        // 下钻到市时必须比省级更大，避免出现「点了反而缩小」
+        provinceFit ? provinceFit.scale * 1.15 : 0,
+      ),
+    [cityDistricts, provinceFit],
   )
   const cityVisit = drillCity ? cityVisitMap.get(drillCity) : undefined
   const visitedDistrictCount = cityDistricts.filter((item) =>
