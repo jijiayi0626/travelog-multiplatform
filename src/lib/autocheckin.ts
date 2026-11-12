@@ -13,6 +13,10 @@ export interface AutoCheckinSettings {
   enabled: boolean
   radius: number
   cooldownMs: number
+  /** 常驻地（家 / 公司）坐标，附近不自动打卡 */
+  homeLat?: number
+  homeLng?: number
+  homeRadius?: number
 }
 
 const KEY = 'travelog.autocheckin'
@@ -20,6 +24,7 @@ const DEFAULT: AutoCheckinSettings = {
   enabled: false,
   radius: 200,
   cooldownMs: 6 * 60 * 60 * 1000,
+  homeRadius: 500,
 }
 
 export function getAutoCheckinSettings(): AutoCheckinSettings {
@@ -88,11 +93,14 @@ export interface AutoCheckinEvent {
   message?: string
 }
 
-function nearestCity(latitude: number, longitude: number): { short: string; city: string; distance: number } | null {
-  let best: { short: string; city: string; distance: number } | null = null
+function nearestCity(
+  latitude: number,
+  longitude: number,
+): { item: (typeof CHINA_CITIES)[number]; distance: number } | null {
+  let best: { item: (typeof CHINA_CITIES)[number]; distance: number } | null = null
   for (const item of CHINA_CITIES) {
     const distance = distanceMeters(latitude, longitude, item.lat, item.lng)
-    if (!best || distance < best.distance) best = { short: item.short, city: item.name, distance }
+    if (!best || distance < best.distance) best = { item, distance }
   }
   return best
 }
@@ -165,6 +173,17 @@ async function handleFix(
   status.latitude = fix.latitude
   status.longitude = fix.longitude
 
+  // 常驻地（家 / 公司）附近不打卡，避免一直记录同一个地方
+  if (settings.homeLat != null && settings.homeLng != null) {
+    const homeRadius = settings.homeRadius ?? 500
+    const toHome = distanceMeters(fix.latitude, fix.longitude, settings.homeLat, settings.homeLng)
+    if (toHome <= homeRadius) {
+      status.lastMatch = `常驻地范围内（${Math.round(toHome)} 米），跳过`
+      noteEvent('常驻地免打扰')
+      return
+    }
+  }
+
   const { footprints, tripId } = await loadCache()
 
   let nearest: { item: FootprintLite; distance: number } | null = null
@@ -191,18 +210,29 @@ async function handleFix(
     noteEvent('未匹配到城市')
     return
   }
-  status.lastMatch = `城市：${city.city}（${(city.distance / 1000).toFixed(1)} 公里）`
   if (city.distance > 50000) {
+    status.lastMatch = `城市：${city.item.name}（${(city.distance / 1000).toFixed(1)} 公里）`
     noteEvent('最近城市超过 50 公里，不打卡')
     return
   }
-  const key = `city:${city.city}`
+
+  // 优先用该市最近的区县，能精确到「龙泉驿区附近」而不是「成都附近」
+  let district: { name: string; distance: number } | null = null
+  for (const item of city.item.districts) {
+    const distance = distanceMeters(fix.latitude, fix.longitude, item.lat, item.lng)
+    if (!district || distance < district.distance) district = { name: item.name, distance }
+  }
+
+  const placeName =
+    district && district.distance <= 25000 ? `${district.name}附近` : `${city.item.short}附近`
+  status.lastMatch = `${placeName}（${(city.distance / 1000).toFixed(1)} 公里）`
+
+  const key = `city:${city.item.name}`
   if (!cooled(key, settings.cooldownMs)) {
     noteEvent('该城市已打卡，冷却中')
     return
   }
-  const placeName = `${city.short}附近`
-  await record(placeName, city.city, fix, tripId, '自动打卡（周边地名）')
+  await record(placeName, city.item.name, fix, tripId, '自动打卡（周边地名）')
   noteEvent(`已打卡：${placeName}`)
   listener?.({ type: 'checked', place: placeName, distance: city.distance })
 }

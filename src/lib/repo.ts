@@ -944,7 +944,17 @@ export async function resetAll(): Promise<void> {
 export type { TripTemplate }
 /* ---------------- 云同步 ---------------- */
 
-export const SYNC_KINDS = ['trips', 'moments', 'expenses', 'checklist', 'footprints', 'members', 'plans'] as const
+// 包含 profile：昵称/头像也随账号同步到其他设备
+export const SYNC_KINDS = [
+  'trips',
+  'moments',
+  'expenses',
+  'checklist',
+  'footprints',
+  'members',
+  'plans',
+  'profile',
+] as const
 export type SyncKind = (typeof SYNC_KINDS)[number]
 
 export interface SyncEntity {

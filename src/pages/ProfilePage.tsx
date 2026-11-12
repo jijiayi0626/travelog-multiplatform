@@ -23,7 +23,7 @@ import { useLoader } from '../lib/hooks'
 import { useI18n, useNav, useRefresh, useToast } from '../lib/app-context'
 import { ACCENTS, type AccentName, currentTheme, getAccent, setAccent, setThemeMode } from '../lib/theme'
 import { downloadText, formatCny, readTextFile } from '../lib/utils'
-import { shareTextFile } from '../lib/native'
+import { getBestFix, isNative, shareTextFile } from '../lib/native'
 import { isSignedIn } from '../lib/cloud'
 import {
   getAutoCheckinSettings,
@@ -306,7 +306,36 @@ export function ProfilePage() {
             </p>
             {checkinStatus.lastMatch ? <p>匹配：{checkinStatus.lastMatch}</p> : null}
             {checkinStatus.lastEvent ? <p>最近：{checkinStatus.lastEvent}</p> : null}
-            <p className="pt-0.5">半径 {autoCheckin.radius}m · 无已知地点时按最近城市（50km 内）补足迹</p>
+            <p className="pt-0.5">半径 {autoCheckin.radius}m · 无已知地点时按最近城市/区县补足迹</p>
+            <button
+              type="button"
+              className="chip mt-1 px-2.5 py-1 text-caption"
+              onClick={async () => {
+                const fix = isNative()
+                  ? await getBestFix()
+                  : await new Promise<{ latitude: number; longitude: number } | null>((resolve) => {
+                      if (!navigator.geolocation) return resolve(null)
+                      navigator.geolocation.getCurrentPosition(
+                        (pos) =>
+                          resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+                        () => resolve(null),
+                      )
+                    })
+                if (!fix) {
+                  toast('定位失败，稍后再试')
+                  return
+                }
+                const next = setAutoCheckinSettings({
+                  homeLat: fix.latitude,
+                  homeLng: fix.longitude,
+                  homeRadius: 500,
+                })
+                setAutoCheckin(next)
+                toast('已设为常驻地，附近 500 米不再自动打卡')
+              }}
+            >
+              {autoCheckin.homeLat != null ? '重新设置常驻地' : '把当前位置设为常驻地'}
+            </button>
           </div>
         ) : null}
         <SettingRow

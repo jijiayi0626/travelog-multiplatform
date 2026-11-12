@@ -211,7 +211,12 @@ export function ChinaMap({
         role="img"
         aria-label={tr('{province} 城市足迹地图', { province: province.short })}
       >
-        <g transform={provinceFit.transform}>
+        <g
+          style={{
+            transform: provinceFit.transform,
+            transition: 'transform 420ms cubic-bezier(0.16, 1, 0.3, 1)',
+          }}
+        >
           <path
             d={province.path}
             fill="var(--color-paper-2)"
@@ -297,7 +302,12 @@ export function ChinaMap({
         role="img"
         aria-label={tr('{city} 区县足迹地图', { city: currentCity.name })}
       >
-        <g transform={cityPointFit.transform}>
+        <g
+          style={{
+            transform: cityPointFit.transform,
+            transition: 'transform 420ms cubic-bezier(0.16, 1, 0.3, 1)',
+          }}
+        >
           <path
             d={province.path}
             fill="var(--color-paper-2)"
