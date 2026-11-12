@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useEffect, useRef } from 'react'
 import { X } from '@phosphor-icons/react'
 import { cn } from '../lib/cn'
@@ -218,7 +219,7 @@ export function Sheet({
 
   if (!open) return null
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
       role="dialog"
@@ -256,7 +257,8 @@ export function Sheet({
           </footer>
         ) : null}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -279,7 +281,7 @@ export function ConfirmDialog({
 }) {
   const { tr } = useI18n()
   if (!open) return null
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center px-5" role="alertdialog" aria-modal="true">
       <button
         type="button"
@@ -312,6 +314,7 @@ export function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

@@ -119,7 +119,8 @@ function toHash(view: View): string {
 function viewKey(view: View): string {
   switch (view.name) {
     case 'trip':
-      return `trip:${view.id}:${view.tab}`
+      // 只按旅程 id：切换日程/时间线/账本等子 Tab 时不重挂载，避免整页刷新
+      return `trip:${view.id}`
     case 'momentEditor':
       return `moment:${view.tripId}:${view.momentId ?? 'new'}`
     case 'expenseEditor':
