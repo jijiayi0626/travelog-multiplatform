@@ -24,6 +24,7 @@ import { useI18n, useNav, useRefresh, useToast } from '../lib/app-context'
 import { ACCENTS, type AccentName, currentTheme, getAccent, setAccent, setThemeMode } from '../lib/theme'
 import { downloadText, formatCny, readTextFile } from '../lib/utils'
 import { getBestFix, isNative, shareTextFile } from '../lib/native'
+import { ensureNotificationPermission } from '../lib/reminder'
 import { isSignedIn } from '../lib/cloud'
 import {
   getAutoCheckinSettings,
@@ -307,37 +308,52 @@ export function ProfilePage() {
             {checkinStatus.lastMatch ? <p>匹配：{checkinStatus.lastMatch}</p> : null}
             {checkinStatus.lastEvent ? <p>最近：{checkinStatus.lastEvent}</p> : null}
             <p className="pt-0.5">半径 {autoCheckin.radius}m · 无已知地点时按最近城市/区县补足迹</p>
-            <button
-              type="button"
-              className="chip mt-1 px-2.5 py-1 text-caption"
-              onClick={async () => {
-                const fix = isNative()
-                  ? await getBestFix()
-                  : await new Promise<{ latitude: number; longitude: number } | null>((resolve) => {
-                      if (!navigator.geolocation) return resolve(null)
-                      navigator.geolocation.getCurrentPosition(
-                        (pos) =>
-                          resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
-                        () => resolve(null),
-                      )
-                    })
-                if (!fix) {
-                  toast('定位失败，稍后再试')
-                  return
-                }
-                const next = setAutoCheckinSettings({
-                  homeLat: fix.latitude,
-                  homeLng: fix.longitude,
-                  homeRadius: 500,
-                })
-                setAutoCheckin(next)
-                toast('已设为常驻地，附近 500 米不再自动打卡')
-              }}
-            >
-              {autoCheckin.homeLat != null ? '重新设置常驻地' : '把当前位置设为常驻地'}
-            </button>
           </div>
         ) : null}
+        {/* 这两个入口不依赖自动打卡开关，始终保持可见 */}
+        <div className="flex flex-wrap gap-1.5 px-4 pb-3">
+          <button
+            type="button"
+            className="chip px-2.5 py-1 text-caption"
+            onClick={async () => {
+              const fix = isNative()
+                ? await getBestFix()
+                : await new Promise<{ latitude: number; longitude: number } | null>((resolve) => {
+                    if (!navigator.geolocation) return resolve(null)
+                    navigator.geolocation.getCurrentPosition(
+                      (pos) =>
+                        resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+                      () => resolve(null),
+                    )
+                  })
+              if (!fix) {
+                toast('定位失败，稍后再试')
+                return
+              }
+              const next = setAutoCheckinSettings({
+                homeLat: fix.latitude,
+                homeLng: fix.longitude,
+                homeRadius: 500,
+              })
+              setAutoCheckin(next)
+              toast('已设为常驻地，附近 500 米不再自动打卡')
+            }}
+          >
+            {autoCheckin.homeLat != null ? '重新设置常驻地' : '把当前位置设为常驻地'}
+          </button>
+          <button
+            type="button"
+            className="chip px-2.5 py-1 text-caption"
+            onClick={async () => {
+              const granted = await ensureNotificationPermission()
+              toast(
+                granted ? '已获得通知权限，日程提醒会正常发出' : '未获得通知权限，请在系统设置里开启',
+              )
+            }}
+          >
+            开启通知权限
+          </button>
+        </div>
         <SettingRow
           icon={<Sparkle size={17} />}
           title="AI 助手"

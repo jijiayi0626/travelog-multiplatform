@@ -72,6 +72,12 @@ export function TripCard({
       }}
     >
       <span className="cover-texture pointer-events-none absolute inset-0" />
+      {trip.coverImage ? (
+        <>
+          <img src={trip.coverImage} alt="" className="absolute inset-0 h-full w-full object-cover" />
+          <span className="absolute inset-0 bg-black/35" />
+        </>
+      ) : null}
       <span className="relative flex items-start justify-between gap-3 p-4">
         <span
           className={cn(

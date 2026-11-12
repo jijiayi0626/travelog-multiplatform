@@ -681,4 +681,9 @@ export const EN_TEXT: Record<string, string> = {
   收起重复记录: 'Collapse repeats',
   放大: 'Zoom in',
   缩小: 'Zoom out',
+  上传封面图片: 'Upload cover image',
+  更换封面图片: 'Change cover image',
+  账号名称: 'Account name',
+  未设置: 'Not set',
+  从照片导入位置: 'Import locations from photos',
 }

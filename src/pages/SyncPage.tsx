@@ -11,7 +11,7 @@ import {
   SignOut,
   ArrowsClockwise,
 } from '@phosphor-icons/react'
-import { useNav, useI18n, useRefresh, useToast } from '../lib/app-context'
+import { useNav, useI18n, useToast } from '../lib/app-context'
 import {
   checkHealth,
   clearCloudConfig,
@@ -21,7 +21,7 @@ import {
   saveCloudConfig,
   type HealthInfo,
 } from '../lib/cloud'
-import { pullOverwrite, runSync } from '../lib/sync-engine'
+import { runSync } from '../lib/sync-engine'
 import { copyText, relativeTime } from '../lib/utils'
 import { cn } from '../lib/cn'
 import { Field, IconButton } from '../components/ui'
@@ -38,7 +38,6 @@ const ENDPOINTS = [
 export function SyncPage() {
   const nav = useNav()
   const toast = useToast()
-  const { bump } = useRefresh()
   const { tr } = useI18n()
 
   const [config, setConfig] = useState(() => getCloudConfig())
@@ -102,15 +101,7 @@ export function SyncPage() {
       saveCloudConfig({ baseUrl: baseUrl.trim() })
       await loginCloud(code.trim())
       setConfig(getCloudConfig())
-      // 登录后先以云端为准覆盖本地，不推送本地数据
-      const result = await pullOverwrite()
-      setConfig(getCloudConfig())
-      bump()
-      toast(
-        result.pulled > 0
-          ? tr('已用云端数据覆盖本地（{n} 条）', { n: result.pulled })
-          : tr('云端还没有数据，已保留本地'),
-      )
+      toast(tr('登录成功，可以同步了'))
     } catch (error) {
       toast(error instanceof Error ? error.message : tr('登录失败'))
     } finally {
@@ -189,6 +180,12 @@ export function SyncPage() {
                 {signedIn ? tr('已登录') : tr('仅本地')}
               </dd>
             </div>
+            {signedIn ? (
+              <div className="flex items-center justify-between gap-3">
+                <dt className="shrink-0 text-ink-3">{tr('账号名称')}</dt>
+                <dd className="min-w-0 truncate text-ink">{config.nickname || tr('未设置')}</dd>
+              </div>
+            ) : null}
             {signedIn ? (
               <div className="flex items-center justify-between gap-3">
                 <dt className="shrink-0 text-ink-3">{tr('同步码')}</dt>

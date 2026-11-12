@@ -7,6 +7,7 @@ import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import {
   addDays,
   coverClass,
+  compressImage,
   CURRENCY_LABEL,
   CURRENCY_ORDER,
   formatDate,
@@ -43,6 +44,7 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
   const [endDate, setEndDate] = useState(addDays(todayStart(), 3))
   const [note, setNote] = useState('')
   const [cover, setCover] = useState(template ? TEMPLATE_COVER[template] : 0)
+  const [coverImage, setCoverImage] = useState('')
   const [currency, setCurrency] = useState<Currency>('CNY')
   const [budgetText, setBudgetText] = useState('')
   const [error, setError] = useState('')
@@ -64,6 +66,7 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
         setEndDate(trip.endDate || addDays(trip.startDate || todayStart(), 3))
         setNote(trip.note)
         setCover(trip.cover)
+        setCoverImage(trip.coverImage ?? '')
         setCurrency(trip.currency ?? 'CNY')
         setBudgetText(trip.budget && trip.budget > 0 ? String(trip.budget) : '')
       }
@@ -97,6 +100,7 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
         endDate: end,
         note: note.trim(),
         cover,
+        coverImage: coverImage || undefined,
         ownerId: original?.ownerId ?? profile.id,
         inviteCode: original?.inviteCode ?? '',
         createdAt: original?.createdAt ?? 0,
@@ -256,6 +260,39 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
                 )}
               />
             ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="btn-ghost h-9 cursor-pointer px-3 text-caption">
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={async (event) => {
+                  const file = event.target.files?.[0]
+                  if (!file) return
+                  try {
+                    setCoverImage(await compressImage(file))
+                  } catch {
+                    toast(tr('图片处理失败，换一张试试'))
+                  } finally {
+                    event.target.value = ''
+                  }
+                }}
+              />
+              {coverImage ? tr('更换封面图片') : tr('上传封面图片')}
+            </label>
+            {coverImage ? (
+              <>
+                <img src={coverImage} alt="" className="h-9 w-14 rounded-lg object-cover" />
+                <button
+                  type="button"
+                  className="press text-caption text-ink-3 hover:text-danger"
+                  onClick={() => setCoverImage('')}
+                >
+                  {tr('移除')}
+                </button>
+              </>
+            ) : null}
           </div>
         </div>
         <Field label={tr('旅行备注')} hint={tr('写给这段旅程的一句话')}>

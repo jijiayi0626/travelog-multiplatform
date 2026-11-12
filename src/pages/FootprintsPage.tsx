@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Browser } from '@capacitor/browser'
 import { Capacitor } from '@capacitor/core'
-import { ListBullets, MagnifyingGlass, MapPin, MapTrifold, Plus } from '@phosphor-icons/react'
+import { ImageSquare, ListBullets, MagnifyingGlass, MapPin, MapTrifold, Plus } from '@phosphor-icons/react'
 import type { Footprint } from '../lib/types'
-import { deleteFootprint, listFootprints } from '../lib/repo'
+import { deleteFootprint, listFootprints, saveFootprint } from '../lib/repo'
+import { readFileGps } from '../lib/exif'
 import { useLoader } from '../lib/hooks'
 import { useI18n, useNav, useRefresh, useSearch, useToast } from '../lib/app-context'
 import { summarizeVisits, type ProvinceVisit } from '../lib/province'
@@ -20,6 +21,35 @@ export function FootprintsPage() {
   const openSearch = useSearch()
   const { bump } = useRefresh()
   const { t, tr } = useI18n()
+  const photoInputRef = useRef<HTMLInputElement>(null)
+
+  // 批量读取照片 EXIF 里的 GPS，直接生成足迹
+  const importFromPhotos = async (files: FileList) => {
+    let added = 0
+    try {
+      for (const file of Array.from(files)) {
+        const gps = await readFileGps(file)
+        if (!gps) continue
+        const name = file.name.replace(/\.[^.]+$/, '').slice(0, 40)
+        await saveFootprint({
+          id: '',
+          tripId: '',
+          placeName: name || '照片位置',
+          city: '',
+          latitude: gps.latitude,
+          longitude: gps.longitude,
+          note: '从照片导入',
+          visitedAt: Date.now(),
+          createdAt: 0,
+        })
+        added += 1
+      }
+      bump()
+      toast(added > 0 ? `已导入 ${added} 个地点` : '这些照片没有 GPS 信息')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : '导入失败')
+    }
+  }
   const { data: footprints, loading } = useLoader(() => listFootprints(), [] as Footprint[], 'footprints')
   const [pendingDelete, setPendingDelete] = useState<Footprint | null>(null)
   const [mode, setMode] = useState<'china' | 'map' | 'list'>('china')
@@ -69,6 +99,9 @@ export function FootprintsPage() {
           </h1>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <IconButton label={tr('从照片导入位置')} onClick={() => photoInputRef.current?.click()}>
+            <ImageSquare size={17} />
+          </IconButton>
           <IconButton label={tr('搜索')} onClick={openSearch}>
             <MagnifyingGlass size={17} />
           </IconButton>
@@ -77,6 +110,17 @@ export function FootprintsPage() {
             {t('footprints.checkin')}
           </button>
         </div>
+        <input
+          ref={photoInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(event) => {
+            if (event.target.files?.length) void importFromPhotos(event.target.files)
+            event.target.value = ''
+          }}
+        />
       </header>
 
       <div className="flex divide-x divide-line border-y border-line py-3.5">

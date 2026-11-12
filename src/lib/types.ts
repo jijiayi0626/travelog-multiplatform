@@ -22,6 +22,8 @@ export interface Trip {
   budget?: number
   currency?: Currency
   template?: TripTemplate
+  /** 自定义封面：本地压缩后的 data URL，仅在设置了图片时存在 */
+  coverImage?: string
 }
 
 export interface TripView extends Trip {
