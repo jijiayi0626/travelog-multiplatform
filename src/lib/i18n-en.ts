@@ -679,4 +679,6 @@ export const EN_TEXT: Record<string, string> = {
   '已选择「{name}」': 'Selected "{name}"',
   '同一地点去过 {n} 次，展开': 'Visited {n} times — expand',
   收起重复记录: 'Collapse repeats',
+  放大: 'Zoom in',
+  缩小: 'Zoom out',
 }

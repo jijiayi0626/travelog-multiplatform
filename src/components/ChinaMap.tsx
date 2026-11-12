@@ -72,6 +72,8 @@ export function ChinaMap({
   const [hoverProvince, setHoverProvince] = useState<string | null>(null)
   const [drillProvince, setDrillProvince] = useState<string | null>(null)
   const [drillCity, setDrillCity] = useState<string | null>(null)
+  // 全国视图的手动缩放，方便看清港澳、上海这类小面积区域
+  const [zoom, setZoom] = useState(1)
   const { tr } = useI18n()
 
   const maxCount = useMemo(() => {
@@ -101,9 +103,13 @@ export function ChinaMap({
   }
 
   /* ---------------- 全国视图 ---------------- */
+  const vbWidth = CHINA_WIDTH / zoom
+  const vbHeight = CHINA_HEIGHT / zoom
+  const vbX = (CHINA_WIDTH - vbWidth) / 2
+  const vbY = (CHINA_HEIGHT - vbHeight) / 2
   const countryView = (
     <svg
-      viewBox={`0 0 ${CHINA_WIDTH} ${CHINA_HEIGHT}`}
+      viewBox={`${vbX} ${vbY} ${vbWidth} ${vbHeight}`}
       className="block w-full"
       role="img"
       aria-label={tr('中国省份足迹地图')}
@@ -405,6 +411,28 @@ export function ChinaMap({
       ) : null}
 
       {view}
+
+      {/* 全国视图可用按钮缩放，看清港澳/上海这类小区域 */}
+      {!drillProvince ? (
+        <div className="absolute right-3 top-3 flex flex-col overflow-hidden rounded-full border border-line bg-surface/95 backdrop-blur-sm">
+          <button
+            type="button"
+            aria-label={tr('放大')}
+            className="press flex h-8 w-8 items-center justify-center text-body text-ink-2 hover:text-ink"
+            onClick={() => setZoom((value) => Math.min(4, Number((value * 1.35).toFixed(2))))}
+          >
+            +
+          </button>
+          <button
+            type="button"
+            aria-label={tr('缩小')}
+            className="press flex h-8 w-8 items-center justify-center border-t border-line text-body text-ink-2 hover:text-ink"
+            onClick={() => setZoom((value) => Math.max(1, Number((value / 1.35).toFixed(2))))}
+          >
+            −
+          </button>
+        </div>
+      ) : null}
 
       <div className="pointer-events-none absolute inset-x-3 bottom-3 flex items-end gap-2">
         <div className="min-w-0 max-w-[62%] rounded-lg bg-surface/90 px-2 py-1 backdrop-blur-sm">

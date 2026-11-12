@@ -944,7 +944,7 @@ export async function resetAll(): Promise<void> {
 export type { TripTemplate }
 /* ---------------- 云同步 ---------------- */
 
-// 包含 profile：昵称/头像也随账号同步到其他设备
+// profile 也纳入同步：昵称/头像随账号走到别的设备
 export const SYNC_KINDS = [
   'trips',
   'moments',
@@ -963,23 +963,6 @@ export interface SyncEntity {
   data: unknown
   updatedAt: number
   deleted?: boolean
-}
-
-/**
- * 以云端为准全量覆盖本地。
- * 用于「输入同步码登录后，先拉取云端数据」的场景——不做 LWW 比较，直接替换。
- * 调用方需保证 entities 非空，避免误清空本地。
- */
-export async function replaceAllWithRemote(entities: SyncEntity[]): Promise<number> {
-  for (const kind of SYNC_KINDS) await clearStore(kind)
-  await clearStore('tombstones')
-  let applied = 0
-  for (const entity of entities) {
-    if (entity.deleted || !entity.data || typeof entity.data !== 'object') continue
-    await putOne(entity.kind, entity.data as { id: string })
-    applied++
-  }
-  return applied
 }
 
 /** 导出本次需要推送的全部实体（含墓碑） */

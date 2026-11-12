@@ -174,6 +174,36 @@ export function FootprintEditor() {
               {poiLoading ? tr('搜索中…') : tr('搜索')}
             </button>
           </div>
+          {/* 分类快捷：比自由输入命中率高，能直接看到周边的学校/公园等 */}
+          <div className="flex flex-wrap gap-1.5">
+            {['学校', '公园', '景点', '医院', '餐厅', '商场', '地铁站'].map((label) => (
+              <button
+                key={label}
+                type="button"
+                className="chip px-2 py-1 text-caption"
+                disabled={poiLoading}
+                onClick={async () => {
+                  setPoiQuery(label)
+                  setPoiLoading(true)
+                  try {
+                    const results = await searchPoi(
+                      label,
+                      latitude !== 0 ? latitude : undefined,
+                      longitude !== 0 ? longitude : undefined,
+                    )
+                    setPoiResults(results)
+                    if (results.length === 0) toast(tr('附近没搜到，换个关键词试试'))
+                  } catch (error) {
+                    toast(error instanceof Error ? error.message : tr('搜索失败'))
+                  } finally {
+                    setPoiLoading(false)
+                  }
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           {poiResults.length > 0 ? (
             <ul className="space-y-1">
               {poiResults.map((item) => (
@@ -207,16 +237,12 @@ export function FootprintEditor() {
             className="input"
             value={city}
             placeholder={tr('例如「杭州」「大理」')}
-            onChange={(event) => setCity(event.target.value)}
-            list="city-suggestions"
+            onChange={(event) => {
+              setCity(event.target.value)
+              // 改了城市就清掉之前选的区县，否则区县列表会一直停在旧城市
+              setPickedCity(null)
+            }}
           />
-          <datalist id="city-suggestions">
-            {['北京', '上海', '广州', '深圳', '杭州', '成都', '大理', '厦门', '西安', '南京', '重庆', '青岛', '长沙', '武汉'].map(
-              (item) => (
-                <option key={item} value={item} />
-              ),
-            )}
-          </datalist>
         </Field>
         {cityMatches.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
