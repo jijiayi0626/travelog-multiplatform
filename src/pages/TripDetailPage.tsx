@@ -682,6 +682,9 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
           </p>
           <div className="flex gap-2">
             <input
+              type="text"
+              inputMode="text"
+              autoComplete="off"
               className="input"
               value={qaText}
               placeholder={tr('例如「这趟花了多少」「哪天花得最多」')}
@@ -1435,6 +1438,9 @@ function ChecklistTab({
         }}
       >
         <input
+          type="text"
+          inputMode="text"
+          autoComplete="off"
           className="input"
           placeholder={tr('添加一项待办，比如「提前买好 JR Pass」')}
           value={value}
@@ -1519,6 +1525,9 @@ function MembersTab({
       >
         <div className="flex gap-2">
           <input
+            type="text"
+            inputMode="text"
+            autoComplete="off"
             className="input"
             placeholder={tr('旅伴昵称')}
             value={value}
@@ -1531,12 +1540,18 @@ function MembersTab({
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
           <input
+            type="text"
+            inputMode="text"
+            autoComplete="off"
             className="input"
             placeholder={tr('联系方式（可选）')}
             value={contact}
             onChange={(event) => onContactChange(event.target.value)}
           />
           <input
+            type="text"
+            inputMode="text"
+            autoComplete="off"
             className="input"
             placeholder={tr('备注：过敏 / 饮食 / 房型')}
             value={note}

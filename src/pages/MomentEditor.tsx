@@ -271,6 +271,9 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
             ))}
           </div>
           <input
+            type="text"
+            inputMode="text"
+            autoComplete="off"
             className="input h-10 text-body-sm"
             value={customTag}
             placeholder={tr('自定义标签，回车添加')}

@@ -24,8 +24,8 @@ import { useI18n, useNav, useRefresh, useToast } from '../lib/app-context'
 import { ACCENTS, type AccentName, currentTheme, getAccent, setAccent, setThemeMode } from '../lib/theme'
 import { downloadText, formatCny, readTextFile } from '../lib/utils'
 import { getBestFix, isNative, shareTextFile } from '../lib/native'
-import { ensureNotificationPermission } from '../lib/reminder'
-import { isSignedIn } from '../lib/cloud'
+import { ensureExactAlarmPermission, ensureNotificationPermission } from '../lib/reminder'
+import { isSignedIn, saveCloudConfig } from '../lib/cloud'
 import {
   getAutoCheckinSettings,
   getAutoCheckinStatus,
@@ -67,6 +67,8 @@ export function ProfilePage() {
   const [accent, setAccentState] = useState<AccentName>(() => getAccent())
   const [editing, setEditing] = useState(false)
   const [nickname, setNickname] = useState('')
+  // 中文输入法下 React state 可能滞后，保存时以输入框实际值为准
+  const nicknameRef = useRef<HTMLInputElement>(null)
   const [confirmReset, setConfirmReset] = useState(false)
   const [autoCheckin, setAutoCheckin] = useState(() => getAutoCheckinSettings())
   const [checkinStatus, setCheckinStatus] = useState(() => getAutoCheckinStatus())
@@ -123,16 +125,24 @@ export function ProfilePage() {
   }
 
   const saveNickname = async () => {
-    if (!data.profile) return
-    const name = nickname.trim()
+    // 以输入框实际值为准：中文输入法下 state 可能还停留在旧值
+    const name = (nicknameRef.current?.value ?? nickname).trim()
     if (!name) {
       toast('昵称不能为空')
       return
     }
-    await saveProfile({ ...data.profile, nickname: name })
-    setEditing(false)
-    bump()
-    toast('资料已更新')
+    try {
+      const base: Profile =
+        data.profile ?? { id: 'local-user', nickname: name, avatar: '', createdAt: Date.now() }
+      await saveProfile({ ...base, nickname: name })
+      if (isSignedIn()) saveCloudConfig({ nickname: name })
+      setNickname(name)
+      setEditing(false)
+      bump()
+      toast('资料已更新')
+    } catch (error) {
+      toast(`保存失败：${error instanceof Error ? error.message : '请稍后重试'}`)
+    }
   }
 
   const doReset = async () => {
@@ -346,8 +356,15 @@ export function ProfilePage() {
             className="chip px-2.5 py-1 text-caption"
             onClick={async () => {
               const granted = await ensureNotificationPermission()
+              if (!granted) {
+                toast('未获得通知权限，请在系统设置里开启')
+                return
+              }
+              const exact = await ensureExactAlarmPermission()
               toast(
-                granted ? '已获得通知权限，日程提醒会正常发出' : '未获得通知权限，请在系统设置里开启',
+                exact
+                  ? '已获得通知权限，日程提醒会正常发出'
+                  : '通知已开启；精确提醒未授权，系统可能延迟送达',
               )
             }}
           >
@@ -458,6 +475,10 @@ export function ProfilePage() {
           </div>
           <Field label="昵称">
             <input
+              ref={nicknameRef}
+              type="text"
+              inputMode="text"
+              autoComplete="off"
               className="input"
               value={nickname}
               maxLength={16}

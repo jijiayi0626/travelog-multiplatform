@@ -4,7 +4,7 @@ import type { Plan, Trip } from './types'
 
 const native = Capacitor.isNativePlatform()
 
-/** 权限弹窗可能在无用户手势时永远挂起，统一加超时兜底 */
+/** 权限弹窗可能在无用户手势时永远挂起；超时只做兜底，之后会重新查询真实状态 */
 function withTimeout<T>(promise: Promise<T>, fallback: T, ms = 2500): Promise<T> {
   return Promise.race([
     promise.catch(() => fallback),
@@ -19,6 +19,28 @@ export interface ReminderPrefs {
 
 const KEY = 'travelog.reminder'
 const DEFAULT: ReminderPrefs = { enabled: true, leadMinutes: 15 }
+
+/** 自定义通知频道：高优先级，提醒才能横幅弹出而不是被折叠 */
+const CHANNEL_ID = 'reminders'
+let channelReady = false
+
+async function ensureChannel(): Promise<void> {
+  if (!native || channelReady) return
+  try {
+    await LocalNotifications.createChannel({
+      id: CHANNEL_ID,
+      name: '日程提醒',
+      description: '行程安排与出发前提醒',
+      importance: 4,
+      visibility: 1,
+      vibration: true,
+      lights: true,
+    })
+    channelReady = true
+  } catch {
+    /* Android 8 以下没有通知频道，使用系统默认即可 */
+  }
+}
 
 export function getReminderPrefs(): ReminderPrefs {
   try {
@@ -43,17 +65,46 @@ function numericId(id: string): number {
 
 export async function ensureNotificationPermission(): Promise<boolean> {
   if (native) {
-    const status = await LocalNotifications.checkPermissions()
-    if (status.display === 'granted') return true
-    const requested = await withTimeout(LocalNotifications.requestPermissions(), {
-      display: 'denied' as const,
-    })
-    return requested.display === 'granted'
+    try {
+      let status = await LocalNotifications.checkPermissions()
+      if (status.display !== 'granted') {
+        // 授权框需要用户操作，不能用 2.5 秒超时直接当作拒绝
+        status = await withTimeout(
+          LocalNotifications.requestPermissions(),
+          { display: 'denied' as const },
+          60_000,
+        )
+        // 超时后用户可能已经点过「允许」，以系统真实状态为准
+        if (status.display !== 'granted') status = await LocalNotifications.checkPermissions()
+      }
+      if (status.display !== 'granted') return false
+      await ensureChannel()
+      return true
+    } catch {
+      return false
+    }
   }
   if (typeof Notification === 'undefined') return false
   if (Notification.permission === 'granted') return true
   if (Notification.permission === 'denied') return false
-  return (await withTimeout(Notification.requestPermission(), 'default')) === 'granted'
+  return (await withTimeout(Notification.requestPermission(), 'default', 60_000)) === 'granted'
+}
+
+/**
+ * Android 12+ 精确闹钟授权：未授权时系统会退化为非精确提醒（可能延迟十几分钟）。
+ * 会跳到系统设置页，建议只在用户主动点击「开启通知权限」时调用。
+ */
+export async function ensureExactAlarmPermission(): Promise<boolean> {
+  if (!native) return true
+  try {
+    const setting = await LocalNotifications.checkExactNotificationSetting()
+    if (setting.exact_alarm === 'granted') return true
+    const changed = await LocalNotifications.changeExactNotificationSetting()
+    return changed.exact_alarm === 'granted'
+  } catch {
+    /* 旧系统或插件不支持时按可用处理 */
+    return true
+  }
 }
 
 function triggerAt(plan: Plan, trip: Trip, leadMinutes: number): number | null {
@@ -66,6 +117,25 @@ function triggerAt(plan: Plan, trip: Trip, leadMinutes: number): number | null {
   return at > Date.now() + 5000 ? at : null
 }
 
+/** 页面关闭后 Web 通知不可用；优先走 Service Worker，安卓 Chrome 不支持 new Notification */
+async function showWebNotification(title: string, body: string, tag: string): Promise<void> {
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
+  try {
+    const registration = await navigator.serviceWorker?.getRegistration()
+    if (registration) {
+      await registration.showNotification(title, { body, tag })
+      return
+    }
+  } catch {
+    /* 继续尝试构造函数 */
+  }
+  try {
+    new Notification(title, { body, tag })
+  } catch {
+    /* 部分浏览器禁止页面直接构造通知 */
+  }
+}
+
 /** 给一条日程安排提醒；时间已过则跳过 */
 export async function schedulePlanReminder(
   plan: Plan,
@@ -76,12 +146,14 @@ export async function schedulePlanReminder(
   if (at === null) return false
 
   if (native) {
+    await ensureChannel()
     await LocalNotifications.schedule({
       notifications: [
         {
           id: numericId(plan.id),
           title: `${trip.title}`,
           body: `${plan.time} ${plan.title}${plan.place ? ` · ${plan.place}` : ''}`,
+          channelId: CHANNEL_ID,
           schedule: { at: new Date(at), allowWhileIdle: true },
         },
       ],
@@ -92,12 +164,11 @@ export async function schedulePlanReminder(
   const delay = at - Date.now()
   if (delay <= 0 || delay > 2 ** 31 - 1) return false
   window.setTimeout(() => {
-    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-      new Notification(`${trip.title}`, {
-        body: `${plan.time} ${plan.title}`,
-        tag: plan.id,
-      })
-    }
+    void showWebNotification(
+      `${trip.title}`,
+      `${plan.time} ${plan.title}${plan.place ? ` · ${plan.place}` : ''}`,
+      plan.id,
+    )
   }, delay)
   return true
 }

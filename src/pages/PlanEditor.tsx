@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CheckCircle, Trash } from '@phosphor-icons/react'
 import type { Plan, PlanKind, Trip } from '../lib/types'
 import { deletePlan, getTrip, listPlans, savePlan } from '../lib/repo'
@@ -55,6 +55,9 @@ export function PlanEditor({
   const [remind, setRemind] = useState(() => getReminderPrefs().enabled)
   const [lead, setLead] = useState(() => getReminderPrefs().leadMinutes)
   const [error, setError] = useState('')
+  // 中文输入法下 React state 可能滞后，保存时以输入框实际值为准
+  const titleRef = useRef<HTMLInputElement>(null)
+  const placeRef = useRef<HTMLInputElement>(null)
 
   const maxDay = Math.max(trip ? tripDayCount(trip.startDate, trip.endDate) : 0, 1)
 
@@ -86,7 +89,9 @@ export function PlanEditor({
   }, [tripId, planId])
 
   const save = async () => {
-    if (!title.trim()) {
+    const titleValue = (titleRef.current?.value ?? title).trim()
+    const placeValue = (placeRef.current?.value ?? place).trim()
+    if (!titleValue) {
       setError(tr('写下这一步要做什么'))
       return
     }
@@ -98,8 +103,8 @@ export function PlanEditor({
         tripId,
         dayIndex: Math.min(Math.max(day, 1), 99),
         time: normalizeClock(time) || time.trim(),
-        title: title.trim(),
-        place: place.trim(),
+        title: titleValue,
+        place: placeValue,
         kind,
         note: note.trim(),
         done: original ? done : false,
@@ -162,6 +167,10 @@ export function PlanEditor({
           hint={error ? undefined : tr('例如「地中美术馆」')}
         >
           <input
+            ref={titleRef}
+            type="text"
+            inputMode="text"
+            autoComplete="off"
             className={cn('input', error && 'border-danger')}
             value={title}
             maxLength={40}
@@ -268,6 +277,10 @@ export function PlanEditor({
       <FormBlock title={tr('地点与备注')}>
         <Field label={tr('地点')} hint={tr('会显示在日程右侧')}>
           <input
+            ref={placeRef}
+            type="text"
+            inputMode="text"
+            autoComplete="off"
             className="input"
             value={place}
             maxLength={40}

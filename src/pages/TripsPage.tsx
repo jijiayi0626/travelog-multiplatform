@@ -417,6 +417,9 @@ export function TripsPage() {
             {tr('向旅伴要这趟旅程的邀请码（6 位）。加入后两端自动同步同一份数据，需要先登录云同步。')}
           </p>
           <input
+            type="text"
+            inputMode="text"
+            autoComplete="off"
             className="input text-center font-mono text-title tracking-[0.3em]"
             value={joinCode}
             maxLength={8}

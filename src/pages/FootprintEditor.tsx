@@ -139,6 +139,9 @@ export function FootprintEditor() {
         <Field label={tr('地点名称')} error={error}>
           <input
             ref={placeRef}
+            type="text"
+            inputMode="text"
+            autoComplete="off"
             className={error ? 'input border-danger' : 'input'}
             value={placeName}
             placeholder={tr('例如「函馆山」')}
@@ -157,6 +160,9 @@ export function FootprintEditor() {
           </p>
           <div className="flex gap-2">
             <input
+              type="text"
+              inputMode="text"
+              autoComplete="off"
               className="input"
               value={poiQuery}
               placeholder={tr('景点 / 街道 / 建筑')}
@@ -234,6 +240,9 @@ export function FootprintEditor() {
           hint={tr('填写城市名会自动归入省份，点亮足迹地图')}
         >
           <input
+            type="text"
+            inputMode="text"
+            autoComplete="off"
             className="input"
             value={city}
             placeholder={tr('例如「杭州」「大理」')}
@@ -291,6 +300,9 @@ export function FootprintEditor() {
         ) : null}
         <Field label={tr('备注')}>
           <input
+            type="text"
+            inputMode="text"
+            autoComplete="off"
             className="input"
             value={note}
             placeholder={tr('例如「夜景，风很大」')}

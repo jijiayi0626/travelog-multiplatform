@@ -18,7 +18,8 @@ permissions:
 jobs:
   apk:
     name: Build APK (x86_64 runner)
-    runs-on: ubuntu-latest
+    # GitHub 托管的 ubuntu-24.04 为 x86_64，显式固定避免 ubuntu-latest 迁移导致环境漂移
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -241,6 +241,9 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
           hint={spentAt > 0 ? tr('记账日期 {date}', { date: formatDate(spentAt) }) : undefined}
         >
           <input
+            type="text"
+            inputMode="text"
+            autoComplete="off"
             className="input"
             value={note}
             maxLength={60}

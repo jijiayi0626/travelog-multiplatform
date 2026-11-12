@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import {
   ArrowLeft,
   CheckCircle,
@@ -47,6 +47,8 @@ export function SyncPage() {
   const [health, setHealth] = useState<HealthInfo | null>(null)
   const [busy, setBusy] = useState<'health' | 'register' | 'login' | 'sync' | null>(null)
   const [result, setResult] = useState('')
+  // 中文输入法下 React state 可能滞后，注册时以输入框实际值为准
+  const nicknameRef = useRef<HTMLInputElement>(null)
 
   const signedIn = Boolean(config.token)
 
@@ -73,14 +75,15 @@ export function SyncPage() {
   }
 
   const doRegister = async () => {
-    if (!nickname.trim()) {
+    const name = (nicknameRef.current?.value ?? nickname).trim()
+    if (!name) {
       toast(tr('先填一个昵称'))
       return
     }
     setBusy('register')
     try {
       saveCloudConfig({ baseUrl: baseUrl.trim() })
-      const auth = await registerCloud(nickname.trim())
+      const auth = await registerCloud(name)
       setConfig(getCloudConfig())
       setResult(tr('同步码：{code}', { code: auth.syncCode }))
       toast(tr('账号已创建，请记下同步码'))
@@ -269,6 +272,10 @@ export function SyncPage() {
           </h2>
           <Field label={tr('API 地址')} hint={tr('留空则使用当前站点同源的 /api')}>
             <input
+              type="url"
+              inputMode="url"
+              autoComplete="off"
+              autoCapitalize="off"
               className="input"
               value={baseUrl}
               placeholder="https://travelog-api.your-name.workers.dev"
@@ -305,6 +312,10 @@ export function SyncPage() {
               <p className="text-note text-ink-3">{tr('第一次用：创建一个同步账号')}</p>
               <div className="flex gap-2">
                 <input
+                  ref={nicknameRef}
+                  type="text"
+                  inputMode="text"
+                  autoComplete="off"
                   className="input"
                   value={nickname}
                   placeholder={tr('昵称')}
@@ -326,6 +337,10 @@ export function SyncPage() {
               <p className="text-note text-ink-3">{tr('已有账号：输入 8 位同步码')}</p>
               <div className="flex gap-2">
                 <input
+                  type="text"
+                  inputMode="text"
+                  autoComplete="off"
+                  autoCapitalize="characters"
                   className="input font-mono tracking-[0.2em] uppercase"
                   value={code}
                   placeholder="ABCD2345"

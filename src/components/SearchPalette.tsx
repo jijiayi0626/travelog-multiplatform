@@ -98,6 +98,9 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
           <MagnifyingGlass size={17} className="shrink-0 text-ink-3" />
           <input
             ref={inputRef}
+            type="search"
+            inputMode="search"
+            autoComplete="off"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {

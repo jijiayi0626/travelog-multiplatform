@@ -152,9 +152,11 @@ export function AdminPage() {
             </div>
             <Field label={tr('用户名')}>
               <input
+                type="text"
+                inputMode="text"
+                autoComplete="username"
                 className="input"
                 value={username}
-                autoComplete="username"
                 onChange={(event) => setUsername(event.target.value)}
               />
             </Field>
@@ -259,6 +261,9 @@ export function AdminPage() {
               <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-line bg-surface px-3">
                 <MagnifyingGlass size={15} className="shrink-0 text-ink-3" />
                 <input
+                  type="search"
+                  inputMode="search"
+                  autoComplete="off"
                   className="min-w-0 flex-1 bg-transparent py-2.5 text-body-sm text-ink outline-none placeholder:text-ink-3"
                   value={query}
                   placeholder={tr('搜索昵称或同步码')}
@@ -545,6 +550,9 @@ function AISettings({
           <div key={item.id} className="space-y-2.5 rounded-2xl border border-line p-3">
             <div className="flex items-center gap-2">
               <input
+                type="text"
+                inputMode="text"
+                autoComplete="off"
                 className="input h-9 flex-1"
                 value={item.name}
                 onChange={(event) => patchDraft(item.id, { name: event.target.value })}
@@ -603,6 +611,10 @@ function AISettings({
                   onChange={(event) => patchDraft(item.id, { key: event.target.value })}
                 />
                 <input
+                  type="url"
+                  inputMode="url"
+                  autoComplete="off"
+                  autoCapitalize="off"
                   className="input"
                   placeholder="https://api.openai.com/v1"
                   value={item.base}
@@ -613,6 +625,10 @@ function AISettings({
 
             <div className="flex gap-2">
               <input
+                type="text"
+                inputMode="text"
+                autoComplete="off"
+                autoCapitalize="off"
                 className="input flex-1 font-mono"
                 placeholder={
                   item.type === 'workers' ? '@cf/meta/llama-3.1-8b-instruct' : 'gpt-4o-mini'
@@ -721,7 +737,14 @@ function SiteSettings({
       <section className="card space-y-4 p-5">
         <h2 className="text-body-sm font-semibold tracking-tight text-ink">{tr('站点信息')}</h2>
         <Field label={tr('站点名称')} hint={tr('显示在管理面板和健康检查里')}>
-          <input className="input" value={name} onChange={(event) => setName(event.target.value)} />
+          <input
+            type="text"
+            inputMode="text"
+            autoComplete="off"
+            className="input"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+          />
         </Field>
         <button
           type="button"
