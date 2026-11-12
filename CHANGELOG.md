@@ -2,6 +2,25 @@
 
 本文件用于生成 GitHub Release 说明：每个版本一个 `## [x.y.z]` 段落，发布时自动提取。
 
+## [1.8.7]
+
+### 修复
+
+- **1.8.5 / 1.8.6 构建失败，Release 没发出来**
+  报错：`src/lib/sync-engine.ts(7,50): Module '"./repo"' has no exported member 'replaceAllWithRemote'`。
+  原因：那次提交只落了一半——`sync-engine.ts` 引用了新函数，但 `repo.ts` 里的实现没提交上去。
+  现已补回 `replaceAllWithRemote`（以云端为准全量覆盖本地），并用 `tsc -b --force` 全量校验通过。
+
+本版包含 1.8.5 / 1.8.6 的全部内容：
+
+- 打卡城市/区县可反复切换
+- 周边分类快捷（学校/公园/医院…）
+- 地图放大缩小按钮
+- 封面自定义图片
+- 通知权限申请
+- 照片批量导入位置
+- 账号名称展示 + 昵称同步
+
 ## [1.8.6]
 
 ### 新增
