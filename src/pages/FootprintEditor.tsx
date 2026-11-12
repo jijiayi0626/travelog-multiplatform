@@ -1,10 +1,11 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Crosshair, MapPin } from '@phosphor-icons/react'
 import { saveFootprint } from '../lib/repo'
 import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import { todayStart } from '../lib/utils'
 import { getBestFix, isNative } from '../lib/native'
 import { searchPoi, type PoiItem } from '../lib/cloud'
+import { CHINA_CITIES } from '../lib/chinaCities'
 import { EditorScreen, FormBlock } from '../components/EditorScreen'
 import { Field } from '../components/ui'
 
@@ -45,6 +46,17 @@ export function FootprintEditor() {
       setPoiLoading(false)
     }
   }
+
+  // 输入城市时给出匹配项，选中后可继续选区县
+  const cityMatches = useMemo(() => {
+    const query = city.trim()
+    if (!query) return []
+    return CHINA_CITIES.filter(
+      (item) => item.name.includes(query) || item.short.includes(query),
+    ).slice(0, 6)
+  }, [city])
+
+  const [pickedCity, setPickedCity] = useState<(typeof CHINA_CITIES)[number] | null>(null)
 
   const locate = async () => {
     setLocating(true)
@@ -206,6 +218,51 @@ export function FootprintEditor() {
             )}
           </datalist>
         </Field>
+        {cityMatches.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {cityMatches.map((item) => (
+              <button
+                key={item.name}
+                type="button"
+                onClick={() => {
+                  setCity(item.name)
+                  setPickedCity(item)
+                }}
+                className={
+                  city === item.name
+                    ? 'chip chip-active px-2 py-1 text-caption'
+                    : 'chip px-2 py-1 text-caption'
+                }
+              >
+                {item.name}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {pickedCity && pickedCity.districts.length > 0 ? (
+          <div className="space-y-1.5 rounded-2xl border border-line bg-surface p-2.5">
+            <p className="text-caption text-ink-3">
+              {tr('选择区县（可选，会填到地点名称与坐标）')}
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {pickedCity.districts.map((district) => (
+                <button
+                  key={district.name}
+                  type="button"
+                  onClick={() => {
+                    if (!placeName.trim()) setPlaceName(district.name)
+                    setLatitude(district.lat)
+                    setLongitude(district.lng)
+                    toast(tr('已选择「{name}」', { name: district.name }))
+                  }}
+                  className="chip px-2 py-1 text-caption"
+                >
+                  {district.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <Field label={tr('备注')}>
           <input
             className="input"

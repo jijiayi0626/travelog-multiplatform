@@ -675,4 +675,8 @@ export const EN_TEXT: Record<string, string> = {
   '附近没搜到，换个关键词试试': 'Nothing nearby — try another keyword',
   搜索失败: 'Search failed',
   '已填入「{name}」': 'Filled in "{name}"',
+  '选择区县（可选，会填到地点名称与坐标）': 'Pick a district (optional, fills name and coordinates)',
+  '已选择「{name}」': 'Selected "{name}"',
+  '同一地点去过 {n} 次，展开': 'Visited {n} times — expand',
+  收起重复记录: 'Collapse repeats',
 }

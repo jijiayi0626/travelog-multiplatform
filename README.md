@@ -98,12 +98,12 @@ npm run preview    # 本地预览生产构建
 
 ## 下载 APK
 
-由 GitHub Actions（`ubuntu-latest` / x86_64）自动构建，产物见 [Releases · v1.8.2](https://github.com/jijiayi0626/travelog-multiplatform/releases/tag/v1.8.2)：
+由 GitHub Actions（`ubuntu-latest` / x86_64）自动构建，产物见 [Releases · v1.8.3](https://github.com/jijiayi0626/travelog-multiplatform/releases/tag/v1.8.3)：
 
-- [Debug APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v1.8.2/travelog-1.8.2-debug.apk)（约 4 MB，可直接安装）
-- [Release APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v1.8.2/travelog-1.8.2-release.apk)（约 3 MB，CI 临时签名，正式发布请换成自有 keystore）
+- [Debug APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v1.8.3/travelog-1.8.3-debug.apk)（约 4 MB，可直接安装）
+- [Release APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v1.8.3/travelog-1.8.3-release.apk)（约 3 MB，CI 临时签名，正式发布请换成自有 keystore）
 
-包名 `com.travellog.app`，minSdk 23 / targetSdk 35，versionCode 25 / versionName 1.8.2。应用为 WebView + Java 实现，**不含 native 库**，单个 APK 兼容 `arm64-v8a` / `armeabi-v7a` / `x86_64`。
+包名 `com.travellog.app`，minSdk 23 / targetSdk 35，versionCode 26 / versionName 1.8.3。应用为 WebView + Java 实现，**不含 native 库**，单个 APK 兼容 `arm64-v8a` / `armeabi-v7a` / `x86_64`。
 
 ### 自动构建
 

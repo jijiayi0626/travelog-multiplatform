@@ -28,6 +28,19 @@ export function FootprintsPage() {
   const visits = useMemo(() => summarizeVisits(footprints), [footprints])
   const visitedProvinceCount = visits.visited.size
 
+  // 同一地点去过多次时折叠成一条，点开再看全部，避免列表被重复记录填满
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  const grouped = useMemo(() => {
+    const map = new Map<string, Footprint[]>()
+    for (const item of footprints) {
+      const key = `${item.placeName.trim().toLowerCase()}::${item.city.trim()}`
+      const list = map.get(key)
+      if (list) list.push(item)
+      else map.set(key, [item])
+    }
+    return [...map.entries()].map(([key, list]) => ({ key, list }))
+  }, [footprints])
+
   const cityStats = useMemo(() => {
     const counter = new Map<string, number>()
     for (const item of footprints) {
@@ -200,14 +213,40 @@ export function FootprintsPage() {
         <WorldMap footprints={footprints} onSelect={openMap} />
       ) : (
         <div className="grid gap-2.5 lg:grid-cols-2">
-          {footprints.map((footprint) => (
-            <FootprintRow
-              key={footprint.id}
-              footprint={footprint}
-              onOpenMap={() => openMap(footprint)}
-              onDelete={() => setPendingDelete(footprint)}
-            />
-          ))}
+          {grouped.map(({ key, list }) => {
+            const isOpen = expandedGroups.has(key)
+            const visible = isOpen || list.length === 1 ? list : list.slice(0, 1)
+            return (
+              <div key={key} className="space-y-1.5">
+                {visible.map((footprint) => (
+                  <FootprintRow
+                    key={footprint.id}
+                    footprint={footprint}
+                    onOpenMap={() => openMap(footprint)}
+                    onDelete={() => setPendingDelete(footprint)}
+                  />
+                ))}
+                {list.length > 1 ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedGroups((prev) => {
+                        const next = new Set(prev)
+                        if (next.has(key)) next.delete(key)
+                        else next.add(key)
+                        return next
+                      })
+                    }
+                    className="press w-full rounded-xl border border-dashed border-line px-2.5 py-1.5 text-caption text-ink-3 hover:text-ink"
+                  >
+                    {isOpen
+                      ? tr('收起重复记录')
+                      : tr('同一地点去过 {n} 次，展开', { n: list.length })}
+                  </button>
+                ) : null}
+              </div>
+            )
+          })}
         </div>
       )}
 
