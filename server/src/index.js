@@ -373,7 +373,10 @@ async function handleAdminUsers(request, env, url) {
             la.ip AS last_ip, la.user_agent AS last_user_agent, la.country AS last_country,
             la.region AS last_region, la.city AS last_city, la.colo AS last_colo,
             la.created_at AS last_login_at,
-            (SELECT COUNT(*) FROM entities e WHERE e.user_id = u.id AND e.deleted = 0) AS entity_count
+            (SELECT COUNT(*) FROM entities e WHERE e.user_id = u.id AND e.deleted = 0) AS entity_count,
+            (SELECT COUNT(*) FROM photos p WHERE p.user_id = u.id) AS photo_count,
+            (SELECT COALESCE(SUM(size), 0) FROM photos p WHERE p.user_id = u.id) AS photo_bytes,
+            (SELECT COALESCE(SUM(size), 0) FROM avatars a WHERE a.user_id = u.id) AS avatar_bytes
      FROM users u
      LEFT JOIN user_meta m ON m.user_id = u.id
      LEFT JOIN user_credentials c ON c.user_id = u.id
@@ -404,6 +407,9 @@ async function handleAdminUsers(request, env, url) {
         lastSeenAt: row.last_seen_at || 0,
         status: row.status,
         entityCount: row.entity_count,
+        photoCount: row.photo_count || 0,
+        photoBytes: row.photo_bytes || 0,
+        avatarBytes: row.avatar_bytes || 0,
         membership: membershipPayload(row.membership_expires_at),
         lastLoginAt: row.last_login_at || 0,
         lastIp: row.last_ip || '',
@@ -2067,6 +2073,156 @@ async function handlePhotoDelete(request, env, id) {
   return json({ ok: true }, 200, env, request)
 }
 
+const MAX_AVATAR_BYTES = Math.floor(1.5 * 1024 * 1024)
+
+function avatarUrl(request, userId, accessKey) {
+  const origin = new URL(request.url).origin
+  return `${origin}/api/avatar/${encodeURIComponent(userId)}?k=${encodeURIComponent(accessKey)}`
+}
+
+async function handlePhotoList(request, env, url) {
+  const user = await requireUser(request, env)
+  const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 60), 1), 200)
+  const offset = Math.max(Number(url.searchParams.get('offset') || 0), 0)
+  const [rows, totals] = await Promise.all([
+    env.DB.prepare(
+      `SELECT id, access_key, mime, size, created_at FROM photos
+       WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+    )
+      .bind(user.id, limit, offset)
+      .all(),
+    env.DB.prepare(
+      'SELECT COUNT(*) AS count, COALESCE(SUM(size), 0) AS bytes FROM photos WHERE user_id = ?',
+    )
+      .bind(user.id)
+      .first(),
+  ])
+  return json(
+    {
+      total: totals?.count ?? 0,
+      bytes: totals?.bytes ?? 0,
+      photos: (rows.results || []).map((row) => ({
+        id: row.id,
+        url: photoUrl(request, row.id, row.access_key),
+        size: row.size,
+        mime: row.mime,
+        createdAt: row.created_at,
+      })),
+    },
+    200,
+    env,
+    request,
+  )
+}
+
+async function handleAccountStorage(request, env) {
+  const user = await requireUser(request, env)
+  const [photos, avatar] = await Promise.all([
+    env.DB.prepare(
+      'SELECT COUNT(*) AS count, COALESCE(SUM(size), 0) AS bytes FROM photos WHERE user_id = ?',
+    )
+      .bind(user.id)
+      .first(),
+    env.DB.prepare('SELECT size, updated_at FROM avatars WHERE user_id = ?').bind(user.id).first(),
+  ])
+  return json(
+    {
+      photos: { count: photos?.count ?? 0, bytes: photos?.bytes ?? 0 },
+      avatar: avatar ? { size: avatar.size, updatedAt: avatar.updated_at } : null,
+    },
+    200,
+    env,
+    request,
+  )
+}
+
+async function handleAvatarUpload(request, env) {
+  const user = await requireUser(request, env)
+  if (!env.PHOTOS) throw new HttpError(503, '照片存储未配置：请绑定 R2 桶 PHOTOS')
+  const body = await readJSON(request)
+  const dataUrl = String(body.dataUrl || '')
+  const match = dataUrl.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=\r\n]+)$/)
+  if (!match) throw new HttpError(400, '仅支持 JPEG / PNG / WebP 图片')
+  if (match[2].length > Math.ceil((MAX_AVATAR_BYTES * 4) / 3) + 16) {
+    throw new HttpError(413, '头像不能超过 1.5MB，请重新选择')
+  }
+  let bytes
+  try {
+    bytes = decodeBase64(match[2].replace(/[\r\n]/g, ''))
+  } catch {
+    throw new HttpError(400, '图片数据损坏，请重新选择')
+  }
+  if (bytes.length === 0) throw new HttpError(400, '图片内容为空')
+  if (bytes.length > MAX_AVATAR_BYTES) throw new HttpError(413, '头像不能超过 1.5MB，请重新选择')
+  const mime = sniffImageMime(bytes)
+  if (!mime) throw new HttpError(400, '文件不是有效图片')
+
+  const id = randomToken(9)
+  const accessKey = randomToken(18)
+  const r2Key = `avatars/${user.id}/${id}.${PHOTO_MIME_EXT[mime]}`
+  const updatedAt = Date.now()
+  const previous = await env.DB.prepare('SELECT r2_key FROM avatars WHERE user_id = ?').bind(user.id).first()
+  await env.PHOTOS.put(r2Key, bytes, {
+    httpMetadata: { contentType: mime, cacheControl: 'private, max-age=31536000, immutable' },
+  })
+  await env.DB.prepare(
+    `INSERT INTO avatars (user_id, r2_key, access_key, mime, size, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET
+       r2_key = excluded.r2_key,
+       access_key = excluded.access_key,
+       mime = excluded.mime,
+       size = excluded.size,
+       updated_at = excluded.updated_at`,
+  )
+    .bind(user.id, r2Key, accessKey, mime, bytes.length, updatedAt)
+    .run()
+  if (previous?.r2_key && previous.r2_key !== r2Key) {
+    await env.PHOTOS.delete(previous.r2_key).catch(() => undefined)
+  }
+  return json(
+    { url: avatarUrl(request, user.id, accessKey), size: bytes.length, mime, updatedAt },
+    200,
+    env,
+    request,
+  )
+}
+
+async function handleAvatarDelete(request, env) {
+  const user = await requireUser(request, env)
+  if (!env.PHOTOS) throw new HttpError(503, '照片存储未配置')
+  const row = await env.DB.prepare('SELECT r2_key FROM avatars WHERE user_id = ?').bind(user.id).first()
+  if (row?.r2_key) {
+    await env.PHOTOS.delete(row.r2_key).catch(() => undefined)
+    await env.DB.prepare('DELETE FROM avatars WHERE user_id = ?').bind(user.id).run()
+  }
+  return json({ ok: true }, 200, env, request)
+}
+
+async function handleAvatarGet(request, env, userId, url) {
+  if (!env.PHOTOS) throw new HttpError(503, '照片存储未配置')
+  const key = url.searchParams.get('k') || ''
+  const row = await env.DB.prepare('SELECT r2_key, access_key, mime FROM avatars WHERE user_id = ?')
+    .bind(userId)
+    .first()
+  if (!row || !key || key !== row.access_key) throw new HttpError(404, '头像不存在')
+  const object = await env.PHOTOS.get(row.r2_key)
+  if (!object) throw new HttpError(404, '头像不存在')
+
+  const headers = {
+    'content-type': object.httpMetadata?.contentType || row.mime || 'image/jpeg',
+    'cache-control': 'private, max-age=31536000, immutable',
+    'x-content-type-options': 'nosniff',
+    'content-disposition': 'inline',
+    etag: object.httpEtag,
+    ...corsHeaders(env, request),
+  }
+  if (request.headers.get('If-None-Match') === object.httpEtag) {
+    return new Response(null, { status: 304, headers })
+  }
+  return new Response(request.method === 'HEAD' ? null : object.body, { status: 200, headers })
+}
+
 async function handleAdminPhotos(request, env, url) {
   await requireAdmin(request, env)
   const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 60), 1), 200)
@@ -2212,13 +2368,22 @@ async function handleApi(request, env, url, ctx) {
   if (route === 'POST /api/auth/credentials') return await handleSetCredentials(request, env)
   if (route === 'POST /api/membership/redeem') return await handleMembershipRedeem(request, env)
   if (route === 'PATCH /api/account') return await handleUpdateAccount(request, env)
+  if (route === 'GET /api/account/storage') return await handleAccountStorage(request, env)
   if (route === 'POST /api/photos') return await handlePhotoUpload(request, env)
+  if (route === 'GET /api/photos') return await handlePhotoList(request, env, url)
   const photoMatch = url.pathname.match(/^\/api\/photos\/([A-Za-z0-9]+)$/)
   if (photoMatch && (request.method === 'GET' || request.method === 'HEAD')) {
     return await handlePhotoGet(request, env, photoMatch[1], url)
   }
   if (photoMatch && request.method === 'DELETE') {
     return await handlePhotoDelete(request, env, photoMatch[1])
+  }
+
+  if (route === 'POST /api/avatar') return await handleAvatarUpload(request, env)
+  if (route === 'DELETE /api/avatar') return await handleAvatarDelete(request, env)
+  const avatarMatch = url.pathname.match(/^\/api\/avatar\/([A-Za-z0-9-]+)$/)
+  if (avatarMatch && (request.method === 'GET' || request.method === 'HEAD')) {
+    return await handleAvatarGet(request, env, avatarMatch[1], url)
   }
   if (route === 'GET /api/sync/pull') return await handlePull(request, env, url)
   if (route === 'POST /api/sync/push') return await handlePush(request, env)

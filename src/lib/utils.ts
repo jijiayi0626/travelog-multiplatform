@@ -187,11 +187,7 @@ export function initials(name: string): string {
   return trimmed.slice(0, 1)
 }
 
-export async function compressImage(file: File): Promise<string> {
-  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() =>
-    createImageBitmap(file),
-  )
-  const maxSide = 1440
+function bitmapToDataUrl(bitmap: ImageBitmap, maxSide: number, quality: number): string {
   const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height))
   const width = Math.max(1, Math.round(bitmap.width * scale))
   const height = Math.max(1, Math.round(bitmap.height * scale))
@@ -205,7 +201,21 @@ export async function compressImage(file: File): Promise<string> {
   }
   context.drawImage(bitmap, 0, 0, width, height)
   bitmap.close()
-  return canvas.toDataURL('image/jpeg', 0.82)
+  return canvas.toDataURL('image/jpeg', quality)
+}
+
+export async function compressImage(file: File, maxSide = 1440, quality = 0.82): Promise<string> {
+  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() =>
+    createImageBitmap(file),
+  )
+  return bitmapToDataUrl(bitmap, maxSide, quality)
+}
+
+/** 压缩已有的 data URL，用于修复历史遗留的超大照片 */
+export async function compressDataUrl(src: string, maxSide = 1440, quality = 0.8): Promise<string> {
+  const response = await fetch(src)
+  const bitmap = await createImageBitmap(await response.blob())
+  return bitmapToDataUrl(bitmap, maxSide, quality)
 }
 
 export function assetUrl(relative: string): string {

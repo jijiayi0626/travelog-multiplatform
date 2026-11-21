@@ -11,7 +11,7 @@ import {
 } from './lib/app-context'
 import { getLang, setLang as persistLang, translate, translateText, type Lang } from './lib/i18n'
 import { ensureReady } from './lib/repo'
-import { runSync, scheduleAutoSync } from './lib/sync-engine'
+import { hasPendingLocalChanges, runSync, scheduleAutoSync } from './lib/sync-engine'
 import { getCloudConfig } from './lib/cloud'
 import { startAutoCheckin } from './lib/autocheckin'
 import { AppShell, type RootKey } from './components/AppShell'
@@ -24,6 +24,7 @@ import { TripsPage } from './pages/TripsPage'
 import { TripDetailPage } from './pages/TripDetailPage'
 import { FootprintsPage } from './pages/FootprintsPage'
 import { AlbumPage } from './pages/AlbumPage'
+import { CloudGalleryPage } from './pages/CloudGalleryPage'
 import { RecapPage } from './pages/RecapPage'
 import { ExpensesPage } from './pages/ExpensesPage'
 import { ProfilePage } from './pages/ProfilePage'
@@ -71,6 +72,8 @@ function parseHash(): View {
       return { name: 'footprints' }
     case 'album':
       return { name: 'album' }
+    case 'cloud':
+      return { name: 'cloud' }
     case 'recap':
       return { name: 'recap' }
     case 'expenses':
@@ -98,6 +101,8 @@ function toHash(view: View): string {
       return '#/footprints'
     case 'album':
       return '#/album'
+    case 'cloud':
+      return '#/cloud'
     case 'recap':
       return '#/recap'
     case 'expenses':
@@ -202,21 +207,50 @@ export default function App() {
     }
   }, [])
 
-  // 双端自动同步：登录后启动即拉一次，回到前台/窗口聚焦再同步
+  // 自动同步：启动、回到前台、联网、定时各检查一次。
+  // 没有本地改动时只拉取，减少 Worker/D1 写入；间隔与仅 Wi-Fi 可在「我的」里设置。
   useEffect(() => {
-    if (!getCloudConfig().token) return
-    const sync = () => {
-      void runSync().catch(() => {})
+    let stopped = false
+    let lastRun = 0
+
+    const isWifi = () => {
+      const conn = (navigator as Navigator & { connection?: { type?: string } }).connection
+      if (!conn?.type) return true // WebView 多数不暴露网络类型，判断不了时不阻塞
+      return conn.type === 'wifi' || conn.type === 'ethernet'
     }
-    sync()
+
+    const syncIfDue = (opts: { force?: boolean; ignoreToggle?: boolean; minGapMs?: number } = {}) => {
+      if (stopped || document.visibilityState !== 'visible') return
+      const config = getCloudConfig()
+      if (!config.token || (!opts.ignoreToggle && !config.autoSync) || !navigator.onLine) return
+      if (!opts.ignoreToggle && config.wifiOnly && !isWifi()) return
+      const now = Date.now()
+      if (!opts.force && now - lastRun < (opts.minGapMs ?? 60_000)) return
+      lastRun = now
+      void runSync({ pullOnly: !hasPendingLocalChanges() }).catch(() => {})
+    }
+
+    const intervalMs = () =>
+      Math.min(Math.max(getCloudConfig().syncIntervalMinutes || 5, 1), 120) * 60_000
+
+    syncIfDue({ force: true })
+    const timer = window.setInterval(() => syncIfDue({ minGapMs: intervalMs() }), 60_000)
     const onVisible = () => {
-      if (document.visibilityState === 'visible') sync()
+      if (document.visibilityState === 'visible') syncIfDue()
     }
+    // 登录成功或用户主动要求时，不受自动同步开关 / 仅 Wi-Fi 限制
+    const onRequest = () => syncIfDue({ force: true, ignoreToggle: true })
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', onVisible)
+    window.addEventListener('online', onVisible)
+    window.addEventListener('travelog:sync-now', onRequest)
     return () => {
+      stopped = true
+      window.clearInterval(timer)
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
+      window.removeEventListener('online', onVisible)
+      window.removeEventListener('travelog:sync-now', onRequest)
     }
   }, [])
 
@@ -312,6 +346,8 @@ export default function App() {
         return <FootprintsPage />
       case 'album':
         return <AlbumPage />
+      case 'cloud':
+        return <CloudGalleryPage />
       case 'recap':
         return <RecapPage />
       case 'expenses':

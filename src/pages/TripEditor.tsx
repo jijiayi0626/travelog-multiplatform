@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Sparkle, Trash } from '@phosphor-icons/react'
 import type { Currency, Trip, TripTemplate } from '../lib/types'
-import { applyChecklistTemplate, applyPlanTemplate, deleteTrip, getProfile, getTrip, saveTrip } from '../lib/repo'
+import { applyChecklistTemplate, applyPlanTemplate, deleteTrip, getProfile, getTrip, listMoments, saveTrip } from '../lib/repo'
+import { deleteCloudPhoto, isSignedIn } from '../lib/cloud'
 import { suggestTripNote } from '../lib/ai'
 import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import {
@@ -92,6 +93,15 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
       const budgetValue = Number.parseFloat(budgetText)
       const start = startDate || todayStart()
       const end = endDate && endDate >= start ? endDate : start
+      // 封面被移除时立刻清理 R2 旧图；换了新图则保留旧 cloudId，
+      // 等新封面由同步上传成功后再删，避免先删后传失败导致丢图
+      let nextCoverCloudId = original?.coverCloudId
+      if (!coverImage && original?.coverCloudId) {
+        if (isSignedIn() && navigator.onLine) {
+          void deleteCloudPhoto(original.coverCloudId).catch(() => undefined)
+        }
+        nextCoverCloudId = undefined
+      }
       const saved = await saveTrip({
         id: original?.id ?? '',
         title: titleValue,
@@ -101,6 +111,7 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
         note: note.trim(),
         cover,
         coverImage: coverImage || undefined,
+        coverCloudId: nextCoverCloudId,
         ownerId: original?.ownerId ?? profile.id,
         inviteCode: original?.inviteCode ?? '',
         createdAt: original?.createdAt ?? 0,
@@ -133,7 +144,19 @@ export function TripEditor({ id, template }: { id?: string; template?: TripTempl
 
   const doDelete = async () => {
     if (!original) return
+    // 删旅程前收集云端照片，随后一并清理 R2，避免留下孤儿文件
+    const photoIds = new Set<string>()
+    if (original.coverCloudId) photoIds.add(original.coverCloudId)
+    const moments = await listMoments(original.id)
+    for (const moment of moments) {
+      for (const photo of moment.photos ?? []) {
+        if (photo.cloudId) photoIds.add(photo.cloudId)
+      }
+    }
     await deleteTrip(original.id)
+    if (isSignedIn() && navigator.onLine) {
+      for (const photoId of photoIds) void deleteCloudPhoto(photoId).catch(() => undefined)
+    }
     bump()
     toast(tr('旅程已删除'))
     nav.navigate({ name: 'trips' })

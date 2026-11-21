@@ -13,6 +13,10 @@ export interface CloudConfig {
   cursor: string | number
   lastSyncAt: number
   autoSync: boolean
+  /** 前台自动同步间隔（分钟） */
+  syncIntervalMinutes: number
+  /** 仅在 Wi-Fi 下自动同步 */
+  wifiOnly: boolean
 }
 
 const STORAGE_KEY = 'travelog.cloud'
@@ -27,6 +31,8 @@ const DEFAULT_CONFIG: CloudConfig = {
   cursor: 0,
   lastSyncAt: 0,
   autoSync: true,
+  syncIntervalMinutes: 5,
+  wifiOnly: false,
 }
 
 export function getCloudConfig(): CloudConfig {
@@ -311,6 +317,55 @@ export function deleteCloudPhoto(id: string): Promise<{ ok: boolean }> {
   return api(`/photos/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
+export interface UploadedAvatar {
+  url: string
+  size: number
+  mime: string
+  updatedAt: number
+}
+
+/** 头像单独存 R2：服务端会替换旧文件，避免隐私图片出现在后台照片列表里 */
+export function uploadAvatar(dataUrl: string): Promise<UploadedAvatar> {
+  return api<UploadedAvatar>('/avatar', {
+    method: 'POST',
+    body: { dataUrl },
+    timeoutMs: 60000,
+  })
+}
+
+export function deleteAvatar(): Promise<{ ok: boolean }> {
+  return api('/avatar', { method: 'DELETE' })
+}
+
+export interface CloudPhoto {
+  id: string
+  url: string
+  size: number
+  mime: string
+  createdAt: number
+}
+
+export interface CloudPhotoPage {
+  total: number
+  bytes: number
+  photos: CloudPhoto[]
+}
+
+/** 当前账号上传到 R2 的照片（含总张数与总占用） */
+export function listMyPhotos(limit = 60, offset = 0): Promise<CloudPhotoPage> {
+  return api<CloudPhotoPage>(`/photos?limit=${limit}&offset=${offset}`)
+}
+
+export interface StorageInfo {
+  photos: { count: number; bytes: number }
+  avatar: { size: number; updatedAt: number } | null
+}
+
+/** 云存储占用：照片与头像 */
+export function getStorageInfo(): Promise<StorageInfo> {
+  return api<StorageInfo>('/account/storage')
+}
+
 export interface WeatherNow {
   temperature: number
   weatherCode: number
@@ -413,6 +468,9 @@ export interface AdminUser {
   lastSeenAt: number
   status: 'active' | 'disabled'
   entityCount: number
+  photoCount: number
+  photoBytes: number
+  avatarBytes: number
   membership: MembershipInfo
   lastLoginAt: number
   lastIp: string

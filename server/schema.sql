@@ -174,3 +174,13 @@ CREATE TABLE IF NOT EXISTS ai_jobs (
 
 CREATE INDEX IF NOT EXISTS idx_ai_jobs_user ON ai_jobs (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_jobs_status ON ai_jobs (status, created_at);
+
+-- 用户头像（文件本体在 R2，按用户保留最新一张）
+CREATE TABLE IF NOT EXISTS avatars (
+  user_id TEXT PRIMARY KEY,
+  r2_key TEXT NOT NULL,
+  access_key TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);

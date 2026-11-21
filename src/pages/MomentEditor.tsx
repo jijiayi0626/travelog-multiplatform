@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ImageSquare, Plus, Sparkle, Trash } from '@phosphor-icons/react'
 import type { Moment, Photo, Trip } from '../lib/types'
 import { deleteMoment, getTrip, listMoments, saveMoment } from '../lib/repo'
+import { deleteCloudPhoto, isSignedIn } from '../lib/cloud'
 import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import { compressImage, dayIndexInTrip, uid } from '../lib/utils'
 import { polishMoment } from '../lib/ai'
@@ -163,6 +164,15 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
         photos,
         tags,
       })
+      // 编辑时移除的照片同步清理 R2，避免孤儿文件持续占用空间
+      if (original && isSignedIn() && navigator.onLine) {
+        const kept = new Set(photos.map((photo) => photo.cloudId).filter(Boolean))
+        for (const photo of original.photos ?? []) {
+          if (photo.cloudId && !kept.has(photo.cloudId)) {
+            void deleteCloudPhoto(photo.cloudId).catch(() => undefined)
+          }
+        }
+      }
       bump()
       toast(tr('记录已保存'))
       nav.back()
@@ -175,7 +185,11 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
 
   const doDelete = async () => {
     if (!original) return
+    const cloudIds = (original.photos ?? []).map((photo) => photo.cloudId).filter(Boolean) as string[]
     await deleteMoment(original.id)
+    if (isSignedIn() && navigator.onLine) {
+      for (const cloudId of cloudIds) void deleteCloudPhoto(cloudId).catch(() => undefined)
+    }
     bump()
     toast(tr('记录已删除'))
     nav.back()

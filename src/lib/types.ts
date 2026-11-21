@@ -22,8 +22,10 @@ export interface Trip {
   budget?: number
   currency?: Currency
   template?: TripTemplate
-  /** 自定义封面：本地压缩后的 data URL，仅在设置了图片时存在 */
+  /** 自定义封面：本地压缩后的 data URL 或 R2 地址 */
   coverImage?: string
+  /** 封面已上传到 R2 时的照片 id，用于换封面时清理旧图 */
+  coverCloudId?: string
 }
 
 export interface TripView extends Trip {
@@ -169,6 +171,7 @@ export type View =
   | { name: 'trip'; id: string; tab: TabKey }
   | { name: 'footprints' }
   | { name: 'album' }
+  | { name: 'cloud' }
   | { name: 'recap' }
   | { name: 'expenses' }
   | { name: 'profile' }

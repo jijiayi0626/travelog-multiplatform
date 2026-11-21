@@ -4,6 +4,7 @@ import {
   BookOpen,
   CaretDown,
   CaretRight,
+  CloudCheck,
   CloudSlash,
   DownloadSimple,
   Crown,
@@ -25,10 +26,22 @@ import { exportAll, getProfile, importAll, saveProfile, stats } from '../lib/rep
 import { useLoader } from '../lib/hooks'
 import { useI18n, useNav, useRefresh, useToast } from '../lib/app-context'
 import { ACCENTS, type AccentName, currentTheme, getAccent, setAccent, setThemeMode } from '../lib/theme'
-import { downloadText, readTextFile } from '../lib/utils'
+import { compressImage, downloadText, readTextFile, relativeTime } from '../lib/utils'
 import { getBestFix, isNative, shareTextFile } from '../lib/native'
 import { ensureExactAlarmPermission, ensureNotificationPermission } from '../lib/reminder'
-import { getCloudConfig, isSignedIn, saveCloudConfig, updateAccountNickname } from '../lib/cloud'
+import {
+  deleteAvatar,
+  getCloudConfig,
+  getStorageInfo,
+  isSignedIn,
+  saveCloudConfig,
+  updateAccountNickname,
+  uploadAvatar,
+  type CloudConfig,
+  type StorageInfo,
+} from '../lib/cloud'
+import { scheduleAutoSync } from '../lib/sync-engine'
+import { countPendingImages } from '../lib/photo-sync'
 import {
   getActiveAIJobs,
   getAIJobs,
@@ -67,6 +80,7 @@ export function ProfilePage() {
   const { bump } = useRefresh()
   const { t, tr, lang, setLang } = useI18n()
   const fileRef = useRef<HTMLInputElement>(null)
+  const avatarRef = useRef<HTMLInputElement>(null)
 
   const loader = useCallback(async () => {
     const [profile, stat] = await Promise.all([getProfile(), stats()])
@@ -82,10 +96,14 @@ export function ProfilePage() {
   const nicknameRef = useRef<HTMLInputElement>(null)
   const [autoCheckin, setAutoCheckin] = useState(() => getAutoCheckinSettings())
   const [checkinStatus, setCheckinStatus] = useState(() => getAutoCheckinStatus())
-  const signedIn = isSignedIn()
+  const [cloudConfig, setCloudConfig] = useState<CloudConfig>(() => getCloudConfig())
+  const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null)
+  const [pendingImages, setPendingImages] = useState(0)
+  const signedIn = Boolean(cloudConfig.token)
   const [importing, setImporting] = useState(false)
   const [aiJobs, setAIJobs] = useState<AIJob[]>(() => getAIJobs())
   const [guestTools, setGuestTools] = useState(false)
+  const [avatarBusy, setAvatarBusy] = useState(false)
   const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null)
   const [lastBackupAt, setLastBackupAt] = useState(() =>
     Number(localStorage.getItem('travelog.lastBackupAt') || 0),
@@ -96,6 +114,39 @@ export function ProfilePage() {
   }, [data.profile])
 
   useEffect(() => subscribeAIJobs(setAIJobs), [])
+
+  useEffect(() => {
+    const onCloud = () => setCloudConfig(getCloudConfig())
+    window.addEventListener('travelog:cloud-changed', onCloud)
+    return () => window.removeEventListener('travelog:cloud-changed', onCloud)
+  }, [])
+
+  // 云存储占用：进入页面、同步完成后刷新，方便随时看到 R2 用量
+  useEffect(() => {
+    if (!signedIn) {
+      setStorageInfo(null)
+      return
+    }
+    let alive = true
+    const refresh = () => {
+      getStorageInfo()
+        .then((info) => {
+          if (alive) setStorageInfo(info)
+        })
+        .catch(() => undefined)
+      countPendingImages()
+        .then((count) => {
+          if (alive) setPendingImages(count)
+        })
+        .catch(() => undefined)
+    }
+    refresh()
+    window.addEventListener('travelog:sync-done', refresh)
+    return () => {
+      alive = false
+      window.removeEventListener('travelog:sync-done', refresh)
+    }
+  }, [signedIn])
 
   useEffect(() => {
     navigator.storage
@@ -186,6 +237,55 @@ export function ProfilePage() {
     }
   }
 
+  const pickAvatar = async (file: File | undefined) => {
+    if (!file) return
+    setAvatarBusy(true)
+    try {
+      // 头像按 256px 压缩，控制 R2 用量；仍保留本地副本防止上传失败后丢图
+      const dataUrl = await compressImage(file, 256, 0.85)
+      const base: Profile =
+        data.profile ?? {
+          id: 'local-user',
+          nickname: (nicknameRef.current?.value ?? nickname).trim() || '旅人',
+          avatar: '',
+          createdAt: Date.now(),
+        }
+      let avatar = dataUrl
+      let uploaded = false
+      if (isSignedIn() && navigator.onLine) {
+        try {
+          const result = await uploadAvatar(dataUrl)
+          avatar = result.url
+          uploaded = true
+        } catch {
+          // 上传失败就把 data URL 存在本地，自动同步会继续重试
+        }
+      }
+      await saveProfile({ ...base, avatar })
+      bump()
+      scheduleAutoSync(500)
+      toast(uploaded ? '头像已上传到云端' : '头像已保存到本机，联网后自动上传')
+    } catch {
+      toast('图片处理失败，换一张试试')
+    } finally {
+      setAvatarBusy(false)
+      if (avatarRef.current) avatarRef.current.value = ''
+    }
+  }
+
+  const clearAvatar = async () => {
+    const base = data.profile
+    if (!base) return
+    const wasRemote = /^https?:\/\//i.test(base.avatar ?? '')
+    await saveProfile({ ...base, avatar: '' })
+    if (wasRemote && isSignedIn() && navigator.onLine) {
+      void deleteAvatar().catch(() => undefined)
+    }
+    bump()
+    scheduleAutoSync(500)
+    toast('已移除头像')
+  }
+
   const doExport = async () => {
     const json = await exportAll()
     const name = `travelog-backup-${new Date().toISOString().slice(0, 10)}.json`
@@ -252,7 +352,6 @@ export function ProfilePage() {
   const profile = data.profile
   const ThemeGlyph = theme === 'dark' ? Moon : Sun
 
-  const cloudConfig = getCloudConfig()
   const memberActive = cloudConfig.membershipExpiresAt > Date.now()
   const pendingSync = data.stats.pendingSync
   const autoSummary = autoCheckin.enabled
@@ -262,6 +361,136 @@ export function ProfilePage() {
   const backupSummary = lastBackupAt
     ? `上次备份 ${new Date(lastBackupAt).toLocaleDateString('zh-CN')}`
     : '导出 / 导入 JSON 备份'
+  const syncSummary = cloudConfig.autoSync
+    ? `自动 · 每 ${cloudConfig.syncIntervalMinutes} 分钟${cloudConfig.wifiOnly ? ' · 仅 Wi-Fi' : ''}`
+    : '仅手动同步'
+
+  const patchCloud = (patch: Partial<CloudConfig>) => setCloudConfig(saveCloudConfig(patch))
+
+  const cloudStorageBytes = (storageInfo?.photos.bytes ?? 0) + (storageInfo?.avatar?.size ?? 0)
+
+  const syncGroup = (
+    <SettingsGroup
+      icon={<CloudCheck size={17} />}
+      title={tr('云同步与存储')}
+      summary={syncSummary}
+    >
+      <div className="space-y-3">
+        <div className="flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-body-sm text-ink">自动同步</p>
+            <p className="mt-0.5 text-caption leading-4 text-ink-3">
+              打开应用、切回前台或修改后自动同步。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => patchCloud({ autoSync: !cloudConfig.autoSync })}
+            aria-pressed={cloudConfig.autoSync}
+            className={cn(
+              'press relative h-6 w-11 shrink-0 rounded-full transition-colors',
+              cloudConfig.autoSync ? 'bg-accent' : 'bg-paper-2',
+            )}
+          >
+            <span
+              className={cn(
+                'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all',
+                cloudConfig.autoSync ? 'left-[22px]' : 'left-0.5',
+              )}
+            />
+          </button>
+        </div>
+
+        {cloudConfig.autoSync ? (
+          <>
+            <div>
+              <p className="text-caption text-ink-3">同步间隔</p>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {[1, 5, 15, 30].map((minutes) => (
+                  <button
+                    key={minutes}
+                    type="button"
+                    className={cn(
+                      'chip px-2.5 py-1 text-caption',
+                      cloudConfig.syncIntervalMinutes === minutes && 'chip-active',
+                    )}
+                    onClick={() => patchCloud({ syncIntervalMinutes: minutes })}
+                  >
+                    {minutes} 分钟
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-body-sm text-ink">仅 Wi-Fi 同步</p>
+                <p className="mt-0.5 text-caption leading-4 text-ink-3">
+                  移动数据下不自动上传照片，节省流量。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => patchCloud({ wifiOnly: !cloudConfig.wifiOnly })}
+                aria-pressed={cloudConfig.wifiOnly}
+                className={cn(
+                  'press relative h-6 w-11 shrink-0 rounded-full transition-colors',
+                  cloudConfig.wifiOnly ? 'bg-accent' : 'bg-paper-2',
+                )}
+              >
+                <span
+                  className={cn(
+                    'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all',
+                    cloudConfig.wifiOnly ? 'left-[22px]' : 'left-0.5',
+                  )}
+                />
+              </button>
+            </div>
+          </>
+        ) : null}
+
+        <div className="rounded-xl bg-paper-2/60 p-3 text-caption leading-5 text-ink-3">
+          <p>
+            云照片 {storageInfo?.photos.count ?? 0} 张 · {formatBytes(storageInfo?.photos.bytes ?? 0)}
+            {storageInfo?.avatar ? ` · 头像 ${formatBytes(storageInfo.avatar.size)}` : ''}
+          </p>
+          <p>云存储合计 {formatBytes(cloudStorageBytes)}</p>
+          {pendingImages > 0 ? (
+            <p className="text-accent">还有 {pendingImages} 张图片等待上传</p>
+          ) : null}
+          <p>
+            上次同步：{cloudConfig.lastSyncAt > 0 ? relativeTime(cloudConfig.lastSyncAt) : '从未'}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            className="chip px-2.5 py-1 text-caption"
+            onClick={() => nav.navigate({ name: 'cloud' })}
+          >
+            管理云相册
+          </button>
+          <button
+            type="button"
+            className="chip px-2.5 py-1 text-caption"
+            onClick={() => nav.navigate({ name: 'sync' })}
+          >
+            账号与服务器
+          </button>
+          <button
+            type="button"
+            className="chip px-2.5 py-1 text-caption"
+            onClick={() => {
+              window.dispatchEvent(new Event('travelog:sync-now'))
+              toast('已开始同步')
+            }}
+          >
+            立即同步
+          </button>
+        </div>
+      </div>
+    </SettingsGroup>
+  )
 
   const autoCheckinGroup = (
     <SettingsGroup
@@ -506,7 +735,7 @@ export function ProfilePage() {
       </header>
 
       <section className="flex items-center gap-3.5 border-y border-line py-4">
-        <Avatar name={profile?.nickname ?? tr('旅人')} size={56} />
+        <Avatar name={profile?.nickname ?? tr('旅人')} src={profile?.avatar || undefined} size={56} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-title font-semibold tracking-tight text-ink">
             {loading ? tr('加载中…') : profile?.nickname}
@@ -596,6 +825,7 @@ export function ProfilePage() {
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-line bg-surface">
+        {syncGroup}
         {autoCheckinGroup}
         {appearanceGroup}
         {dataGroup}
@@ -608,6 +838,13 @@ export function ProfilePage() {
         accept="application/json,.json"
         className="hidden"
         onChange={(event) => doImport(event.target.files?.[0])}
+      />
+      <input
+        ref={avatarRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(event) => pickAvatar(event.target.files?.[0])}
       />
 
       <p className="pb-2 text-center text-caption uppercase tracking-[0.18em] text-ink-3">
@@ -626,12 +863,32 @@ export function ProfilePage() {
       >
         <div className="space-y-4">
           <div className="flex items-center gap-3">
-            <Avatar name={nickname || '旅人'} size={52} />
-            <p className="text-note leading-5 text-ink-3">
-              头像目前用名字首字生成。
-              <br />
-              接入账号体系后可上传真实头像。
-            </p>
+            <Avatar name={nickname || '旅人'} src={data.profile?.avatar || undefined} size={52} />
+            <div className="min-w-0 flex-1">
+              <p className="text-note leading-5 text-ink-3">
+                头像会压缩到 256px 后上传到 R2，其他设备同步后可见。
+              </p>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  className="chip px-2.5 py-1 text-caption"
+                  onClick={() => avatarRef.current?.click()}
+                  disabled={avatarBusy}
+                >
+                  {avatarBusy ? '处理中…' : data.profile?.avatar ? '更换头像' : '上传头像'}
+                </button>
+                {data.profile?.avatar ? (
+                  <button
+                    type="button"
+                    className="chip px-2.5 py-1 text-caption text-ink-3"
+                    onClick={clearAvatar}
+                    disabled={avatarBusy}
+                  >
+                    移除头像
+                  </button>
+                ) : null}
+              </div>
+            </div>
           </div>
           <Field label="昵称">
             <input

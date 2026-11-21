@@ -160,6 +160,13 @@ export function SyncPage({ mode }: { mode?: 'login' | 'register' }) {
     }
   }
 
+  /** 登录/注册成功后立刻触发一次双向同步（头像、封面、照片会一并上传） */
+  const requestImmediateSync = () => {
+    window.setTimeout(() => {
+      window.dispatchEvent(new Event('travelog:sync-now'))
+    }, 400)
+  }
+
   const doRegister = async () => {
     const name = (nicknameRef.current?.value ?? '').trim()
     if (!name) {
@@ -177,7 +184,8 @@ export function SyncPage({ mode }: { mode?: 'login' | 'register' }) {
       await applyNickname(auth.nickname)
       setConfig(getCloudConfig())
       setResult(tr('账号已创建，同步码：{code}', { code: auth.syncCode }))
-      toast(tr('注册成功，已自动登录'))
+      toast(tr('注册成功，正在同步数据…'))
+      requestImmediateSync()
     } catch (error) {
       toast(error instanceof Error ? error.message : tr('注册失败'))
     } finally {
@@ -197,7 +205,8 @@ export function SyncPage({ mode }: { mode?: 'login' | 'register' }) {
         const auth = await loginWithPassword(loginUsername.trim(), loginPassword)
         await applyNickname(auth.nickname)
         setConfig(getCloudConfig())
-        toast(tr('登录成功，可以同步了'))
+        toast(tr('登录成功，正在同步数据…'))
+        requestImmediateSync()
       } catch (error) {
         toast(error instanceof Error ? error.message : tr('登录失败'))
       } finally {
@@ -216,7 +225,8 @@ export function SyncPage({ mode }: { mode?: 'login' | 'register' }) {
       const auth = await loginCloud(code.trim())
       await applyNickname(auth.nickname)
       setConfig(getCloudConfig())
-      toast(auth.needsCredentials ? tr('已用同步码登录，建议设置账号密码') : tr('登录成功，可以同步了'))
+      toast(auth.needsCredentials ? tr('已用同步码登录，建议设置账号密码') : tr('登录成功，正在同步数据…'))
+      requestImmediateSync()
     } catch (error) {
       toast(error instanceof Error ? error.message : tr('登录失败'))
     } finally {
@@ -274,14 +284,36 @@ export function SyncPage({ mode }: { mode?: 'login' | 'register' }) {
     try {
       const sync = await runSync()
       setConfig(getCloudConfig())
-      setResult(
+      const parts = [
         tr('推送 {push} 条 · 拉取 {pull} 条 · 删除 {del} 条', {
           push: sync.pushed,
           pull: sync.pulled,
           del: sync.removed,
         }),
-      )
-      toast(tr('同步完成'))
+      ]
+      if (sync.photos.uploaded > 0) {
+        parts.push(tr('图片上传 {n} 张', { n: sync.photos.uploaded }))
+      }
+      if (sync.photos.failed > 0) {
+        parts.push(tr('图片失败 {n} 张', { n: sync.photos.failed }))
+      }
+      if (sync.photos.remaining > 0) {
+        parts.push(tr('还有 {n} 张待上传', { n: sync.photos.remaining }))
+      }
+      setResult(parts.join(' · '))
+      if (sync.photos.failed > 0) {
+        toast(
+          sync.photos.remaining > 0
+            ? tr('同步完成，但有 {n} 张图片上传失败，下次会自动重试', { n: sync.photos.failed })
+            : tr('同步完成，有 {n} 张图片上传失败，请检查网络后重试', { n: sync.photos.failed }),
+        )
+      } else {
+        toast(
+          sync.photos.remaining > 0
+            ? tr('已同步数据，图片还在后台继续上传（剩 {n} 张）', { n: sync.photos.remaining })
+            : tr('同步完成'),
+        )
+      }
     } catch (error) {
       toast(error instanceof Error ? error.message : tr('同步失败'))
     } finally {
@@ -612,6 +644,14 @@ export function SyncPage({ mode }: { mode?: 'login' | 'register' }) {
                 </dd>
               </div>
             </dl>
+
+            <p className="mt-2 text-caption leading-4 text-ink-3">
+              {config.autoSync
+                ? tr('自动同步已开启：打开应用、切回前台或改动后自动同步，前台每 {n} 分钟检查一次。', {
+                    n: config.syncIntervalMinutes,
+                  }) + (config.wifiOnly ? tr('仅在 Wi-Fi 下自动同步。') : '')
+                : tr('自动同步已关闭：只有点击「立即同步」时才会同步。')}
+            </p>
 
             {result ? (
               <p className="mt-3 flex items-start gap-1.5 rounded-xl bg-accent-soft/70 px-3 py-2 text-note leading-5 text-accent">

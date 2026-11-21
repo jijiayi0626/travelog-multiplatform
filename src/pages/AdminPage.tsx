@@ -74,6 +74,7 @@ export function AdminPage() {
   const [users, setUsers] = useState<AdminUser[]>([])
   const [total, setTotal] = useState(0)
   const [query, setQuery] = useState('')
+  const [photoQuery, setPhotoQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [settings, setSettings] = useState<AdminSettings | null>(null)
   const [pendingDelete, setPendingDelete] = useState<AdminUser | null>(null)
@@ -232,7 +233,7 @@ export function AdminPage() {
       </div>
 
       <div className="mx-auto mt-4 w-full max-w-[860px] space-y-4 pb-6">
-        <section className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <section className="grid grid-cols-2 gap-3 sm:grid-cols-6">
           <div className="card p-3.5">
             <StatTile label={tr('用户')} value={String(overview?.users ?? '—')} />
           </div>
@@ -244,6 +245,13 @@ export function AdminPage() {
           </div>
           <div className="card p-3.5">
             <StatTile label={tr('云端实体')} value={String(overview?.entities ?? '—')} />
+          </div>
+          <div className="card p-3.5">
+            <StatTile
+              label={tr('云照片')}
+              value={String(overview?.photos.count ?? '—')}
+              sub={overview ? formatBytes(overview.photos.bytes) : undefined}
+            />
           </div>
           <div className="card p-3.5">
             <StatTile
@@ -270,7 +278,10 @@ export function AdminPage() {
             { value: 'ai', label: tr('AI 接口') },
             { value: 'site', label: tr('站点') },
           ]}
-          onChange={setTab}
+          onChange={(next) => {
+            if (next === 'photos') setPhotoQuery('')
+            setTab(next)
+          }}
           className="max-w-[560px]"
         />
 
@@ -351,6 +362,10 @@ export function AdminPage() {
                         : tr('从未活跃')}
                     </p>
                     <p className="text-caption text-ink-3">
+                      云端 {user.entityCount} 条 · 照片 {user.photoCount} 张 ·{' '}
+                      {formatBytes((user.photoBytes ?? 0) + (user.avatarBytes ?? 0))}
+                    </p>
+                    <p className="text-caption text-ink-3">
                       {user.membership.active
                         ? tr('会员至 {date}', { date: formatDateCn(user.membership.expiresAt) })
                         : tr('非会员')}
@@ -377,6 +392,19 @@ export function AdminPage() {
                     ) : null}
 
                     <div className="flex flex-wrap gap-1.5">
+                      {user.photoCount > 0 ? (
+                        <button
+                          type="button"
+                          className="chip px-2.5 py-1 text-caption"
+                          onClick={() => {
+                            setPhotoQuery(user.nickname || user.syncCode || user.id)
+                            setTab('photos')
+                          }}
+                        >
+                          <Images size={12} />
+                          {tr('查看云照片')}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="chip px-2.5 py-1 text-caption"
@@ -462,7 +490,7 @@ export function AdminPage() {
           <CodesSettings onError={handleError} />
         ) : null}
 
-        {tab === 'photos' ? <PhotosPanel onError={handleError} /> : null}
+        {tab === 'photos' ? <PhotosPanel onError={handleError} initialQuery={photoQuery} /> : null}
 
         {tab === 'ai' && settings ? (
           <AISettings
@@ -526,12 +554,18 @@ function mimeExt(mime: string): string {
   return 'jpg'
 }
 
-function PhotosPanel({ onError }: { onError: (error: unknown) => void }) {
+function PhotosPanel({
+  onError,
+  initialQuery = '',
+}: {
+  onError: (error: unknown) => void
+  initialQuery?: string
+}) {
   const { tr } = useI18n()
   const toast = useToast()
   const [offset, setOffset] = useState(0)
-  const [query, setQuery] = useState('')
-  const [search, setSearch] = useState('')
+  const [query, setQuery] = useState(initialQuery)
+  const [search, setSearch] = useState(initialQuery)
   const [mime, setMime] = useState('')
   const [items, setItems] = useState<AdminPhoto[]>([])
   const [summary, setSummary] = useState<AdminPhotoPage | null>(null)
