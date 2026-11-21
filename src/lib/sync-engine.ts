@@ -5,6 +5,7 @@ import {
   type CloudConfig,
 } from './cloud'
 import { applyRemoteEntities, exportAllEntities, replaceAllWithRemote, type SyncEntity } from './repo'
+import { uploadPendingPhotos } from './photo-sync'
 
 export interface SyncResult {
   pushed: number
@@ -12,7 +13,7 @@ export interface SyncResult {
   removed: number
   skipped: number
   at: number
-  cursor: number
+  cursor: string | number
 }
 
 const PUSH_BATCH = 150
@@ -35,7 +36,7 @@ async function pushBatch(entities: SyncEntity[]): Promise<{ applied: number; ski
 }
 
 interface PullResponse {
-  cursor: number
+  cursor: string | number
   entities: SyncEntity[]
   hasMore: boolean
 }
@@ -44,11 +45,28 @@ interface PullResponse {
  * 全量推送 + 增量拉取。
  * 推送使用 LWW（服务端按 updatedAt 比较），拉取按 cursor 游标分页。
  */
-export async function runSync(): Promise<SyncResult> {
+export function runSync(): Promise<SyncResult> {
+  if (inFlightSync) return inFlightSync
+  inFlightSync = doRunSync().finally(() => {
+    inFlightSync = null
+  })
+  return inFlightSync
+}
+
+let inFlightSync: Promise<SyncResult> | null = null
+
+async function doRunSync(): Promise<SyncResult> {
   const config: CloudConfig = getCloudConfig()
   if (!config.token) throw new Error('请先登录云同步')
 
   if (!navigator.onLine) throw new Error('当前离线，联网后再同步')
+
+  // 0. 先把本机 data URL 照片传到 R2，换成云端地址再推送；失败的照片保留本地
+  try {
+    await uploadPendingPhotos()
+  } catch (error) {
+    console.warn('[sync] 照片上传失败：', error instanceof Error ? error.message : error)
+  }
 
   // 1. 推送
   const local = await exportAllEntities()
@@ -66,9 +84,12 @@ export async function runSync(): Promise<SyncResult> {
   let pulled = 0
   let removed = 0
   for (let round = 0; round < 50; round++) {
-    const response = await fetch(`${apiOrigin()}/sync/pull?cursor=${cursor}&limit=500`, {
-      headers: { authorization: `Bearer ${config.token}` },
-    })
+    const response = await fetch(
+      `${apiOrigin()}/sync/pull?cursor=${encodeURIComponent(String(cursor))}&limit=500`,
+      {
+        headers: { authorization: `Bearer ${config.token}` },
+      },
+    )
     if (!response.ok) {
       const text = await response.text()
       throw new Error(`拉取失败（${response.status}）${text.slice(0, 120)}`)
@@ -97,12 +118,15 @@ export async function pullOverwrite(): Promise<{ pulled: number }> {
   if (!config.token) throw new Error('请先登录云同步')
   if (!navigator.onLine) throw new Error('当前离线，联网后再同步')
 
-  let cursor = 0
+  let cursor: string | number = 0
   const all: SyncEntity[] = []
   for (let round = 0; round < 100; round++) {
-    const response = await fetch(`${apiOrigin()}/sync/pull?cursor=${cursor}&limit=1000`, {
-      headers: { authorization: `Bearer ${config.token}` },
-    })
+    const response = await fetch(
+      `${apiOrigin()}/sync/pull?cursor=${encodeURIComponent(String(cursor))}&limit=1000`,
+      {
+        headers: { authorization: `Bearer ${config.token}` },
+      },
+    )
     if (!response.ok) {
       const text = await response.text()
       throw new Error(`拉取失败（${response.status}）${text.slice(0, 120)}`)

@@ -1,6 +1,7 @@
 import { listFootprints, listTrips, saveFootprint } from './repo'
 import { tripStatusOf } from './utils'
 import { CHINA_CITIES } from './chinaCities'
+import { reverseGeocode } from './cloud'
 import {
   clearNativeWatch,
   isNative,
@@ -206,8 +207,26 @@ async function handleFix(
     noteEvent('该城市已打卡，冷却中')
     return
   }
-  const placeName = `${city.short}附近`
-  await record(placeName, city.city, fix, tripId, '自动打卡（周边地名）')
+
+  // 反查区县 / 街道，让自动打卡不只知道城市；失败时仍用「城市附近」兜底
+  let placeName = `${city.short}附近`
+  let cityName = city.city
+  try {
+    const info = await reverseGeocode(fix.latitude, fix.longitude, 6000)
+    const detail = info.name || info.street || info.district
+    if (info.city) cityName = info.city
+    if (detail && detail !== cityName && detail !== info.province) {
+      placeName = detail
+      status.lastMatch = `地点：${detail}（${info.district || city.city}）`
+    } else if (info.district) {
+      placeName = info.district
+      status.lastMatch = `地点：${info.district}（${city.city}）`
+    }
+  } catch {
+    // 网络或服务不可用时静默退回城市名
+  }
+
+  await record(placeName, cityName, fix, tripId, '自动打卡（周边地名）')
   noteEvent(`已打卡：${placeName}`)
   listener?.({ type: 'checked', place: placeName, distance: city.distance })
 }

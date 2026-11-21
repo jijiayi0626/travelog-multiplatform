@@ -3,6 +3,9 @@ import {
   ArrowClockwise,
   ArrowLeft,
   CheckCircle,
+  Copy,
+  Crown,
+  Images,
   MagnifyingGlass,
   Plus,
   SignOut,
@@ -12,9 +15,13 @@ import {
 import { useI18n, useNav, useToast } from '../lib/app-context'
 import {
   adminChangePassword,
+  adminCreateCodes,
+  adminDeleteCode,
   adminDeleteUser,
   adminGetSettings,
+  adminListCodes,
   adminListModels,
+  adminListPhotos,
   adminListUsers,
   adminLogin,
   adminLogout,
@@ -26,13 +33,16 @@ import {
   ApiError,
   getAdminSession,
   type AdminAITestResult,
+  type AdminCode,
   type AdminEndpoint,
   type AdminOverview,
+  type AdminPhoto,
   type AdminSettings,
   type AdminUser,
 } from '../lib/cloud'
-import { formatDateCn, relativeTime } from '../lib/utils'
+import { copyText, formatDateCn, relativeTime } from '../lib/utils'
 import { cn } from '../lib/cn'
+import { Lightbox } from '../components/Lightbox'
 import {
   ConfirmDialog,
   EmptyState,
@@ -43,7 +53,7 @@ import {
   StatTile,
 } from '../components/ui'
 
-type Tab = 'users' | 'ai' | 'site'
+type Tab = 'users' | 'codes' | 'photos' | 'ai' | 'site'
 
 export function AdminPage() {
   const nav = useNav()
@@ -218,9 +228,12 @@ export function AdminPage() {
       </div>
 
       <div className="mx-auto mt-4 w-full max-w-[860px] space-y-4 pb-6">
-        <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <section className="grid grid-cols-2 gap-3 sm:grid-cols-5">
           <div className="card p-3.5">
             <StatTile label={tr('用户')} value={String(overview?.users ?? '—')} />
+          </div>
+          <div className="card p-3.5">
+            <StatTile label={tr('会员')} value={String(overview?.members ?? '—')} />
           </div>
           <div className="card p-3.5">
             <StatTile label={tr('7 日活跃')} value={String(overview?.active7Days ?? '—')} />
@@ -248,11 +261,13 @@ export function AdminPage() {
           value={tab}
           options={[
             { value: 'users', label: tr('用户') },
+            { value: 'codes', label: tr('会员码 / 邀请码') },
+            { value: 'photos', label: tr('照片') },
             { value: 'ai', label: tr('AI 接口') },
             { value: 'site', label: tr('站点') },
           ]}
           onChange={setTab}
-          className="max-w-[420px]"
+          className="max-w-[560px]"
         />
 
         {tab === 'users' ? (
@@ -266,7 +281,7 @@ export function AdminPage() {
                   autoComplete="off"
                   className="min-w-0 flex-1 bg-transparent py-2.5 text-body-sm text-ink outline-none placeholder:text-ink-3"
                   value={query}
-                  placeholder={tr('搜索昵称或同步码')}
+                  placeholder={tr('搜索昵称、账号或同步码')}
                   onChange={(event) => setQuery(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') void load()
@@ -307,9 +322,16 @@ export function AdminPage() {
                           >
                             {user.status === 'active' ? tr('正常') : tr('已停用')}
                           </span>
+                          {user.membership.active ? (
+                            <span className="shrink-0 rounded-full bg-accent-soft px-1.5 py-0.5 text-caption text-accent">
+                              {tr('会员')}
+                            </span>
+                          ) : null}
                         </p>
-                        <p className="mt-0.5 font-mono text-caption tracking-[0.14em] text-ink-3">
-                          {user.syncCode}
+                        <p className="mt-0.5 text-caption text-ink-3">
+                          {user.username ? `@${user.username}` : tr('未设账号密码')}
+                          <span className="mx-1.5">·</span>
+                          <span className="font-mono tracking-[0.14em]">{user.syncCode}</span>
                         </p>
                       </div>
                       <span className="shrink-0 text-caption tabular-nums text-ink-3">
@@ -324,8 +346,66 @@ export function AdminPage() {
                         ? tr('最近活跃 {time}', { time: relativeTime(user.lastSeenAt) })
                         : tr('从未活跃')}
                     </p>
+                    <p className="text-caption text-ink-3">
+                      {user.membership.active
+                        ? tr('会员至 {date}', { date: formatDateCn(user.membership.expiresAt) })
+                        : tr('非会员')}
+                      {user.lastLoginAt > 0
+                        ? ` · ${tr('登录 {time}', { time: relativeTime(user.lastLoginAt) })}`
+                        : ''}
+                    </p>
+                    {user.lastIp || user.lastUserAgent ? (
+                      <p
+                        className="truncate text-caption text-ink-3"
+                        title={`${user.lastIp}\n${user.lastUserAgent}`}
+                      >
+                        {[
+                          user.lastIp,
+                          user.lastCountry,
+                          user.lastRegion,
+                          user.lastCity,
+                          user.lastColo ? `CF-${user.lastColo}` : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                        {user.lastUserAgent ? ` · ${user.lastUserAgent}` : ''}
+                      </p>
+                    ) : null}
 
                     <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        className="chip px-2.5 py-1 text-caption"
+                        onClick={async () => {
+                          try {
+                            await adminPatchUser(user.id, { membershipDays: 30 })
+                            toast(tr('已赠送 30 天会员'))
+                            void load()
+                          } catch (error) {
+                            handleError(error)
+                          }
+                        }}
+                      >
+                        <Crown size={12} />
+                        {tr('+30 天会员')}
+                      </button>
+                      {user.membership.active ? (
+                        <button
+                          type="button"
+                          className="chip px-2.5 py-1 text-caption"
+                          onClick={async () => {
+                            try {
+                              await adminPatchUser(user.id, { membershipDays: 0 })
+                              toast(tr('已取消会员'))
+                              void load()
+                            } catch (error) {
+                              handleError(error)
+                            }
+                          }}
+                        >
+                          {tr('取消会员')}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="chip px-2.5 py-1 text-caption"
@@ -374,6 +454,12 @@ export function AdminPage() {
           </section>
         ) : null}
 
+        {tab === 'codes' ? (
+          <CodesSettings onError={handleError} />
+        ) : null}
+
+        {tab === 'photos' ? <PhotosPanel onError={handleError} /> : null}
+
         {tab === 'ai' && settings ? (
           <AISettings
             settings={settings}
@@ -414,6 +500,345 @@ export function AdminPage() {
   )
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
+
+const PHOTO_PAGE = 60
+
+function PhotosPanel({ onError }: { onError: (error: unknown) => void }) {
+  const { tr } = useI18n()
+  const [offset, setOffset] = useState(0)
+  const [items, setItems] = useState<AdminPhoto[]>([])
+  const [total, setTotal] = useState(0)
+  const [bytes, setBytes] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [preview, setPreview] = useState<number | null>(null)
+
+  const load = useCallback(
+    async (nextOffset: number) => {
+      setLoading(true)
+      try {
+        const result = await adminListPhotos(PHOTO_PAGE, nextOffset)
+        setItems(result.photos)
+        setTotal(result.total)
+        setBytes(result.bytes)
+        setPreview(null)
+      } catch (error) {
+        onError(error)
+      } finally {
+        setLoading(false)
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
+
+  useEffect(() => {
+    void load(offset)
+  }, [offset, load])
+
+  const previewPhotos = items.map((photo) => ({
+    id: photo.id,
+    src: photo.url,
+    caption: `${photo.nickname || photo.username || photo.syncCode} · ${formatDateCn(photo.createdAt)} · ${formatBytes(photo.size)}`,
+  }))
+
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center gap-2">
+        <p className="min-w-0 flex-1 text-caption text-ink-3">
+          {tr('共 {n} 张照片 · {size}', { n: total, size: formatBytes(bytes) })}
+        </p>
+        <button
+          type="button"
+          className="press flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-line px-3 text-caption text-ink-2 hover:text-ink"
+          onClick={() => void load(offset)}
+          disabled={loading}
+        >
+          <ArrowClockwise size={13} />
+          {tr('刷新')}
+        </button>
+      </div>
+
+      {loading ? (
+        <SkeletonList rows={2} />
+      ) : items.length === 0 ? (
+        <div className="card">
+          <EmptyState
+            icon={<Images size={24} />}
+            title={tr('暂无云端照片')}
+            hint={tr('用户同步照片后会出现在这里。')}
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-5">
+          {items.map((photo, index) => (
+            <button
+              key={photo.id}
+              type="button"
+              onClick={() => setPreview(index)}
+              className="press group relative aspect-square overflow-hidden rounded-xl border border-line bg-surface"
+            >
+              <img
+                src={photo.url}
+                alt=""
+                loading="lazy"
+                className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+              />
+              <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2 pb-1.5 pt-5 text-left">
+                <span className="block truncate text-[11px] font-medium text-white">
+                  {photo.nickname || photo.username || photo.syncCode}
+                </span>
+                <span className="block truncate text-[10px] text-white/70">
+                  {formatDateCn(photo.createdAt)} · {formatBytes(photo.size)}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {total > PHOTO_PAGE ? (
+        <div className="flex items-center justify-center gap-3">
+          <button
+            type="button"
+            className="btn-ghost h-9 px-3 text-caption"
+            disabled={offset === 0 || loading}
+            onClick={() => setOffset(Math.max(0, offset - PHOTO_PAGE))}
+          >
+            {tr('上一页')}
+          </button>
+          <span className="text-caption tabular-nums text-ink-3">
+            {Math.floor(offset / PHOTO_PAGE) + 1} / {Math.ceil(total / PHOTO_PAGE)}
+          </span>
+          <button
+            type="button"
+            className="btn-ghost h-9 px-3 text-caption"
+            disabled={offset + PHOTO_PAGE >= total || loading}
+            onClick={() => setOffset(offset + PHOTO_PAGE)}
+          >
+            {tr('下一页')}
+          </button>
+        </div>
+      ) : null}
+
+      {preview !== null ? (
+        <Lightbox photos={previewPhotos} startIndex={preview} onClose={() => setPreview(null)} />
+      ) : null}
+    </section>
+  )
+}
+
+function CodesSettings({ onError }: { onError: (error: unknown) => void }) {
+  const toast = useToast()
+  const { tr } = useI18n()
+  const [type, setType] = useState<'membership' | 'invite'>('membership')
+  const [codes, setCodes] = useState<AdminCode[]>([])
+  const [loading, setLoading] = useState(false)
+  const [days, setDays] = useState('30')
+  const [count, setCount] = useState('5')
+  const [maxUses, setMaxUses] = useState('1')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [created, setCreated] = useState<string[]>([])
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const result = await adminListCodes(type)
+      setCodes(result.codes)
+    } catch (error) {
+      onError(error)
+    } finally {
+      setLoading(false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type])
+
+  useEffect(() => {
+    setCreated([])
+    void load()
+  }, [load])
+
+  const create = async () => {
+    setBusy(true)
+    try {
+      const result = await adminCreateCodes({
+        type,
+        count: Number(count) || 1,
+        days: type === 'membership' ? Number(days) || 30 : undefined,
+        maxUses: Number(maxUses) || 1,
+        note,
+      })
+      setCreated(result.codes)
+      toast(
+        type === 'membership'
+          ? tr('已生成 {n} 个会员码（每个 {d} 天）', { n: result.codes.length, d: result.days })
+          : tr('已生成 {n} 个邀请码', { n: result.codes.length }),
+      )
+      void load()
+    } catch (error) {
+      onError(error)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="card space-y-4 p-5">
+      <div>
+        <h2 className="flex items-center gap-1.5 text-body-sm font-semibold tracking-tight text-ink">
+          <Crown size={15} className="text-accent" />
+          {tr('会员码 / 注册邀请码')}
+        </h2>
+        <p className="mt-0.5 text-caption leading-4 text-ink-3">
+          {tr('会员码由用户在「云同步 → 会员」兑换；邀请码用于开启邀请注册后的新用户注册。')}
+        </p>
+      </div>
+
+      <SegmentedTabs
+        value={type}
+        options={[
+          { value: 'membership', label: tr('会员码') },
+          { value: 'invite', label: tr('注册邀请码') },
+        ]}
+        onChange={(value) => setType(value as 'membership' | 'invite')}
+        className="max-w-[320px]"
+      />
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {type === 'membership' ? (
+          <Field label={tr('天数')}>
+            <input
+              className="input"
+              inputMode="numeric"
+              value={days}
+              onChange={(event) => setDays(event.target.value.replace(/\D/g, ''))}
+            />
+          </Field>
+        ) : null}
+        <Field label={tr('数量')} hint={tr('最多 50')}>
+          <input
+            className="input"
+            inputMode="numeric"
+            value={count}
+            onChange={(event) => setCount(event.target.value.replace(/\D/g, ''))}
+          />
+        </Field>
+        <Field label={tr('每码可用次数')}>
+          <input
+            className="input"
+            inputMode="numeric"
+            value={maxUses}
+            onChange={(event) => setMaxUses(event.target.value.replace(/\D/g, ''))}
+          />
+        </Field>
+        <Field label={tr('备注')}>
+          <input
+            className="input"
+            autoComplete="off"
+            value={note}
+            placeholder={tr('选填')}
+            onChange={(event) => setNote(event.target.value)}
+          />
+        </Field>
+      </div>
+
+      <button type="button" className="btn-primary" onClick={create} disabled={busy}>
+        <Plus size={14} weight="bold" />
+        {busy ? tr('生成中…') : tr('生成')}
+      </button>
+
+      {created.length > 0 ? (
+        <div className="rounded-2xl bg-accent-soft/60 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-caption font-medium text-accent">{tr('本次生成（点击复制）')}</p>
+            <button
+              type="button"
+              className="press flex items-center gap-1 text-caption text-accent"
+              onClick={async () => {
+                const ok = await copyText(created.join('\n'))
+                toast(ok ? tr('已复制全部') : tr('复制失败'))
+              }}
+            >
+              <Copy size={12} />
+              {tr('复制全部')}
+            </button>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {created.map((code) => (
+              <button
+                key={code}
+                type="button"
+                className="press rounded-lg bg-surface px-2 py-1 font-mono text-body-sm tracking-[0.14em] text-ink"
+                onClick={async () => {
+                  const ok = await copyText(code)
+                  toast(ok ? tr('已复制 {code}', { code }) : tr('复制失败'))
+                }}
+              >
+                {code}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="border-t border-line pt-3">
+        <div className="flex items-center justify-between">
+          <p className="text-caption text-ink-3">{tr('最近生成')}</p>
+          {loading ? <span className="text-caption text-ink-3">{tr('加载中…')}</span> : null}
+        </div>
+        {codes.length === 0 && !loading ? (
+          <p className="mt-2 text-note text-ink-3">{tr('还没有生成过这种码。')}</p>
+        ) : (
+          <ul className="mt-2 divide-y divide-line">
+            {codes.map((item) => (
+              <li key={item.code} className="flex items-center gap-2 py-2">
+                <button
+                  type="button"
+                  className="press shrink-0 font-mono text-body-sm tracking-[0.14em] text-ink"
+                  onClick={async () => {
+                    const ok = await copyText(item.code)
+                    toast(ok ? tr('已复制 {code}', { code: item.code }) : tr('复制失败'))
+                  }}
+                >
+                  {item.code}
+                </button>
+                <span className="min-w-0 flex-1 truncate text-caption text-ink-3">
+                  {item.days ? `${item.days}${tr('天')} · ` : ''}
+                  {tr('已用 {used}/{max}', { used: item.usedCount, max: item.maxUses })}
+                  {item.note ? ` · ${item.note}` : ''}
+                  {` · ${formatDateCn(item.createdAt)}`}
+                </span>
+                <button
+                  type="button"
+                  aria-label={tr('删除')}
+                  className="press shrink-0 text-ink-3 hover:text-danger"
+                  onClick={async () => {
+                    try {
+                      await adminDeleteCode(type, item.code)
+                      toast(tr('已删除'))
+                      void load()
+                    } catch (error) {
+                      onError(error)
+                    }
+                  }}
+                >
+                  <Trash size={13} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  )
+}
+
 function AISettings({
   settings,
   onSaved,
@@ -426,6 +851,7 @@ function AISettings({
   const toast = useToast()
   const { tr } = useI18n()
   const [enabled, setEnabled] = useState(settings.ai.enabled)
+  const [membershipRequired, setMembershipRequired] = useState(settings.ai.membershipRequired)
   const [temperature, setTemperature] = useState(String(settings.ai.temperature))
   const [drafts, setDrafts] = useState<AdminEndpoint[]>(() =>
     settings.ai.endpoints.map((item) => ({ ...item })),
@@ -479,6 +905,7 @@ function AISettings({
       await adminSaveSettings({
         ai: {
           enabled,
+          membershipRequired,
           temperature: Number(temperature) || 0.6,
           endpoints: drafts.map((item) => ({
             id: item.id,
@@ -544,6 +971,33 @@ function AISettings({
           />
         </button>
       </div>
+
+      <button
+        type="button"
+        onClick={() => setMembershipRequired((value) => !value)}
+        aria-pressed={membershipRequired}
+        className="flex w-full items-center justify-between gap-3 rounded-2xl border border-line px-3 py-2.5 text-left"
+      >
+        <span className="min-w-0">
+          <span className="block text-body-sm font-medium text-ink">{tr('AI 需要会员')}</span>
+          <span className="mt-0.5 block text-caption leading-4 text-ink-3">
+            {tr('开启后，只有会员可以使用 AI；关闭则所有登录用户可用。')}
+          </span>
+        </span>
+        <span
+          className={cn(
+            'relative h-6 w-11 shrink-0 rounded-full transition-colors',
+            membershipRequired ? 'bg-accent' : 'bg-paper-2',
+          )}
+        >
+          <span
+            className={cn(
+              'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all',
+              membershipRequired ? 'left-[22px]' : 'left-0.5',
+            )}
+          />
+        </span>
+      </button>
 
       <div className="space-y-2">
         {drafts.map((item) => (
@@ -729,8 +1183,9 @@ function SiteSettings({
   const toast = useToast()
   const { tr } = useI18n()
   const [name, setName] = useState(settings.site.name)
+  const [inviteRequired, setInviteRequired] = useState(settings.registration.inviteRequired)
   const [password, setPassword] = useState('')
-  const [busy, setBusy] = useState<'site' | 'password' | null>(null)
+  const [busy, setBusy] = useState<'site' | 'invite' | 'password' | null>(null)
 
   return (
     <div className="space-y-3">
@@ -764,6 +1219,52 @@ function SiteSettings({
           }}
         >
           {busy === 'site' ? tr('保存中…') : tr('保存')}
+        </button>
+      </section>
+
+      <section className="card space-y-4 p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-body-sm font-semibold tracking-tight text-ink">{tr('注册设置')}</h2>
+            <p className="mt-0.5 text-caption leading-4 text-ink-3">
+              {tr('开启后，新用户注册必须填写「会员码 / 邀请码」页生成的邀请码。')}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setInviteRequired((value) => !value)}
+            aria-pressed={inviteRequired}
+            className={cn(
+              'press relative h-6 w-11 shrink-0 rounded-full transition-colors',
+              inviteRequired ? 'bg-accent' : 'bg-paper-2',
+            )}
+          >
+            <span
+              className={cn(
+                'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all',
+                inviteRequired ? 'left-[22px]' : 'left-0.5',
+              )}
+            />
+          </button>
+        </div>
+        <button
+          type="button"
+          className="btn-primary"
+          disabled={busy !== null}
+          onClick={async () => {
+            setBusy('invite')
+            try {
+              await adminSaveSettings({ registration: { inviteRequired } })
+              toast(inviteRequired ? tr('已开启邀请注册') : tr('已关闭邀请注册'))
+              onSaved()
+            } catch (error) {
+              onError(error)
+            } finally {
+              setBusy(null)
+            }
+          }}
+        >
+          {busy === 'invite' ? tr('保存中…') : tr('保存注册设置')}
         </button>
       </section>
 

@@ -38,6 +38,8 @@ export interface Photo {
   id: string
   src: string
   caption?: string
+  /** 已上传到 R2 的云照片 id；src 为云端地址时存在 */
+  cloudId?: string
 }
 
 export interface Moment {
@@ -128,6 +130,9 @@ export interface Profile {
   nickname: string
   avatar: string
   createdAt: number
+  /** 参与云端同步的更新时间；旧数据可能没有 */
+  updatedAt?: number
+  syncState?: number
 }
 
 export interface AppStats {
@@ -173,6 +178,7 @@ export type View =
   | { name: 'footprintEditor' }
   | { name: 'planEditor'; tripId: string; planId?: string; dayIndex?: number }
   | { name: 'sync' }
+  | { name: 'about' }
   | { name: 'admin' }
 
 export interface SearchResult {

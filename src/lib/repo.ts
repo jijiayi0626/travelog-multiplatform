@@ -17,6 +17,7 @@ import type {
   TripView,
 } from './types'
 import { clearStore, deleteOne, getAll, getOne, putOne, type StoreName } from './db'
+import { isRemotePhoto, mergeMomentPhotos } from './photo-utils'
 import {
   CATEGORY_ORDER,
   clockToMinutes,
@@ -600,13 +601,25 @@ export async function removeMember(id: string): Promise<void> {
 export async function getProfile(): Promise<Profile> {
   const existing = await getOne<Profile>('profile', 'local-user')
   if (existing) return existing
-  const profile: Profile = { id: 'local-user', nickname: '陈行舟', avatar: '', createdAt: Date.now() }
+  const now = Date.now()
+  const profile: Profile = {
+    id: 'local-user',
+    nickname: '陈行舟',
+    avatar: '',
+    createdAt: now,
+    updatedAt: now,
+  }
   await putOne('profile', profile)
   return profile
 }
 
 export async function saveProfile(profile: Profile): Promise<Profile> {
-  const next: Profile = { ...profile, id: profile.id || 'local-user' }
+  const next: Profile = {
+    ...profile,
+    id: profile.id || 'local-user',
+    updatedAt: Date.now(),
+    syncState: 1,
+  }
   await putOne('profile', next)
   return next
 }
@@ -965,17 +978,37 @@ export interface SyncEntity {
   deleted?: boolean
 }
 
+/** 云端只同步 R2 地址；本地 data URL 照片上传完成前不写入 D1（避免撑爆单行 2MB 限制） */
+function stripLocalOnly(kind: SyncKind, data: unknown): unknown {
+  if (kind !== 'moments' || !data || typeof data !== 'object') return data
+  const moment = data as Record<string, unknown>
+  if (!Array.isArray(moment.photos)) return data
+  return { ...moment, photos: moment.photos.filter(isRemotePhoto) }
+}
+
 /**
  * 以云端为准全量覆盖本地（登录后首次同步用）。
  * 不做 LWW 比较，直接清空后写入；调用方需保证 entities 非空。
  */
 export async function replaceAllWithRemote(entities: SyncEntity[]): Promise<number> {
+  // 本机还没上传的照片：清空前记下，覆盖后合并回去（data URL 继续保留，等待上传）
+  const localPhotos = new Map<string, unknown>()
+  const localMoments = await getAll<{ id: string; photos?: unknown }>('moments')
+  for (const moment of localMoments) {
+    if (Array.isArray(moment.photos) && moment.photos.length > 0) {
+      localPhotos.set(moment.id, moment.photos)
+    }
+  }
   for (const kind of SYNC_KINDS) await clearStore(kind)
   await clearStore('tombstones')
   let applied = 0
   for (const entity of entities) {
     if (entity.deleted || !entity.data || typeof entity.data !== 'object') continue
-    await putOne(entity.kind, entity.data as { id: string })
+    let data = entity.data as { id: string; photos?: unknown }
+    if (entity.kind === 'moments') {
+      data = { ...data, photos: mergeMomentPhotos(data.photos, localPhotos.get(data.id)) }
+    }
+    await putOne(entity.kind, data)
     applied += 1
   }
   return applied
@@ -990,7 +1023,7 @@ export async function exportAllEntities(): Promise<SyncEntity[]> {
       out.push({
         kind,
         id: row.id,
-        data: row,
+        data: stripLocalOnly(kind, row),
         updatedAt: row.updatedAt ?? row.createdAt ?? Date.now(),
       })
     }
@@ -1013,7 +1046,7 @@ export async function applyRemoteEntities(
     if (!SYNC_KINDS.includes(entity.kind)) continue
 
     // 本地优先：本地更新时间更新时不接受远程版本，避免刚编辑/AI 生成的内容被旧数据覆盖
-    const local = await getOne<{ updatedAt?: number }>(entity.kind, entity.id)
+    const local = await getOne<{ updatedAt?: number; photos?: unknown }>(entity.kind, entity.id)
     const localAt = local?.updatedAt ?? 0
 
     if (entity.deleted) {
@@ -1025,7 +1058,12 @@ export async function applyRemoteEntities(
     }
     if (entity.data && typeof entity.data === 'object') {
       if (local && localAt > entity.updatedAt) continue
-      await putOne(entity.kind, entity.data as { id: string })
+      let data = entity.data as { id: string; photos?: unknown }
+      if (entity.kind === 'moments') {
+        // 云端照片优先，同时保留本机尚未上传的 data URL
+        data = { ...data, photos: mergeMomentPhotos(data.photos, local?.photos) }
+      }
+      await putOne(entity.kind, data)
       applied++
     }
   }

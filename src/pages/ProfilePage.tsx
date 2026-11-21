@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
-  ArrowClockwise,
-  ArrowCounterClockwise,
+  BookOpen,
   CaretRight,
   CloudSlash,
   DownloadSimple,
-  GearSix,
   Images,
+  Info,
   Translate,
   MapPinLine,
   Sparkle,
@@ -18,7 +17,7 @@ import {
   UploadSimple,
 } from '@phosphor-icons/react'
 import type { AppStats, Profile } from '../lib/types'
-import { exportAll, getProfile, importAll, resetAll, saveProfile, stats } from '../lib/repo'
+import { exportAll, getProfile, importAll, saveProfile, stats } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
 import { useI18n, useNav, useRefresh, useToast } from '../lib/app-context'
 import { ACCENTS, type AccentName, currentTheme, getAccent, setAccent, setThemeMode } from '../lib/theme'
@@ -27,6 +26,14 @@ import { getBestFix, isNative, shareTextFile } from '../lib/native'
 import { ensureExactAlarmPermission, ensureNotificationPermission } from '../lib/reminder'
 import { isSignedIn, saveCloudConfig, updateAccountNickname } from '../lib/cloud'
 import {
+  getActiveAIJobs,
+  getAIJobs,
+  getUnreadAIJobs,
+  subscribeAIJobs,
+  type AIJob,
+} from '../lib/ai-jobs'
+import { openOnboarding } from '../lib/onboarding'
+import {
   getAutoCheckinSettings,
   getAutoCheckinStatus,
   setAutoCheckinSettings,
@@ -34,7 +41,7 @@ import {
   stopAutoCheckin,
 } from '../lib/autocheckin'
 import { cn } from '../lib/cn'
-import { Avatar, ConfirmDialog, Field, Sheet, StatTile } from '../components/ui'
+import { Avatar, Field, Sheet, StatTile } from '../components/ui'
 
 const EMPTY_STATS: AppStats = {
   tripCount: 0,
@@ -69,15 +76,20 @@ export function ProfilePage() {
   const [nickname, setNickname] = useState('')
   // 中文输入法下 React state 可能滞后，保存时以输入框实际值为准
   const nicknameRef = useRef<HTMLInputElement>(null)
-  const [confirmReset, setConfirmReset] = useState(false)
   const [autoCheckin, setAutoCheckin] = useState(() => getAutoCheckinSettings())
   const [checkinStatus, setCheckinStatus] = useState(() => getAutoCheckinStatus())
   const signedIn = isSignedIn()
   const [importing, setImporting] = useState(false)
+  const [aiJobs, setAIJobs] = useState<AIJob[]>(() => getAIJobs())
 
   useEffect(() => {
     if (data.profile) setNickname(data.profile.nickname)
   }, [data.profile])
+
+  useEffect(() => subscribeAIJobs(setAIJobs), [])
+
+  const aiActive = getActiveAIJobs(aiJobs)
+  const aiUnread = getUnreadAIJobs(aiJobs)
 
   // 开启后每 2 秒刷新一次诊断信息，方便确认到底卡在定位还是匹配
   useEffect(() => {
@@ -156,12 +168,6 @@ export function ProfilePage() {
     } catch (error) {
       toast(`保存失败：${error instanceof Error ? error.message : '请稍后重试'}`)
     }
-  }
-
-  const doReset = async () => {
-    await resetAll()
-    bump()
-    toast('已恢复示例数据')
   }
 
   const doExport = async () => {
@@ -278,11 +284,31 @@ export function ProfilePage() {
           value={data.stats.pendingSync > 0 ? `${data.stats.pendingSync} 条待同步` : '未连接云端'}
           onClick={() => nav.navigate({ name: 'sync' })}
         />
+        {signedIn && aiJobs.length > 0 ? (
+          <SettingRow
+            icon={<Sparkle size={17} />}
+            title={tr('AI 任务')}
+            value={
+              aiActive.length > 0
+                ? tr('生成中 {n}', { n: aiActive.length })
+                : aiUnread.length > 0
+                  ? tr('{n} 条新结果', { n: aiUnread.length })
+                  : tr('{n} 条记录', { n: aiJobs.length })
+            }
+            onClick={() => window.dispatchEvent(new Event('travelog:ai-open'))}
+          />
+        ) : null}
         <SettingRow
-          icon={<GearSix size={17} />}
-          title={tr('管理面板')}
-          value={tr('用户、AI 接口与站点设置')}
-          onClick={() => nav.navigate({ name: 'admin' })}
+          icon={<Info size={17} />}
+          title={tr('关于旅记')}
+          value={`v${__APP_VERSION__}`}
+          onClick={() => nav.navigate({ name: 'about' })}
+        />
+        <SettingRow
+          icon={<BookOpen size={17} />}
+          title={tr('新手引导')}
+          value={tr('再看一遍')}
+          onClick={() => openOnboarding()}
         />
         <div className="flex w-full items-center gap-3 border-b border-line px-4 py-3.5">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-ink-2">
@@ -391,23 +417,6 @@ export function ProfilePage() {
           onClick={() => nav.navigate({ name: 'sync' })}
         />
         <SettingRow
-          icon={<ArrowClockwise size={17} />}
-          title={tr('强制更新')}
-          value={tr('清除缓存并重新加载')}
-          onClick={async () => {
-            try {
-              const regs = navigator.serviceWorker ? await navigator.serviceWorker.getRegistrations() : []
-              await Promise.all(regs.map((item) => item.unregister()))
-              const keys = await caches.keys()
-              await Promise.all(keys.map((key) => caches.delete(key)))
-              toast(tr('缓存已清除，正在重新加载'))
-              window.setTimeout(() => window.location.reload(), 600)
-            } catch {
-              window.location.reload()
-            }
-          }}
-        />
-        <SettingRow
           icon={<Translate size={17} />}
           title={lang === 'zh' ? '语言' : 'Language'}
           value={lang === 'zh' ? '中文' : 'English'}
@@ -446,12 +455,6 @@ export function ProfilePage() {
           title={importing ? t('common.loading') : t('profile.import')}
           value="JSON"
           onClick={() => fileRef.current?.click()}
-        />
-        <SettingRow
-          icon={<ArrowCounterClockwise size={17} />}
-          title="恢复示例数据"
-          value="清空本地数据"
-          onClick={() => setConfirmReset(true)}
         />
       </section>
 
@@ -501,15 +504,6 @@ export function ProfilePage() {
           </Field>
         </div>
       </Sheet>
-
-      <ConfirmDialog
-        open={confirmReset}
-        title="恢复示例数据？"
-        message="本机上现有的旅行、日程、记录与账目都会被替换为最初的示例内容。建议先导出备份。"
-        confirmText="恢复"
-        onClose={() => setConfirmReset(false)}
-        onConfirm={doReset}
-      />
     </div>
   )
 }

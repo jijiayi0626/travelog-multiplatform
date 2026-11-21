@@ -1,8 +1,9 @@
 import { aiComplete, isSignedIn } from './cloud'
+import { runAIJob } from './ai-jobs'
 import type { ExpenseCategory, PlanKind } from './types'
 
 export class AIUnavailableError extends Error {
-  constructor(message = 'AI 不可用：请先在「云同步」登录，并让服务端配置 Workers AI 或 OPENAI_API_KEY') {
+  constructor(message = 'AI 不可用：请先在「云同步」登录，并确认服务端已配置 AI 接口') {
     super(message)
   }
 }
@@ -34,8 +35,14 @@ export async function polishMoment(
     .filter(Boolean)
     .join('\n')
 
-  const result = await aiComplete(prompt, system, 0.7)
-  const text = result.text.replace(/^["“']|["”']$/g, '').trim()
+  const job = await runAIJob({
+    kind: 'polish',
+    label: '润色游记',
+    system,
+    prompt,
+    temperature: 0.7,
+  })
+  const text = job.result.replace(/^["“']|["”']$/g, '').trim()
   if (!text) throw new Error('AI 没有返回内容，稍后再试')
   return text
 }
@@ -75,8 +82,14 @@ export async function generatePlan(input: {
     .filter(Boolean)
     .join('\n')
 
-  const result = await aiComplete(prompt, PLAN_SYSTEM, 0.5)
-  const raw = result.text
+  const job = await runAIJob({
+    kind: 'plan',
+    label: '生成行程',
+    system: PLAN_SYSTEM,
+    prompt,
+    temperature: 0.5,
+  })
+  const raw = job.result
   const start = raw.indexOf('{')
   const end = raw.lastIndexOf('}')
   if (start < 0 || end <= start) throw new Error('AI 返回格式不正确，稍后再试')
@@ -133,8 +146,14 @@ export async function guessCategory(note: string, amount?: number): Promise<Expe
 export async function suggestTripNote(destination: string, days: number): Promise<string> {
   ensureReady()
   const system = '你是中文旅行编辑。写一句 20–36 字的旅程开场白，克制、有画面、不用感叹号。只输出这一句。'
-  const result = await aiComplete(`目的地：${destination}\n天数：${days} 天`, system, 0.8)
-  return result.text.replace(/^["“']|["”']$/g, '').trim()
+  const job = await runAIJob({
+    kind: 'trip_note',
+    label: '生成旅程开场白',
+    system,
+    prompt: `目的地：${destination}\n天数：${days} 天`,
+    temperature: 0.8,
+  })
+  return job.result.replace(/^["“']|["”']$/g, '').trim()
 }
 
 /* ---------------- 行李清单 ---------------- */
@@ -162,8 +181,14 @@ export async function generatePackingList(input: {
     .filter(Boolean)
     .join('\n')
 
-  const result = await aiComplete(prompt, PACKING_SYSTEM, 0.4)
-  const raw = result.text
+  const job = await runAIJob({
+    kind: 'packing',
+    label: '生成打包清单',
+    system: PACKING_SYSTEM,
+    prompt,
+    temperature: 0.4,
+  })
+  const raw = job.result
   const start = raw.indexOf('{')
   const end = raw.lastIndexOf('}')
 
@@ -204,8 +229,14 @@ export async function answerTripQuestion(context: string, question: string): Pro
   const system =
     '你是旅行数据助理。只根据用户给出的旅程数据回答，数据里没有的信息就明确说"数据里没有这项信息"，不要编造。' +
     '用简体中文回答，两三句话，能带数字就带数字，不要用 Markdown 列表。'
-  const result = await aiComplete(`旅程数据：\n${context}\n\n问题：${question}`, system, 0.3)
-  const text = result.text.trim()
+  const job = await runAIJob({
+    kind: 'qa',
+    label: '旅行问答',
+    system,
+    prompt: `旅程数据：\n${context}\n\n问题：${question}`,
+    temperature: 0.3,
+  })
+  const text = job.result.trim()
   if (!text) throw new Error('AI 没有返回内容，稍后再试')
   return text
 }
@@ -238,8 +269,14 @@ export async function summarizeYear(input: {
   ]
     .filter(Boolean)
     .join('\n')
-  const result = await aiComplete(prompt, system, 0.7)
-  const text = result.text.replace(/^["“']|["”']$/g, '').trim()
+  const job = await runAIJob({
+    kind: 'recap',
+    label: '生成年度回顾',
+    system,
+    prompt,
+    temperature: 0.7,
+  })
+  const text = job.result.replace(/^["“']|["”']$/g, '').trim()
   if (!text) throw new Error('AI 没有返回内容，稍后再试')
   return text
 }

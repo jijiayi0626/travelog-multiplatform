@@ -13,7 +13,7 @@ run_worker_first = ["/api/*"]
 [[d1_databases]]
 binding = "DB"
 database_name = "travelog"
-database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
+database_id = "21cce9d3-6418-46d0-90ce-31f8ec5ad827"
 
 [ai]
 binding = "AI"
@@ -21,8 +21,13 @@ binding = "AI"
 [vars]
 CORS_ORIGIN = "*"
 SITE_NAME = "旅记 Travelog"
-# 管理面板首次登录的引导口令：登录后立即在面板里改掉，然后删除此变量并重新部署
-ADMIN_USER = "admin"
-ADMIN_TOKEN = "change-me-now"
+# 管理员账号已写入 D1 settings（admin.username / admin.password），
+# 不再在此处保存明文口令；如需初始化新库，临时设置 ADMIN_USER/ADMIN_TOKEN，
+# 登录管理面板后立即修改口令并删除这两个变量。
 
 # AI 配置不写在这里：登录管理面板 →「AI 接口」填写，保存在 D1 的 settings 表。
+
+# 照片文件存 R2，D1 只存索引与访问密钥
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "travelog-photos"

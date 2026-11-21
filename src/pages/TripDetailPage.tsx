@@ -1116,14 +1116,14 @@ function PlanTab({
             className="btn-primary w-full"
             disabled={aiBusy}
             onClick={async () => {
+              // AI 已改为后台任务，提交后立即收起遮罩，用户可以离开此页
+              setAiOpen(false)
               setAiBusy(true)
               try {
                 await onAIPlan(aiStyle)
               } catch (error) {
                 toast(error instanceof Error ? error.message : tr('生成失败'))
               } finally {
-                // 无论成功还是失败都要关闭，否则遮罩会一直盖住页面
-                setAiOpen(false)
                 setAiBusy(false)
               }
             }}
@@ -1132,7 +1132,7 @@ function PlanTab({
             {aiBusy ? tr('生成中…') : tr('生成行程')}
           </button>
           <p className="text-caption leading-4 text-ink-3">
-            {tr('需要先在「我的 → 云同步」登录，并由服务端配置 Workers AI 或 OpenAI 密钥。')}
+            {tr('提交后会在后台生成，可以离开此页面，完成后在右上角查看。')}
           </p>
         </div>
       </Sheet>

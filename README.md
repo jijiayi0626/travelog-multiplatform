@@ -9,13 +9,16 @@
 | 行程 | 旅行列表、**列表 / 日历双视图**、封面、状态（计划中 / 进行中 / 已结束）、筛选与排序、模板新建、日期区间与天数、预算与多币种 |
 | 日程 | 按天排程：时间、类型（交通 / 游玩 / 用餐 / 住宿 / 购物）、地点、备注；勾选完成、上下移动、每日密度条、下一步提示、4 套模板 |
 | 回忆 | 首页「往年今日」横滑卡片，不足时用最近 30 天记录补齐 |
-| 时间线 | 按天归组的图文记录，文字 + 最多 9 张照片（本地压缩后保存）、标签、灯箱翻页 |
-| 相册 | 跨旅程照片聚合，按旅程 / 按时间分组，灯箱左右翻页与单张下载 |
-| 足迹 | 地点打卡、浏览器定位、城市统计、星图可视化、**中国地图三层下钻**（全国 → 省 → 市 → 区县，右下角含南海诸岛小图）、**照片 EXIF 自动定位**、**自动打卡**（进入半径内自动补足迹）、点击跳转地图查看坐标、删除 |
-| 云同步 | 同步码注册 / 登录、游标增量拉取、LWW 冲突合并、墓碑删除、写操作后自动同步 |
-| 部署 | **前后端同一个 Cloudflare Worker**：`[assets]` 托管 `dist`，`/api/*` 走 Worker，一条 `wrangler deploy` 同时上线前端与接口（见 [`server/README.md`](server/README.md)） |
-| 管理面板 | `#/admin`：用户管理（停用/启用、重置同步码、删除）、**AI 接口在线配置**（存 D1，改完即时生效）、站点名称与管理员口令 |
-| AI | 游记润色、按目的地生成逐日行程、记账自动分类；走服务端代理，支持 Workers AI 或 OpenAI |
+| 时间线 | 按天归组的图文记录，文字 + 最多 9 张照片（本地压缩，登录后自动上传到 R2）、标签、灯箱翻页 |
+| 相册 | 跨旅程照片聚合，按旅程 / 按时间分组，灯箱左右翻页与单张下载；云端照片离线可看 |
+| 足迹 | 地点打卡、浏览器定位并反查**区县 / 街道**（可手动改）、城市统计、星图可视化、**中国地图三层下钻**（全国 → 省 → 市 → 区县，右下角含南海诸岛小图）、**照片 EXIF 自动定位**、**自动打卡**（进入半径内自动补足迹，优先记录区县 / 街道）、点击跳转地图查看坐标、删除 |
+| 云同步 | 账号密码注册 / 登录（多设备同时在线）、同步码兼容登录、复合游标增量拉取（同毫秒不丢实体）、LWW 冲突合并、push 返回真实写入数、墓碑删除、照片上传 R2 后同步地址、写操作后自动同步 |
+| 部署 | **前后端同一个 Cloudflare Worker**：`[assets]` 托管 `dist`，`/api/*` 走 Worker，D1 存数据、R2 存照片，一条 `wrangler deploy` 同时上线前端与接口（见 [`server/README.md`](server/README.md)） |
+| 管理面板 | `#/admin`（入口在「我的 → 关于旅记 → 开发者模式」）：用户管理（会员、IP / 地区 / 浏览器、停用/启用、重置同步码、删除）、**会员码与注册邀请码**、**云端照片墙**（按用户查看、灯箱预览）、**AI 接口在线配置**（存 D1，改完即时生效，可开关「AI 需要会员」）、站点名称、邀请注册开关与管理员口令 |
+| 会员 | 会员码兑换与到期时间累加；管理面板可直接赠送 / 取消；「AI 需要会员」可在后台开关 |
+| 关于 / 开发者模式 | 版本与构建信息、**检查更新 / 立即更新**、新手引导回放入口；连续点击版本号 7 次解锁开发者模式，管理面板与恢复默认只在该模式下显示 |
+| 新手引导 | 首次打开自动展示 5 步引导（入口、记录、同步、会员），可跳过或从「我的 / 关于」重新打开 |
+| AI | 游记润色、逐日行程、打包清单、旅行问答、年度回顾与记账分类；**后台异步执行**，可离开页面，完成后右上角提醒，也可从「我的 → AI 任务」查看；支持会员专享开关；走服务端代理，支持 Workers AI 或 OpenAI |
 | 提醒 | 日程开始前 5 / 15 / 30 / 60 分钟本地通知（Capacitor Local Notifications，Web 降级） |
 | 多语言 | 中文 / English 一键切换，覆盖导航、页面、空态、表单与提示 |
 | 账本 | 金额 / 分类 / 备注 / 日期 / 币种，分类占比环形图、近 6 个月柱状图、CSV 导出、**「再来一笔」快捷填充** |
@@ -98,12 +101,12 @@ npm run preview    # 本地预览生产构建
 
 ## 下载 APK
 
-由 GitHub Actions（`ubuntu-24.04` / x86_64）自动构建，产物见 [Releases · v1.9.0](https://github.com/jijiayi0626/travelog-multiplatform/releases/tag/v1.9.0)：
+由 GitHub Actions（`ubuntu-24.04` / x86_64）自动构建，产物见 [Releases · v2.0.0](https://github.com/jijiayi0626/travelog-multiplatform/releases/tag/v2.0.0)：
 
-- [Debug APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v1.9.0/travelog-1.9.0-debug.apk)（约 4 MB，可直接安装）
-- [Release APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v1.9.0/travelog-1.9.0-release.apk)（约 3 MB，CI 临时签名，正式发布请换成自有 keystore）
+- [Debug APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v2.0.0/travelog-2.0.0-debug.apk)（约 4 MB，可直接安装）
+- [Release APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v2.0.0/travelog-2.0.0-release.apk)（约 3 MB，CI 临时签名，正式发布请换成自有 keystore）
 
-包名 `com.travellog.app`，minSdk 23 / targetSdk 35，versionCode 33 / versionName 1.9.0。应用为 WebView + Java 实现，**不含 native 库**，单个 APK 兼容 `arm64-v8a` / `armeabi-v7a` / `x86_64`。
+包名 `com.travellog.app`，minSdk 23 / targetSdk 35，versionCode 34 / versionName 2.0.0。应用为 WebView + Java 实现，**不含 native 库**，单个 APK 兼容 `arm64-v8a` / `armeabi-v7a` / `x86_64`。
 
 ### 自动构建
 
@@ -174,5 +177,5 @@ npm run ios:open
 ## 已知边界
 
 - 地图：打卡保存坐标，点击后在系统浏览器打开 OpenStreetMap；如需应用内嵌地图，可接 Map Kit、Google Maps 或 Leaflet。
-- 相册：使用 `<input type="file">`，照片在本地压缩为 JPEG 后存储（单张约 100–300 KB）；Capacitor 可后续替换为原生相机插件。
-- 定位：使用浏览器 Geolocation，需要 HTTPS 与用户授权；失败时可手动填写地点。
+- 相册：使用 `<input type="file">`，照片先在本地压缩为 JPEG（单张约 100–300 KB）；登录云同步后自动上传到 R2，其它设备通过带访问密钥的地址读取，离线时由 Service Worker 缓存兜底。Capacitor 可后续替换为原生相机插件。
+- 定位：使用浏览器 Geolocation，需要 HTTPS 与用户授权；拿到坐标后通过 Worker 代理的 OpenStreetMap Nominatim 反查区县 / 街道并自动填入地点名称和城市，识别不准时可以点候选、搜索周边地点或直接手动修改；失败时仍可手动填写地点。

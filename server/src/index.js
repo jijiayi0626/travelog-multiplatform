@@ -16,7 +16,9 @@ const ADMIN_KEYS = [
   'admin.password',
   'admin.token',
   'site.name',
+  'registration.invite_required',
   'ai.enabled',
+  'ai.membership_required',
   'ai.endpoints',
   'ai.provider',
   'ai.openaiKey',
@@ -27,9 +29,10 @@ const ADMIN_KEYS = [
 ]
 
 class HttpError extends Error {
-  constructor(status, message) {
+  constructor(status, message, code) {
     super(message)
     this.status = status
+    this.code = code
   }
 }
 
@@ -88,6 +91,152 @@ async function hashPassword(password, salt) {
   return [...new Uint8Array(bits)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
+/* ---------------- 账号 / 风控 / 审计 ---------------- */
+
+const USERNAME_RE = /^[\p{L}\p{N}_.-]{2,24}$/u
+
+function normalizeUsername(raw) {
+  const username = String(raw || '').trim()
+  if (!USERNAME_RE.test(username)) {
+    throw new HttpError(400, '账号需为 2–24 位字母、数字、汉字或 _ . -')
+  }
+  return username
+}
+
+function checkPassword(password) {
+  const value = String(password || '')
+  if (value.length < 6) throw new HttpError(400, '密码至少 6 位')
+  if (value.length > 128) throw new HttpError(400, '密码过长')
+  return value
+}
+
+/** 客户端信息：IP、浏览器、Cloudflare 地区，用于登录审计 */
+function clientInfo(request) {
+  const cf = request.cf || {}
+  const forwarded = (request.headers.get('x-forwarded-for') || '').split(',')[0].trim()
+  return {
+    ip: request.headers.get('cf-connecting-ip') || forwarded || '',
+    userAgent: (request.headers.get('user-agent') || '').slice(0, 300),
+    country: cf.country || '',
+    region: cf.region || cf.regionCode || '',
+    city: cf.city || '',
+    colo: cf.colo || '',
+    asn: Number(cf.asn) || 0,
+  }
+}
+
+function bucketKey(request, prefix) {
+  return `${prefix}:${clientInfo(request).ip || 'unknown'}`
+}
+
+/** D1 固定窗口限流：超限抛 429 */
+async function rateLimit(env, bucket, limit, windowSec, message) {
+  const now = Date.now()
+  const row = await env.DB.prepare('SELECT count, reset_at FROM rate_limits WHERE bucket = ?')
+    .bind(bucket)
+    .first()
+  if (!row || row.reset_at <= now) {
+    const resetAt = now + windowSec * 1000
+    await env.DB.prepare(
+      `INSERT INTO rate_limits (bucket, count, reset_at) VALUES (?, 1, ?)
+       ON CONFLICT (bucket) DO UPDATE SET count = 1, reset_at = excluded.reset_at`,
+    )
+      .bind(bucket, resetAt)
+      .run()
+    return
+  }
+  if (row.count >= limit) {
+    throw new HttpError(429, message || '操作太频繁，请稍后再试')
+  }
+  await env.DB.prepare('UPDATE rate_limits SET count = count + 1 WHERE bucket = ?').bind(bucket).run()
+}
+
+/** 记录登录/注册活动；顺带低频清理过期限流与 180 天前审计 */
+async function logActivity(env, request, userId, kind) {
+  const info = clientInfo(request)
+  await env.DB.prepare(
+    `INSERT INTO user_activity (user_id, kind, ip, user_agent, country, region, city, colo, asn, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(userId, kind, info.ip, info.userAgent, info.country, info.region, info.city, info.colo, info.asn, Date.now())
+    .run()
+  if (Math.random() < 0.05) {
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM rate_limits WHERE reset_at < ?').bind(Date.now() - 864e5),
+      env.DB.prepare('DELETE FROM user_activity WHERE created_at < ?').bind(Date.now() - 180 * 864e5),
+    ]).catch(() => {})
+  }
+}
+
+async function getMembership(env, userId) {
+  const row = await env.DB.prepare('SELECT expires_at FROM user_membership WHERE user_id = ?')
+    .bind(userId)
+    .first()
+  return membershipPayload(row?.expires_at)
+}
+
+function membershipPayload(expiresAt) {
+  const expires = Number(expiresAt) || 0
+  return { active: expires > Date.now(), expiresAt: expires }
+}
+
+/** 签发多设备令牌，并兼容旧版单 token 字段 */
+async function issueUserToken(env, userId) {
+  const token = randomToken()
+  const now = Date.now()
+  // 升级前的老设备可能只在 users.token 里保存令牌，先迁移到 user_tokens 再换新，
+  // 这样在新设备登录不会把老设备顶下线。
+  const previous = await env.DB.prepare('SELECT token FROM users WHERE id = ?').bind(userId).first()
+  const statements = []
+  if (previous?.token) {
+    statements.push(
+      env.DB.prepare(
+        'INSERT OR IGNORE INTO user_tokens (token, user_id, created_at, last_seen_at) VALUES (?, ?, ?, ?)',
+      ).bind(previous.token, userId, now, now),
+    )
+  }
+  statements.push(
+    env.DB.prepare('INSERT INTO user_tokens (token, user_id, created_at, last_seen_at) VALUES (?, ?, ?, ?)')
+      .bind(token, userId, now, now),
+    env.DB.prepare('UPDATE users SET token = ? WHERE id = ?').bind(token, userId),
+  )
+  await env.DB.batch(statements)
+  return token
+}
+
+async function registrationSettings(env) {
+  const row = await env.DB.prepare(
+    "SELECT value FROM settings WHERE key = 'registration.invite_required'",
+  )
+    .first()
+  return { inviteRequired: row?.value === '1' }
+}
+
+/** 校验并消费注册邀请码；开启强制邀请时无码直接拒绝 */
+async function consumeInviteCode(env, rawCode, required) {
+  const code = String(rawCode || '').trim().toUpperCase()
+  if (!code) {
+    if (required) throw new HttpError(403, '本站开启了邀请注册，请填写邀请码')
+    return null
+  }
+  const row = await env.DB.prepare(
+    'SELECT code, max_uses, used_count, disabled, created_at FROM invite_codes WHERE code = ?',
+  )
+    .bind(code)
+    .first()
+  if (!row || row.disabled || row.used_count >= row.max_uses) {
+    throw new HttpError(403, '邀请码无效或已用完')
+  }
+  const result = await env.DB.prepare(
+    `UPDATE invite_codes SET used_count = used_count + 1
+     WHERE code = ? AND disabled = 0 AND used_count < max_uses`,
+  )
+    .bind(code)
+    .run()
+  if (!result.meta?.changes) throw new HttpError(403, '邀请码无效或已用完')
+  return code
+}
+
 /* ---------------- settings ---------------- */
 
 async function getSetting(env, key) {
@@ -137,6 +286,7 @@ async function requireAdmin(request, env) {
 }
 
 async function handleAdminLogin(request, env) {
+  await rateLimit(env, bucketKey(request, 'admin-login'), 15, 900, '登录尝试过于频繁，请 15 分钟后再试')
   await adminBootstrap(env)
   const body = await readJSON(request)
   const username = String(body.username || '').trim()
@@ -169,13 +319,16 @@ async function handleAdminPassword(request, env) {
 
 async function handleAdminOverview(request, env) {
   await requireAdmin(request, env)
-  const [users, active7, entities, settings] = await Promise.all([
+  const now = Date.now()
+  const [users, active7, entities, members, settings, photos] = await Promise.all([
     env.DB.prepare('SELECT COUNT(*) AS n FROM users').first(),
     env.DB.prepare(`SELECT COUNT(*) AS n FROM user_meta WHERE last_seen_at > ? AND status = 'active'`)
-      .bind(Date.now() - 7 * 864e5)
+      .bind(now - 7 * 864e5)
       .first(),
     env.DB.prepare('SELECT COUNT(*) AS n FROM entities WHERE deleted = 0').first(),
-    getSettings(env, ['site.name', 'ai.enabled', 'ai.provider', 'ai.openaiModel', 'ai.workersModel']),
+    env.DB.prepare('SELECT COUNT(*) AS n FROM user_membership WHERE expires_at > ?').bind(now).first(),
+    getSettings(env, ['site.name', 'ai.enabled', 'ai.provider', 'ai.openaiModel', 'ai.workersModel', 'registration.invite_required']),
+    env.DB.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS bytes FROM photos').first(),
   ])
   return json(
     {
@@ -183,13 +336,16 @@ async function handleAdminOverview(request, env) {
       users: users?.n ?? 0,
       active7Days: active7?.n ?? 0,
       entities: entities?.n ?? 0,
+      members: members?.n ?? 0,
+      photos: { count: photos?.n ?? 0, bytes: photos?.bytes ?? 0 },
+      registration: { inviteRequired: settings['registration.invite_required'] === '1' },
       ai: {
         enabled: settings['ai.enabled'] !== '0',
         provider: settings['ai.provider'] || (env.OPENAI_API_KEY ? 'openai' : 'workers'),
         model: settings['ai.openaiModel'] || settings['ai.workersModel'] || 'gpt-4o-mini',
         workersBound: Boolean(env.AI),
       },
-      time: Date.now(),
+      time: now,
     },
     200,
     env,
@@ -204,22 +360,37 @@ async function handleAdminUsers(request, env, url) {
   const offset = Math.max(Number(url.searchParams.get('offset') || 0), 0)
   const like = `%${query}%`
   const { results } = await env.DB.prepare(
-    `SELECT u.id, u.nickname, u.sync_code, u.created_at,
+    `WITH last_activity AS (
+       SELECT user_id, ip, user_agent, country, region, city, colo, created_at,
+              ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC) AS rn
+       FROM user_activity
+     )
+     SELECT u.id, u.nickname, u.sync_code, u.created_at,
             COALESCE(m.status, 'active') AS status,
             m.last_seen_at,
+            c.username,
+            um.expires_at AS membership_expires_at,
+            la.ip AS last_ip, la.user_agent AS last_user_agent, la.country AS last_country,
+            la.region AS last_region, la.city AS last_city, la.colo AS last_colo,
+            la.created_at AS last_login_at,
             (SELECT COUNT(*) FROM entities e WHERE e.user_id = u.id AND e.deleted = 0) AS entity_count
      FROM users u
      LEFT JOIN user_meta m ON m.user_id = u.id
-     WHERE (? = '' OR u.nickname LIKE ? OR u.sync_code LIKE ?)
+     LEFT JOIN user_credentials c ON c.user_id = u.id
+     LEFT JOIN user_membership um ON um.user_id = u.id
+     LEFT JOIN last_activity la ON la.user_id = u.id AND la.rn = 1
+     WHERE (? = '' OR u.nickname LIKE ? OR u.sync_code LIKE ? OR c.username LIKE ?)
      ORDER BY u.created_at DESC
      LIMIT ? OFFSET ?`,
   )
-    .bind(query, like, like, limit, offset)
+    .bind(query, like, like, like, limit, offset)
     .all()
   const total = await env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM users WHERE (? = '' OR nickname LIKE ? OR sync_code LIKE ?)`,
+    `SELECT COUNT(*) AS n FROM users u
+     LEFT JOIN user_credentials c ON c.user_id = u.id
+     WHERE (? = '' OR u.nickname LIKE ? OR u.sync_code LIKE ? OR c.username LIKE ?)`,
   )
-    .bind(query, like, like)
+    .bind(query, like, like, like)
     .first()
   return json(
     {
@@ -227,11 +398,20 @@ async function handleAdminUsers(request, env, url) {
       users: (results || []).map((row) => ({
         id: row.id,
         nickname: row.nickname,
+        username: row.username || '',
         syncCode: row.sync_code,
         createdAt: row.created_at,
         lastSeenAt: row.last_seen_at || 0,
         status: row.status,
         entityCount: row.entity_count,
+        membership: membershipPayload(row.membership_expires_at),
+        lastLoginAt: row.last_login_at || 0,
+        lastIp: row.last_ip || '',
+        lastUserAgent: row.last_user_agent || '',
+        lastCountry: row.last_country || '',
+        lastRegion: row.last_region || '',
+        lastCity: row.last_city || '',
+        lastColo: row.last_colo || '',
       })),
     },
     200,
@@ -267,6 +447,24 @@ async function handleAdminUserPatch(request, env, userId) {
       .bind(userId, String(body.note).slice(0, 200))
       .run()
   }
+  if (body.membershipDays !== undefined) {
+    const days = Math.floor(Number(body.membershipDays) || 0)
+    if (days <= 0) {
+      await env.DB.prepare('DELETE FROM user_membership WHERE user_id = ?').bind(userId).run()
+    } else {
+      const current = await env.DB.prepare('SELECT expires_at FROM user_membership WHERE user_id = ?')
+        .bind(userId)
+        .first()
+      const base = Math.max(Date.now(), Number(current?.expires_at) || 0)
+      const expiresAt = base + Math.min(days, 3650) * 864e5
+      await env.DB.prepare(
+        `INSERT INTO user_membership (user_id, expires_at, source, updated_at) VALUES (?, ?, 'admin', ?)
+         ON CONFLICT (user_id) DO UPDATE SET expires_at = excluded.expires_at, source = 'admin', updated_at = excluded.updated_at`,
+      )
+        .bind(userId, expiresAt, Date.now())
+        .run()
+    }
+  }
   return json({ ok: true }, 200, env, request)
 }
 
@@ -281,11 +479,133 @@ async function handleAdminUserResetCode(request, env, userId) {
 
 async function handleAdminUserDelete(request, env, userId) {
   await requireAdmin(request, env)
+  // 先清 R2 里的照片文件，再删数据库记录
+  if (env.PHOTOS) {
+    const { results } = await env.DB.prepare('SELECT r2_key FROM photos WHERE user_id = ?').bind(userId).all()
+    const keys = (results || []).map((row) => row.r2_key)
+    for (let index = 0; index < keys.length; index += 900) {
+      try {
+        await env.PHOTOS.delete(keys.slice(index, index + 900))
+      } catch {
+        /* R2 删除失败不阻塞账号删除 */
+      }
+    }
+  }
   await env.DB.batch([
     env.DB.prepare('DELETE FROM entities WHERE user_id = ?').bind(userId),
+    env.DB.prepare('DELETE FROM ai_jobs WHERE user_id = ?').bind(userId),
+    env.DB.prepare('DELETE FROM photos WHERE user_id = ?').bind(userId),
     env.DB.prepare('DELETE FROM user_meta WHERE user_id = ?').bind(userId),
+    env.DB.prepare('DELETE FROM user_credentials WHERE user_id = ?').bind(userId),
+    env.DB.prepare('DELETE FROM user_tokens WHERE user_id = ?').bind(userId),
+    env.DB.prepare('DELETE FROM user_membership WHERE user_id = ?').bind(userId),
+    env.DB.prepare('DELETE FROM user_activity WHERE user_id = ?').bind(userId),
+    env.DB.prepare('DELETE FROM trip_shares WHERE member_id = ? OR owner_id = ?').bind(userId, userId),
     env.DB.prepare('DELETE FROM users WHERE id = ?').bind(userId),
   ])
+  return json({ ok: true }, 200, env, request)
+}
+
+/* ---------------- 会员码 / 邀请码管理 ---------------- */
+
+function codeType(raw) {
+  return raw === 'invite' ? 'invite' : 'membership'
+}
+
+async function handleAdminCodesList(request, env, url) {
+  await requireAdmin(request, env)
+  const type = codeType(url.searchParams.get('type'))
+  if (type === 'invite') {
+    const { results } = await env.DB.prepare(
+      `SELECT code, note, max_uses, used_count, disabled, created_at
+       FROM invite_codes ORDER BY created_at DESC LIMIT 200`,
+    ).all()
+    return json(
+      {
+        type,
+        codes: (results || []).map((row) => ({
+          code: row.code,
+          note: row.note || '',
+          maxUses: row.max_uses,
+          usedCount: row.used_count,
+          disabled: Boolean(row.disabled),
+          createdAt: row.created_at,
+        })),
+      },
+      200,
+      env,
+      request,
+    )
+  }
+  const { results } = await env.DB.prepare(
+    `SELECT code, days, note, max_uses, used_count, expires_at, created_at
+     FROM membership_codes ORDER BY created_at DESC LIMIT 200`,
+  ).all()
+  return json(
+    {
+      type,
+      codes: (results || []).map((row) => ({
+        code: row.code,
+        days: row.days,
+        note: row.note || '',
+        maxUses: row.max_uses,
+        usedCount: row.used_count,
+        expiresAt: row.expires_at || 0,
+        createdAt: row.created_at,
+      })),
+    },
+    200,
+    env,
+    request,
+  )
+}
+
+async function handleAdminCodesCreate(request, env) {
+  await requireAdmin(request, env)
+  const body = await readJSON(request)
+  const type = codeType(body.type)
+  const count = Math.min(Math.max(Math.floor(Number(body.count) || 1), 1), 50)
+  const maxUses = Math.min(Math.max(Math.floor(Number(body.maxUses) || 1), 1), 10000)
+  const note = String(body.note || '').slice(0, 100)
+  const days = type === 'membership' ? Math.min(Math.max(Math.floor(Number(body.days) || 30), 1), 3650) : 0
+  const now = Date.now()
+  const created = []
+  for (let i = 0; i < count; i += 1) {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const code = randomCode()
+      try {
+        if (type === 'invite') {
+          await env.DB.prepare(
+            `INSERT INTO invite_codes (code, note, max_uses, used_count, disabled, created_at)
+             VALUES (?, ?, ?, 0, 0, ?)`,
+          )
+            .bind(code, note, maxUses, now)
+            .run()
+        } else {
+          await env.DB.prepare(
+            `INSERT INTO membership_codes (code, days, note, max_uses, used_count, created_at)
+             VALUES (?, ?, ?, ?, 0, ?)`,
+          )
+            .bind(code, days, note, maxUses, now)
+            .run()
+        }
+        created.push(code)
+        break
+      } catch {
+        // 极小概率撞码，重试
+      }
+    }
+  }
+  return json({ type, codes: created, days, maxUses }, 201, env, request)
+}
+
+async function handleAdminCodeDelete(request, env, type, code) {
+  await requireAdmin(request, env)
+  if (codeType(type) === 'invite') {
+    await env.DB.prepare('DELETE FROM invite_codes WHERE code = ?').bind(code).run()
+  } else {
+    await env.DB.prepare('DELETE FROM membership_codes WHERE code = ?').bind(code).run()
+  }
   return json({ ok: true }, 200, env, request)
 }
 
@@ -312,8 +632,10 @@ async function handleAdminSettingsGet(request, env) {
   return json(
     {
       site: { name: map['site.name'] || env.SITE_NAME || '旅记 Travelog' },
+      registration: { inviteRequired: map['registration.invite_required'] === '1' },
       ai: {
         enabled: map['ai.enabled'] !== '0',
+        membershipRequired: map['ai.membership_required'] !== '0',
         temperature: Number(map['ai.temperature'] || 0.6),
         workersBound: Boolean(env.AI),
         endpoints: config.all.map((item) => ({
@@ -341,8 +663,15 @@ async function handleAdminSettingsPut(request, env) {
   const body = await readJSON(request)
   const ai = body.ai || {}
   const site = body.site || {}
+  const registration = body.registration || {}
   if (site.name !== undefined) await setSetting(env, 'site.name', String(site.name).slice(0, 60))
+  if (registration.inviteRequired !== undefined) {
+    await setSetting(env, 'registration.invite_required', registration.inviteRequired ? '1' : '0')
+  }
   if (ai.enabled !== undefined) await setSetting(env, 'ai.enabled', ai.enabled ? '1' : '0')
+  if (ai.membershipRequired !== undefined) {
+    await setSetting(env, 'ai.membership_required', ai.membershipRequired ? '1' : '0')
+  }
 
   // 多接口：按 id 合并，密钥留空或带掩码时保留原值
   if (Array.isArray(ai.endpoints)) {
@@ -423,7 +752,7 @@ async function handleAdminAIModels(request, env, url) {
     return json(
       {
         models: [
-          '@cf/meta/llama-3.1-8b-instruct',
+          '@cf/meta/llama-3.1-8b-instruct-fp8',
           '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
           '@cf/qwen/qwen1.5-14b-chat-awq',
           '@cf/mistral/mistral-7b-instruct-v0.2',
@@ -450,14 +779,41 @@ async function handleAdminAIModels(request, env, url) {
 
 /* ---------------- 普通用户 ---------------- */
 
-async function requireUser(request, env) {
+function bearerToken(request) {
   const header = request.headers.get('Authorization') || ''
-  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
+  return header.startsWith('Bearer ') ? header.slice(7).trim() : ''
+}
+
+async function requireUser(request, env) {
+  const token = bearerToken(request)
   if (!token) throw new HttpError(401, '缺少访问令牌')
-  const row = await env.DB.prepare('SELECT id, sync_code, nickname FROM users WHERE token = ?')
+  const select = `SELECT u.id, u.sync_code, u.nickname, u.created_at, c.username,
+                         um.expires_at AS membership_expires_at
+                  FROM users u
+                  LEFT JOIN user_credentials c ON c.user_id = u.id
+                  LEFT JOIN user_membership um ON um.user_id = u.id`
+  let row = await env.DB.prepare(
+    `${select} JOIN user_tokens t ON t.user_id = u.id WHERE t.token = ?`,
+  )
     .bind(token)
     .first()
-  if (!row) throw new HttpError(401, '访问令牌无效')
+  if (row) {
+    await env.DB.prepare('UPDATE user_tokens SET last_seen_at = ? WHERE token = ?')
+      .bind(Date.now(), token)
+      .run()
+  } else {
+    // 兼容升级前签发的旧 token：命中后自动登记为多设备令牌
+    row = await env.DB.prepare(`${select} WHERE u.token = ?`).bind(token).first()
+    if (row) {
+      const now = Date.now()
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO user_tokens (token, user_id, created_at, last_seen_at) VALUES (?, ?, ?, ?)`,
+      )
+        .bind(token, row.id, now, now)
+        .run()
+    }
+  }
+  if (!row) throw new HttpError(401, '访问令牌无效，请重新登录')
   const meta = await env.DB.prepare('SELECT status FROM user_meta WHERE user_id = ?').bind(row.id).first()
   if (meta?.status === 'disabled') throw new HttpError(403, '该账号已被停用')
   await env.DB.prepare(
@@ -466,38 +822,310 @@ async function requireUser(request, env) {
   )
     .bind(row.id, Date.now())
     .run()
-  return row
+  return {
+    ...row,
+    membership: membershipPayload(row.membership_expires_at),
+    needsCredentials: !row.username,
+  }
+}
+
+async function uniqueSyncCode(env) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const code = randomCode()
+    const hit = await env.DB.prepare('SELECT 1 AS x FROM users WHERE sync_code = ?').bind(code).first()
+    if (!hit) return code
+  }
+  throw new HttpError(500, '生成同步码失败，请重试')
+}
+
+function authPayload(userId, token, row, username) {
+  return {
+    userId,
+    token,
+    syncCode: row.sync_code,
+    nickname: row.nickname,
+    username: username || '',
+    membership: membershipPayload(row.membership_expires_at),
+    needsCredentials: !username,
+  }
+}
+
+/** GET /api/auth/config：注册页据此决定是否显示邀请码 */
+async function handleAuthConfig(request, env) {
+  const registration = await registrationSettings(env)
+  return json(
+    {
+      site: (await getSetting(env, 'site.name')) || env.SITE_NAME || '旅记 Travelog',
+      inviteRequired: registration.inviteRequired,
+    },
+    200,
+    env,
+    request,
+  )
 }
 
 async function handleRegister(request, env) {
+  await rateLimit(env, bucketKey(request, 'register'), 10, 3600, '注册过于频繁，请稍后再试')
   const body = await readJSON(request).catch(() => ({}))
-  const nickname = String(body.nickname || '旅人').slice(0, 24)
+  const nickname = String(body.nickname || '旅人').trim().slice(0, 24) || '旅人'
+  const rawUsername = String(body.username || '').trim()
+  const rawPassword = String(body.password || '')
+  const withCredentials = Boolean(rawUsername || rawPassword)
+  let username = ''
+  let password = ''
+  if (withCredentials) {
+    username = normalizeUsername(rawUsername)
+    password = checkPassword(rawPassword)
+    const taken = await env.DB.prepare('SELECT 1 AS x FROM user_credentials WHERE username_lower = ?')
+      .bind(username.toLowerCase())
+      .first()
+    if (taken) throw new HttpError(409, '这个账号已被使用')
+  }
+
+  const registration = await registrationSettings(env)
+  const inviteCode = await consumeInviteCode(env, body.inviteCode, registration.inviteRequired)
+
   const id = crypto.randomUUID()
-  const syncCode = randomCode()
+  const syncCode = await uniqueSyncCode(env)
   const token = randomToken()
-  await env.DB.prepare(
-    'INSERT INTO users (id, sync_code, token, nickname, created_at) VALUES (?, ?, ?, ?, ?)',
+  const now = Date.now()
+  const statements = [
+    env.DB.prepare(
+      'INSERT INTO users (id, sync_code, token, nickname, created_at) VALUES (?, ?, ?, ?, ?)',
+    ).bind(id, syncCode, token, nickname, now),
+    env.DB.prepare(
+      `INSERT INTO user_meta (user_id, status, last_seen_at) VALUES (?, 'active', ?)
+       ON CONFLICT (user_id) DO UPDATE SET last_seen_at = excluded.last_seen_at`,
+    ).bind(id, now),
+    env.DB.prepare(
+      'INSERT INTO user_tokens (token, user_id, created_at, last_seen_at) VALUES (?, ?, ?, ?)',
+    ).bind(token, id, now, now),
+  ]
+  if (withCredentials) {
+    const salt = randomToken(16)
+    statements.push(
+      env.DB.prepare(
+        `INSERT INTO user_credentials (user_id, username, username_lower, salt, password_hash, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind(id, username, username.toLowerCase(), salt, await hashPassword(password, salt), now),
+    )
+  }
+  try {
+    await env.DB.batch(statements)
+  } catch (error) {
+    if (String(error.message || '').includes('UNIQUE')) {
+      throw new HttpError(409, '账号或同步码已被占用，请重试')
+    }
+    throw error
+  }
+  await logActivity(env, request, id, 'register')
+  return json(
+    {
+      ...authPayload(id, token, { sync_code: syncCode, nickname, membership_expires_at: 0 }, username),
+      inviteCode,
+    },
+    201,
+    env,
+    request,
   )
-    .bind(id, syncCode, token, nickname, Date.now())
-    .run()
-  await env.DB.prepare(
-    `INSERT INTO user_meta (user_id, status, last_seen_at) VALUES (?, 'active', ?)
-     ON CONFLICT (user_id) DO UPDATE SET last_seen_at = excluded.last_seen_at`,
-  )
-    .bind(id, Date.now())
-    .run()
-  return json({ userId: id, syncCode, token, nickname }, 201, env, request)
 }
 
 async function handleLogin(request, env) {
   const body = await readJSON(request)
+  const usernameRaw = String(body.username || '').trim()
+
+  if (usernameRaw) {
+    await rateLimit(env, bucketKey(request, 'login'), 30, 900, '登录尝试过于频繁，请 15 分钟后再试')
+    await rateLimit(env, `login-user:${usernameRaw.toLowerCase()}`, 10, 900, '该账号尝试次数过多，请 15 分钟后再试')
+    const cred = await env.DB.prepare(
+      `SELECT c.user_id, c.username, c.salt, c.password_hash,
+              u.nickname, u.sync_code, u.created_at
+       FROM user_credentials c JOIN users u ON u.id = c.user_id
+       WHERE c.username_lower = ?`,
+    )
+      .bind(usernameRaw.toLowerCase())
+      .first()
+    if (!cred) throw new HttpError(401, '账号或密码不正确')
+    const hash = await hashPassword(String(body.password || ''), cred.salt)
+    if (hash !== cred.password_hash) throw new HttpError(401, '账号或密码不正确')
+    const meta = await env.DB.prepare('SELECT status FROM user_meta WHERE user_id = ?').bind(cred.user_id).first()
+    if (meta?.status === 'disabled') throw new HttpError(403, '该账号已被停用')
+    const token = await issueUserToken(env, cred.user_id)
+    await logActivity(env, request, cred.user_id, 'login')
+    const membership = await getMembership(env, cred.user_id)
+    return json(
+      {
+        userId: cred.user_id,
+        token,
+        syncCode: cred.sync_code,
+        nickname: cred.nickname,
+        username: cred.username,
+        membership,
+        needsCredentials: false,
+      },
+      200,
+      env,
+      request,
+    )
+  }
+
+  // 兼容旧版：同步码登录（多人共享设备/旅伴仍可使用）
   const code = String(body.syncCode || '').trim().toUpperCase()
-  if (!code) throw new HttpError(400, '请输入同步码')
-  const row = await env.DB.prepare('SELECT id, nickname FROM users WHERE sync_code = ?').bind(code).first()
+  if (!code) throw new HttpError(400, '请输入账号密码或同步码')
+  await rateLimit(env, bucketKey(request, 'login-code'), 20, 900, '登录尝试过于频繁，请 15 分钟后再试')
+  const row = await env.DB.prepare(
+    'SELECT id, nickname, sync_code, created_at FROM users WHERE sync_code = ?',
+  )
+    .bind(code)
+    .first()
   if (!row) throw new HttpError(404, '同步码不存在')
-  const token = randomToken()
-  await env.DB.prepare('UPDATE users SET token = ? WHERE id = ?').bind(token, row.id).run()
-  return json({ userId: row.id, token, nickname: row.nickname, syncCode: code }, 200, env, request)
+  const meta = await env.DB.prepare('SELECT status FROM user_meta WHERE user_id = ?').bind(row.id).first()
+  if (meta?.status === 'disabled') throw new HttpError(403, '该账号已被停用')
+  const cred = await env.DB.prepare('SELECT username FROM user_credentials WHERE user_id = ?').bind(row.id).first()
+  const token = await issueUserToken(env, row.id)
+  await logActivity(env, request, row.id, 'login-code')
+  const membership = await getMembership(env, row.id)
+  return json(
+    {
+      userId: row.id,
+      token,
+      syncCode: row.sync_code,
+      nickname: row.nickname,
+      username: cred?.username || '',
+      membership,
+      needsCredentials: !cred,
+      loginMethod: 'syncCode',
+    },
+    200,
+    env,
+    request,
+  )
+}
+
+/** POST /api/auth/logout：注销当前设备令牌，不影响其他设备 */
+async function handleLogout(request, env) {
+  const token = bearerToken(request)
+  if (!token) return json({ ok: true }, 200, env, request)
+  const user = await requireUser(request, env)
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM user_tokens WHERE token = ?').bind(token),
+    // 若注销的正是旧版单 token 字段里的令牌，一并清空，避免下次登录被重新迁回
+    env.DB.prepare('UPDATE users SET token = ? WHERE id = ? AND token = ?').bind('', user.id, token),
+  ])
+  return json({ ok: true }, 200, env, request)
+}
+
+/** GET /api/auth/me：账号资料 + 会员状态 */
+async function handleMe(request, env) {
+  const user = await requireUser(request, env)
+  return json(
+    {
+      userId: user.id,
+      nickname: user.nickname,
+      username: user.username || '',
+      syncCode: user.sync_code,
+      createdAt: user.created_at,
+      membership: user.membership,
+      needsCredentials: user.needsCredentials,
+    },
+    200,
+    env,
+    request,
+  )
+}
+
+/** POST /api/auth/credentials：老账号补设 / 修改账号密码 */
+async function handleSetCredentials(request, env) {
+  const user = await requireUser(request, env)
+  const body = await readJSON(request)
+  const username = normalizeUsername(body.username)
+  const password = checkPassword(body.password)
+  const existing = await env.DB.prepare(
+    'SELECT salt, password_hash FROM user_credentials WHERE user_id = ?',
+  )
+    .bind(user.id)
+    .first()
+  if (existing) {
+    const current = String(body.currentPassword || '')
+    if (!current) throw new HttpError(400, '修改密码需要先输入当前密码')
+    const hash = await hashPassword(current, existing.salt)
+    if (hash !== existing.password_hash) throw new HttpError(403, '当前密码不正确')
+  }
+  const taken = await env.DB.prepare(
+    'SELECT user_id FROM user_credentials WHERE username_lower = ? AND user_id != ?',
+  )
+    .bind(username.toLowerCase(), user.id)
+    .first()
+  if (taken) throw new HttpError(409, '这个账号已被使用')
+
+  const salt = randomToken(16)
+  const now = Date.now()
+  await env.DB.prepare(
+    `INSERT INTO user_credentials (user_id, username, username_lower, salt, password_hash, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (user_id) DO UPDATE SET
+       username = excluded.username, username_lower = excluded.username_lower,
+       salt = excluded.salt, password_hash = excluded.password_hash, updated_at = excluded.updated_at`,
+  )
+    .bind(user.id, username, username.toLowerCase(), salt, await hashPassword(password, salt), now)
+    .run()
+
+  // 修改密码后，其他设备令牌全部失效，当前设备保持登录
+  if (existing) {
+    const currentToken = bearerToken(request)
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM user_tokens WHERE user_id = ? AND token != ?')
+        .bind(user.id, currentToken),
+      // 旧版单 token 字段同步指向当前设备，防止被删除的令牌在下次登录时被重新迁回
+      env.DB.prepare('UPDATE users SET token = ? WHERE id = ?').bind(currentToken, user.id),
+    ])
+  }
+  await logActivity(env, request, user.id, existing ? 'password-change' : 'credentials-set')
+  return json({ ok: true, username }, 200, env, request)
+}
+
+/** POST /api/membership/redeem：兑换会员码，到期时间累加 */
+async function handleMembershipRedeem(request, env) {
+  const user = await requireUser(request, env)
+  await rateLimit(env, `membership:${user.id}`, 10, 3600, '兑换太频繁，请稍后再试')
+  const body = await readJSON(request)
+  const code = String(body.code || '').trim().toUpperCase()
+  if (!code) throw new HttpError(400, '请输入会员码')
+  const row = await env.DB.prepare(
+    'SELECT code, days, max_uses, used_count, expires_at FROM membership_codes WHERE code = ?',
+  )
+    .bind(code)
+    .first()
+  if (!row) throw new HttpError(404, '会员码不存在')
+  if (row.expires_at && row.expires_at <= Date.now()) throw new HttpError(410, '会员码已过期')
+
+  const result = await env.DB.prepare(
+    `UPDATE membership_codes SET used_count = used_count + 1
+     WHERE code = ? AND used_count < max_uses AND (expires_at IS NULL OR expires_at > ?)`,
+  )
+    .bind(code, Date.now())
+    .run()
+  if (!result.meta?.changes) throw new HttpError(409, '会员码已被用完')
+
+  const days = Math.max(1, Math.floor(Number(row.days) || 0))
+  const current = await env.DB.prepare('SELECT expires_at FROM user_membership WHERE user_id = ?')
+    .bind(user.id)
+    .first()
+  const base = Math.max(Date.now(), Number(current?.expires_at) || 0)
+  const expiresAt = base + days * 864e5
+  await env.DB.prepare(
+    `INSERT INTO user_membership (user_id, expires_at, source, updated_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT (user_id) DO UPDATE SET expires_at = excluded.expires_at, source = excluded.source, updated_at = excluded.updated_at`,
+  )
+    .bind(user.id, expiresAt, `code:${code}`, Date.now())
+    .run()
+  await logActivity(env, request, user.id, 'membership')
+  return json(
+    { ok: true, addedDays: days, membership: membershipPayload(expiresAt) },
+    200,
+    env,
+    request,
+  )
 }
 
 /** 修改当前账号昵称（登录后可用，影响旅伴与共享行程中的展示名） */
@@ -511,23 +1139,63 @@ async function handleUpdateAccount(request, env) {
   return json({ userId: user.id, nickname }, 200, env, request)
 }
 
+/**
+ * 游标由「updated_at + kind + id」组成，避免同一毫秒的多条实体在分页边界被跳过。
+ * 兼容旧版纯数字游标（按 updated_at 处理）。
+ */
+function decodeSyncCursor(raw) {
+  const text = String(raw ?? 0)
+  const parts = text.split('~')
+  if (parts.length >= 3 && /^\d+$/.test(parts[0])) {
+    return {
+      updatedAt: Number(parts[0]),
+      kind: parts[1],
+      id: parts.slice(2).join('~'),
+      raw: text,
+    }
+  }
+  const numeric = Number(text)
+  return {
+    updatedAt: Number.isFinite(numeric) && numeric > 0 ? numeric : 0,
+    kind: '',
+    id: '',
+    raw: text,
+  }
+}
+
+function encodeSyncCursor(row) {
+  return `${row.updated_at}~${row.kind}~${row.id}`
+}
+
 async function handlePull(request, env, url) {
   const user = await requireUser(request, env)
-  const cursor = Number(url.searchParams.get('cursor') || 0)
+  const cursor = decodeSyncCursor(url.searchParams.get('cursor'))
   const limit = Math.min(Number(url.searchParams.get('limit') || 500), 1000)
   // 同时拉取自己 + 已加入的共享旅程（owner 的实体）
   const { results } = await env.DB.prepare(
     `WITH shared AS (SELECT trip_id, owner_id FROM trip_shares WHERE member_id = ?)
      SELECT e.kind, e.id, e.data, e.updated_at, e.deleted FROM entities e
-     WHERE e.updated_at > ?
+     WHERE (
+         e.updated_at > ?
+         OR (e.updated_at = ? AND (e.kind > ? OR (e.kind = ? AND e.id > ?)))
+       )
        AND (
          e.user_id = ?
          OR e.user_id = (SELECT owner_id FROM shared WHERE e.kind = 'trips' AND shared.trip_id = e.id)
          OR e.user_id = (SELECT owner_id FROM shared WHERE e.kind != 'trips' AND shared.trip_id = json_extract(e.data, '$.tripId'))
        )
-     ORDER BY e.updated_at ASC LIMIT ?`,
+     ORDER BY e.updated_at ASC, e.kind ASC, e.id ASC LIMIT ?`,
   )
-    .bind(user.id, cursor, user.id, limit)
+    .bind(
+      user.id,
+      cursor.updatedAt,
+      cursor.updatedAt,
+      cursor.kind,
+      cursor.kind,
+      cursor.id,
+      user.id,
+      limit,
+    )
     .all()
 
   const entities = (results || []).map((row) => ({
@@ -537,7 +1205,7 @@ async function handlePull(request, env, url) {
     updatedAt: row.updated_at,
     deleted: Boolean(row.deleted),
   }))
-  const nextCursor = entities.length > 0 ? entities[entities.length - 1].updatedAt : cursor
+  const nextCursor = results?.length ? encodeSyncCursor(results[results.length - 1]) : cursor.raw
   return json({ cursor: nextCursor, entities, hasMore: entities.length === limit }, 200, env, request)
 }
 
@@ -557,7 +1225,7 @@ async function handlePush(request, env) {
   const shareMap = new Map((shareRows || []).map((row) => [row.trip_id, row.owner_id]))
 
   let applied = 0
-  let skipped = 0
+  let invalid = 0
   const statements = []
   const now = Date.now()
 
@@ -565,7 +1233,7 @@ async function handlePush(request, env) {
     const kind = String(item.kind || '')
     const id = String(item.id || '')
     if (!kind || !id) {
-      skipped++
+      invalid++
       continue
     }
 
@@ -585,11 +1253,19 @@ async function handlePush(request, env) {
          WHERE excluded.updated_at >= entities.updated_at`,
       ).bind(ownerId, kind, id, data, updatedAt, deleted),
     )
-    applied++
   }
 
-  if (statements.length > 0) await env.DB.batch(statements)
-  return json({ applied, skipped, cursor: now }, 200, env, request)
+  if (statements.length > 0) {
+    // D1 的 batch 返回每条语句的 meta.changes；被 LWW 拒绝的旧数据不会计入 applied
+    const results = await env.DB.batch(statements)
+    for (const result of results) applied += Number(result?.meta?.changes || 0)
+  }
+  return json(
+    { applied, skipped: invalid + (statements.length - applied), cursor: now },
+    200,
+    env,
+    request,
+  )
 }
 
 /** 用邀请码加入别人的旅程（trip 级共享） */
@@ -687,9 +1363,28 @@ async function handleListShares(request, env) {
 
 async function handleLeaveShare(request, env, tripId) {
   const user = await requireUser(request, env)
+  const share = await env.DB.prepare(
+    'SELECT owner_id FROM trip_shares WHERE trip_id = ? AND member_id = ?',
+  )
+    .bind(tripId, user.id)
+    .first()
   await env.DB.prepare('DELETE FROM trip_shares WHERE trip_id = ? AND member_id = ?')
     .bind(tripId, user.id)
     .run()
+
+  // 同步删除 owner 旅程里的成员记录，避免退出后仍显示「已加入」
+  if (share?.owner_id) {
+    const now = Date.now()
+    await env.DB.prepare(
+      `UPDATE entities SET deleted = 1, data = '{}', updated_at = ?
+       WHERE user_id = ? AND kind = 'members' AND deleted = 0
+         AND json_extract(data, '$.tripId') = ?
+         AND json_extract(data, '$.userId') = ?`,
+    )
+      .bind(now, share.owner_id, tripId, user.id)
+      .run()
+      .catch(() => {})
+  }
   return json({ ok: true }, 200, env, request)
 }
 
@@ -709,6 +1404,7 @@ async function handleStats(request, env) {
 async function loadEndpoints(env) {
   const map = await getSettings(env, [
     'ai.enabled',
+    'ai.membership_required',
     'ai.endpoints',
     'ai.temperature',
     'ai.openaiKey',
@@ -745,7 +1441,7 @@ async function loadEndpoints(env) {
         id: 'legacy-workers',
         name: 'Workers AI',
         type: 'workers',
-        model: map['ai.workersModel'] || env.AI_MODEL || '@cf/meta/llama-3.1-8b-instruct',
+        model: map['ai.workersModel'] || env.AI_MODEL || '@cf/meta/llama-3.1-8b-instruct-fp8',
         weight: 1,
         enabled: true,
       })
@@ -760,6 +1456,7 @@ async function loadEndpoints(env) {
 
   return {
     enabled: map['ai.enabled'] !== '0',
+    requireMembership: map['ai.membership_required'] !== '0',
     temperature: Number(map['ai.temperature'] || 0.6),
     all: list,
     endpoints: usable,
@@ -841,6 +1538,7 @@ async function runAI(env, messages, temperature) {
 
 async function handleAI(request, env) {
   const user = await requireUser(request, env)
+  await requireAIAccess(env, user)
   const body = await readJSON(request)
   const system = String(body.system || '').slice(0, 2000)
   const prompt = String(body.prompt || '').slice(0, 4000)
@@ -852,6 +1550,195 @@ async function handleAI(request, env) {
   const result = await runAI(env, messages, temperature)
   console.log(`ai user=${user.id} model=${result.model} chars=${result.text.length}`)
   return json(result, 200, env, request)
+}
+
+/* ---------------- AI 异步任务 ---------------- */
+
+const AI_JOB_MAX = 30
+const AI_JOB_STALE_MS = 15 * 60 * 1000
+
+/** AI 开关与会员门禁；所有 AI 入口共用 */
+async function requireAIAccess(env, user) {
+  const config = await loadEndpoints(env)
+  if (!config.enabled) throw new HttpError(503, 'AI 已在管理面板中关闭')
+  if (config.requireMembership && !user.membership?.active) {
+    throw new HttpError(
+      403,
+      'AI 是会员功能，请先在「云同步」兑换会员码后使用',
+      'membership_required',
+    )
+  }
+  return config
+}
+
+function aiJobPayload(row) {
+  return {
+    id: row.id,
+    kind: row.kind,
+    status: row.status,
+    result: row.result || '',
+    error: row.error || '',
+    model: row.model || '',
+    endpoint: row.endpoint || '',
+    createdAt: row.created_at,
+    startedAt: row.started_at || 0,
+    finishedAt: row.finished_at || 0,
+  }
+}
+
+/** 把失效的 running 任务标成失败，避免客户端永远转圈；无过期任务时不写库 */
+async function markStaleAIJobs(env, userId) {
+  const now = Date.now()
+  const stale = await env.DB.prepare(
+    `SELECT id FROM ai_jobs
+     WHERE user_id = ? AND status IN ('queued', 'running') AND created_at < ? LIMIT 1`,
+  )
+    .bind(userId, now - AI_JOB_STALE_MS)
+    .first()
+    .catch(() => null)
+  if (!stale) return
+  await env.DB.prepare(
+    `UPDATE ai_jobs SET status = 'error', error = ?, finished_at = ?
+     WHERE user_id = ? AND status IN ('queued', 'running') AND created_at < ?`,
+  )
+    .bind('任务超时，请重新发起', now, userId, now - AI_JOB_STALE_MS)
+    .run()
+    .catch(() => {})
+}
+
+/** 新建任务后清理：兜底过期任务，并只保留最近 30 条 */
+async function pruneAIJobs(env, userId) {
+  await markStaleAIJobs(env, userId)
+  await env.DB.prepare(
+    `DELETE FROM ai_jobs WHERE user_id = ? AND id NOT IN (
+       SELECT id FROM ai_jobs WHERE user_id = ? ORDER BY created_at DESC LIMIT ${AI_JOB_MAX}
+     )`,
+  )
+    .bind(userId, userId)
+    .run()
+    .catch(() => {})
+}
+
+/** 后台执行：waitUntil 提交后即返回，用户可离开页面 */
+async function runAIJob(env, jobId) {
+  const job = await env.DB.prepare('SELECT * FROM ai_jobs WHERE id = ?').bind(jobId).first()
+  if (!job || job.status !== 'queued') return
+  await env.DB.prepare(`UPDATE ai_jobs SET status = 'running', started_at = ? WHERE id = ?`)
+    .bind(Date.now(), jobId)
+    .run()
+  const messages = []
+  if (job.system) messages.push({ role: 'system', content: job.system })
+  messages.push({ role: 'user', content: job.prompt })
+  try {
+    const result = await runAI(env, messages, job.temperature)
+    await env.DB.prepare(
+      `UPDATE ai_jobs SET status = 'done', result = ?, model = ?, endpoint = ?, finished_at = ?
+       WHERE id = ?`,
+    )
+      .bind(result.text, result.model || '', result.endpoint || '', Date.now(), jobId)
+      .run()
+  } catch (error) {
+    const message = String(error?.message || '生成失败').slice(0, 300)
+    await env.DB.prepare(
+      `UPDATE ai_jobs SET status = 'error', error = ?, finished_at = ? WHERE id = ?`,
+    )
+      .bind(message, Date.now(), jobId)
+      .run()
+    console.error(`ai job failed id=${jobId}: ${message}`)
+  }
+}
+
+/** GET /api/ai/config：客户端据此提前展示会员提示 */
+async function handleAIConfig(request, env) {
+  const user = await requireUser(request, env)
+  const config = await loadEndpoints(env)
+  return json(
+    {
+      enabled: config.enabled,
+      membershipRequired: config.requireMembership,
+      member: Boolean(user.membership.active),
+      membershipExpiresAt: user.membership.expiresAt,
+      canUse:
+        config.enabled &&
+        config.endpoints.length > 0 &&
+        (!config.requireMembership || user.membership.active),
+      endpoints: config.endpoints.length,
+    },
+    200,
+    env,
+    request,
+  )
+}
+
+/** POST /api/ai/jobs：入队后立即返回 202 */
+async function handleAIJobCreate(request, env, ctx) {
+  const user = await requireUser(request, env)
+  await requireAIAccess(env, user)
+  await rateLimit(env, bucketKey(request, 'ai-job'), 40, 3600, 'AI 任务提交太频繁，请稍后再试')
+  const body = await readJSON(request)
+  const kind = String(body.kind || 'custom').slice(0, 24)
+  const system = String(body.system || '').slice(0, 2000)
+  const prompt = String(body.prompt || '').slice(0, 8000)
+  if (!prompt.trim()) throw new HttpError(400, 'prompt 不能为空')
+  const temperature = Math.min(Math.max(Number(body.temperature) || 0.6, 0), 1)
+  const id = randomToken(12)
+  const now = Date.now()
+  await env.DB.prepare(
+    `INSERT INTO ai_jobs (id, user_id, kind, status, prompt, system, temperature, created_at)
+     VALUES (?, ?, ?, 'queued', ?, ?, ?, ?)`,
+  )
+    .bind(id, user.id, kind, prompt, system, temperature, now)
+    .run()
+  await pruneAIJobs(env, user.id)
+
+  const job = {
+    id,
+    kind,
+    status: 'queued',
+    result: '',
+    error: '',
+    model: '',
+    endpoint: '',
+    createdAt: now,
+    startedAt: 0,
+    finishedAt: 0,
+  }
+  const task = runAIJob(env, id).catch((error) => {
+    console.error(`ai job crashed id=${id}: ${error?.message || error}`)
+  })
+  if (ctx?.waitUntil) ctx.waitUntil(task)
+  else await task
+  return json({ job }, 202, env, request)
+}
+
+async function handleAIJobsList(request, env, url) {
+  const user = await requireUser(request, env)
+  await markStaleAIJobs(env, user.id)
+  const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 20, 1), 30)
+  const { results } = await env.DB.prepare(
+    `SELECT * FROM ai_jobs WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`,
+  )
+    .bind(user.id, limit)
+    .all()
+  return json({ jobs: (results || []).map(aiJobPayload) }, 200, env, request)
+}
+
+async function handleAIJobGet(request, env, jobId) {
+  const user = await requireUser(request, env)
+  const job = await env.DB.prepare('SELECT * FROM ai_jobs WHERE id = ? AND user_id = ?')
+    .bind(jobId, user.id)
+    .first()
+  if (!job) throw new HttpError(404, 'AI 任务不存在')
+  return json({ job: aiJobPayload(job) }, 200, env, request)
+}
+
+async function handleAIJobDelete(request, env, jobId) {
+  const user = await requireUser(request, env)
+  const result = await env.DB.prepare('DELETE FROM ai_jobs WHERE id = ? AND user_id = ?')
+    .bind(jobId, user.id)
+    .run()
+  if (!result.meta?.changes) throw new HttpError(404, 'AI 任务不存在')
+  return json({ ok: true }, 200, env, request)
 }
 
 /* ---------------- 天气 / 地理编码 ---------------- */
@@ -901,10 +1788,61 @@ async function handleGeocode(request, env, url) {
 /* ---------------- 地点搜索（POI） ---------------- */
 
 /**
+ * OSM 中国地址里 city 常填成区（如「青羊区」），地级市只出现在 display_name。
+ * 这里统一归一化省 / 市 / 区县 / 街道，保证手动与自动打卡语义一致。
+ */
+function normalizeOsmAddress(address = {}, displayName = '') {
+  const tokens = String(displayName || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+  const prefecture =
+    tokens.find(
+      (item) => item.length <= 12 && /(市|自治州|州|盟|地区)$/.test(item),
+    ) || ''
+  const displayDistrict =
+    tokens.find((item) => item.length <= 12 && /(区|县|旗)$/.test(item)) || ''
+  const rawCity = address.city || address.town || address.municipality || address.village || ''
+  const cityIsDistrict = /(区|县|旗)$/.test(rawCity)
+  const city = cityIsDistrict
+    ? prefecture || address.state_district || ''
+    : rawCity || prefecture || address.county || ''
+  const district =
+    address.city_district ||
+    address.district ||
+    address.borough ||
+    address.county ||
+    (cityIsDistrict ? rawCity : '') ||
+    displayDistrict ||
+    address.suburb ||
+    ''
+  const street =
+    address.road ||
+    address.pedestrian ||
+    address.footway ||
+    address.cycling_path ||
+    address.suburb ||
+    address.neighbourhood ||
+    address.quarter ||
+    ''
+  const neighbourhood = address.quarter || address.neighbourhood || ''
+  return {
+    city,
+    district,
+    street,
+    neighbourhood,
+    province: address.state || address.province || address.region || '',
+    country: address.country || '',
+    countryCode: String(address.country_code || '').toUpperCase(),
+  }
+}
+
+/**
  * 附近地点搜索：代理 OpenStreetMap Nominatim。
  * 带 viewbox 时只搜附近，适合「宽窄巷子」「人民公园」这类具体地点。
  */
 async function handlePOI(request, env, url) {
+  await rateLimit(env, bucketKey(request, 'poi'), 120, 3600, '地点搜索太频繁，请稍后再试')
   const lat = Number(url.searchParams.get('lat'))
   const lon = Number(url.searchParams.get('lon'))
   const query = (url.searchParams.get('q') || '').trim().slice(0, 60)
@@ -915,7 +1853,7 @@ async function handlePOI(request, env, url) {
     format: 'jsonv2',
     limit: '8',
     'accept-language': 'zh',
-    addressdetails: '0',
+    addressdetails: '1',
   })
   if (Number.isFinite(lat) && Number.isFinite(lon)) {
     const delta = 0.08
@@ -923,29 +1861,255 @@ async function handlePOI(request, env, url) {
     params.set('bounded', '1')
   }
 
-  const response = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
-    headers: { 'User-Agent': 'Travelog/1.8 (personal travel diary)' },
-    cf: { cacheTtl: 3600 },
-  })
+  const response = await fetch(
+    `${env.NOMINATIM_BASE || 'https://nominatim.openstreetmap.org'}/search?${params.toString()}`,
+    {
+      headers: { 'User-Agent': 'Travelog/1.8 (personal travel diary)' },
+      cf: { cacheTtl: 3600 },
+    },
+  )
   if (!response.ok) throw new HttpError(502, '地点搜索暂时不可用')
 
   const data = await response.json()
   const results = (Array.isArray(data) ? data : [])
-    .map((item) => ({
-      name: item.name || String(item.display_name || '').split(',')[0] || '',
-      displayName: item.display_name || '',
-      latitude: Number(item.lat),
-      longitude: Number(item.lon),
-      type: item.type || '',
-    }))
+    .map((item) => {
+      const normalized = normalizeOsmAddress(item.address || {}, item.display_name || '')
+      return {
+        name: item.name || String(item.display_name || '').split(',')[0] || '',
+        displayName: item.display_name || '',
+        latitude: Number(item.lat),
+        longitude: Number(item.lon),
+        type: item.type || '',
+        city: normalized.city,
+        district: normalized.district,
+        street: normalized.street,
+      }
+    })
     .filter((item) => item.name && Number.isFinite(item.latitude) && Number.isFinite(item.longitude))
 
   return json({ results }, 200, env, request)
 }
 
+/**
+ * 逆地理编码：把坐标解析到区县 / 街道，供手动打卡与自动打卡使用。
+ * 通过 Cloudflare 缓存降低对 Nominatim 的请求量。
+ */
+async function handleReverseGeo(request, env, url) {
+  const lat = Number(url.searchParams.get('lat'))
+  const lon = Number(url.searchParams.get('lon'))
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || (lat === 0 && lon === 0)) {
+    throw new HttpError(400, '缺少坐标')
+  }
+  await rateLimit(env, bucketKey(request, 'reverse-geo'), 180, 3600, '定位解析太频繁，请稍后再试')
+
+  const params = new URLSearchParams({
+    lat: String(lat),
+    lon: String(lon),
+    format: 'jsonv2',
+    addressdetails: '1',
+    zoom: '18',
+    'accept-language': 'zh',
+  })
+  const response = await fetch(
+    `${env.NOMINATIM_BASE || 'https://nominatim.openstreetmap.org'}/reverse?${params.toString()}`,
+    {
+      headers: { 'User-Agent': 'Travelog/1.8 (personal travel diary)' },
+      cf: { cacheTtl: 86400 },
+    },
+  )
+  if (!response.ok) throw new HttpError(502, '定位解析暂时不可用')
+
+  const data = await response.json()
+  const address = data.address || {}
+  const normalized = normalizeOsmAddress(address, data.display_name || '')
+  const { city, district, street, province, country, countryCode } = normalized
+  const name =
+    data.name ||
+    address.tourism ||
+    address.amenity ||
+    address.shop ||
+    address.building ||
+    normalized.neighbourhood ||
+    address.suburb ||
+    street ||
+    district ||
+    city ||
+    ''
+  const parts = [province, city, district, street]
+    .map((value) => String(value || '').trim())
+    .filter((value, index, list) => value && list.indexOf(value) === index)
+  return json(
+    {
+      found: Boolean(name || district || city),
+      name,
+      displayName: data.display_name || '',
+      country,
+      countryCode,
+      province,
+      city,
+      district,
+      street,
+      areaLabel: parts.join(' · '),
+      latitude: Number(data.lat) || lat,
+      longitude: Number(data.lon) || lon,
+    },
+    200,
+    env,
+    request,
+  )
+}
+
+/* ---------------- 照片（R2） ---------------- */
+
+const MAX_PHOTO_BYTES = 8 * 1024 * 1024
+const PHOTO_MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
+
+/** 校验图片真实类型：不信任 data URL 里声明的 MIME */
+function sniffImageMime(bytes) {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg'
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 &&
+    bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a
+  ) {
+    return 'image/png'
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+  ) {
+    return 'image/webp'
+  }
+  return ''
+}
+
+function decodeBase64(input) {
+  const binary = atob(input)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+  return bytes
+}
+
+function photoUrl(request, id, accessKey) {
+  const origin = new URL(request.url).origin
+  return `${origin}/api/photos/${encodeURIComponent(id)}?k=${encodeURIComponent(accessKey)}`
+}
+
+async function handlePhotoUpload(request, env) {
+  const user = await requireUser(request, env)
+  if (!env.PHOTOS) throw new HttpError(503, '照片存储未配置：请绑定 R2 桶 PHOTOS')
+  const body = await readJSON(request)
+  const dataUrl = String(body.dataUrl || '')
+  const match = dataUrl.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=\r\n]+)$/)
+  if (!match) throw new HttpError(400, '仅支持 JPEG / PNG / WebP 图片')
+  // base64 长度上限先做粗判，避免解出超大数组
+  if (match[2].length > Math.ceil((MAX_PHOTO_BYTES * 4) / 3) + 16) {
+    throw new HttpError(413, '单张照片不能超过 8MB，请压缩后再试')
+  }
+  let bytes
+  try {
+    bytes = decodeBase64(match[2].replace(/[\r\n]/g, ''))
+  } catch {
+    throw new HttpError(400, '图片数据损坏，请重新选择')
+  }
+  if (bytes.length === 0) throw new HttpError(400, '图片内容为空')
+  if (bytes.length > MAX_PHOTO_BYTES) throw new HttpError(413, '单张照片不能超过 8MB，请压缩后再试')
+  const mime = sniffImageMime(bytes)
+  if (!mime) throw new HttpError(400, '文件不是有效图片')
+
+  const id = randomToken(9)
+  const accessKey = randomToken(18)
+  const r2Key = `users/${user.id}/${id}.${PHOTO_MIME_EXT[mime]}`
+  const createdAt = Date.now()
+  await env.PHOTOS.put(r2Key, bytes, {
+    httpMetadata: { contentType: mime, cacheControl: 'private, max-age=31536000, immutable' },
+  })
+  await env.DB.prepare(
+    `INSERT INTO photos (id, user_id, r2_key, access_key, mime, size, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(id, user.id, r2Key, accessKey, mime, bytes.length, createdAt)
+    .run()
+  return json({ id, url: photoUrl(request, id, accessKey), size: bytes.length, mime, createdAt }, 201, env, request)
+}
+
+async function handlePhotoGet(request, env, id, url) {
+  if (!env.PHOTOS) throw new HttpError(503, '照片存储未配置')
+  const key = url.searchParams.get('k') || ''
+  const row = await env.DB.prepare('SELECT r2_key, access_key, mime FROM photos WHERE id = ?').bind(id).first()
+  // 统一 404，避免暴露照片是否存在
+  if (!row || !key || key !== row.access_key) throw new HttpError(404, '照片不存在')
+  const object = await env.PHOTOS.get(row.r2_key)
+  if (!object) throw new HttpError(404, '照片不存在')
+
+  const headers = {
+    'content-type': object.httpMetadata?.contentType || row.mime || 'image/jpeg',
+    'cache-control': 'private, max-age=31536000, immutable',
+    'x-content-type-options': 'nosniff',
+    'content-disposition': 'inline',
+    etag: object.httpEtag,
+    ...corsHeaders(env, request),
+  }
+  if (request.headers.get('If-None-Match') === object.httpEtag) {
+    return new Response(null, { status: 304, headers })
+  }
+  return new Response(request.method === 'HEAD' ? null : object.body, { status: 200, headers })
+}
+
+async function handlePhotoDelete(request, env, id) {
+  const user = await requireUser(request, env)
+  const row = await env.DB.prepare('SELECT user_id, r2_key FROM photos WHERE id = ?').bind(id).first()
+  if (!row) throw new HttpError(404, '照片不存在')
+  if (row.user_id !== user.id) throw new HttpError(403, '无权删除这张照片')
+  if (env.PHOTOS) await env.PHOTOS.delete(row.r2_key)
+  await env.DB.prepare('DELETE FROM photos WHERE id = ?').bind(id).run()
+  return json({ ok: true }, 200, env, request)
+}
+
+async function handleAdminPhotos(request, env, url) {
+  await requireAdmin(request, env)
+  const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 60), 1), 200)
+  const offset = Math.max(Number(url.searchParams.get('offset') || 0), 0)
+  const [total, rows] = await Promise.all([
+    env.DB.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS bytes FROM photos').first(),
+    env.DB.prepare(
+      `SELECT p.id, p.user_id, p.access_key, p.mime, p.size, p.created_at,
+              u.nickname, u.sync_code, c.username
+       FROM photos p
+       JOIN users u ON u.id = p.user_id
+       LEFT JOIN user_credentials c ON c.user_id = p.user_id
+       ORDER BY p.created_at DESC
+       LIMIT ? OFFSET ?`,
+    )
+      .bind(limit, offset)
+      .all(),
+  ])
+  return json(
+    {
+      total: total?.n ?? 0,
+      bytes: total?.bytes ?? 0,
+      photos: (rows.results || []).map((row) => ({
+        id: row.id,
+        userId: row.user_id,
+        nickname: row.nickname || '',
+        username: row.username || '',
+        syncCode: row.sync_code || '',
+        mime: row.mime,
+        size: row.size,
+        createdAt: row.created_at,
+        url: photoUrl(request, row.id, row.access_key),
+      })),
+    },
+    200,
+    env,
+    request,
+  )
+}
+
 /* ---------------- 入口 ---------------- */
 
-async function handleApi(request, env, url) {
+async function handleApi(request, env, url, ctx) {
   const route = `${request.method} ${url.pathname}`
 
   if (route === 'GET /api/health') {
@@ -973,6 +2137,19 @@ async function handleApi(request, env, url) {
   if (route === 'PUT /api/admin/settings') return await handleAdminSettingsPut(request, env)
   if (route === 'POST /api/admin/ai/test') return await handleAdminAITest(request, env)
   if (route === 'GET /api/admin/ai/models') return await handleAdminAIModels(request, env, url)
+  if (route === 'GET /api/admin/codes') return await handleAdminCodesList(request, env, url)
+  if (route === 'POST /api/admin/codes') return await handleAdminCodesCreate(request, env)
+  if (route === 'GET /api/admin/photos') return await handleAdminPhotos(request, env, url)
+
+  const adminCodeMatch = url.pathname.match(/^\/api\/admin\/codes\/(membership|invite)\/([^/]+)$/)
+  if (adminCodeMatch && request.method === 'DELETE') {
+    return await handleAdminCodeDelete(
+      request,
+      env,
+      adminCodeMatch[1],
+      decodeURIComponent(adminCodeMatch[2]),
+    )
+  }
 
   const userMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)$/)
   if (userMatch && request.method === 'PATCH') {
@@ -988,7 +2165,20 @@ async function handleApi(request, env, url) {
 
   if (route === 'POST /api/auth/register') return await handleRegister(request, env)
   if (route === 'POST /api/auth/login') return await handleLogin(request, env)
+  if (route === 'POST /api/auth/logout') return await handleLogout(request, env)
+  if (route === 'GET /api/auth/config') return await handleAuthConfig(request, env)
+  if (route === 'GET /api/auth/me') return await handleMe(request, env)
+  if (route === 'POST /api/auth/credentials') return await handleSetCredentials(request, env)
+  if (route === 'POST /api/membership/redeem') return await handleMembershipRedeem(request, env)
   if (route === 'PATCH /api/account') return await handleUpdateAccount(request, env)
+  if (route === 'POST /api/photos') return await handlePhotoUpload(request, env)
+  const photoMatch = url.pathname.match(/^\/api\/photos\/([A-Za-z0-9]+)$/)
+  if (photoMatch && (request.method === 'GET' || request.method === 'HEAD')) {
+    return await handlePhotoGet(request, env, photoMatch[1], url)
+  }
+  if (photoMatch && request.method === 'DELETE') {
+    return await handlePhotoDelete(request, env, photoMatch[1])
+  }
   if (route === 'GET /api/sync/pull') return await handlePull(request, env, url)
   if (route === 'POST /api/sync/push') return await handlePush(request, env)
   if (route === 'GET /api/sync/stats') return await handleStats(request, env)
@@ -999,8 +2189,19 @@ async function handleApi(request, env, url) {
     return await handleLeaveShare(request, env, decodeURIComponent(leaveMatch[1]))
   }
   if (route === 'POST /api/ai/complete') return await handleAI(request, env)
+  if (route === 'GET /api/ai/config') return await handleAIConfig(request, env)
+  if (route === 'POST /api/ai/jobs') return await handleAIJobCreate(request, env, ctx)
+  if (route === 'GET /api/ai/jobs') return await handleAIJobsList(request, env, url)
+  const aiJobMatch = url.pathname.match(/^\/api\/ai\/jobs\/([A-Za-z0-9]+)$/)
+  if (aiJobMatch && request.method === 'GET') {
+    return await handleAIJobGet(request, env, aiJobMatch[1])
+  }
+  if (aiJobMatch && request.method === 'DELETE') {
+    return await handleAIJobDelete(request, env, aiJobMatch[1])
+  }
   if (route === 'GET /api/weather') return await handleWeather(request, env, url)
   if (route === 'GET /api/geocode') return await handleGeocode(request, env, url)
+  if (route === 'GET /api/geo/reverse') return await handleReverseGeo(request, env, url)
   if (route === 'GET /api/poi') return await handlePOI(request, env, url)
 
   return json({ error: 'Not Found', path: url.pathname }, 404, env, request)
@@ -1014,11 +2215,16 @@ export default {
         return new Response(null, { status: 204, headers: corsHeaders(env, request) })
       }
       try {
-        return await handleApi(request, env, url)
+        return await handleApi(request, env, url, ctx)
       } catch (error) {
         const status = error instanceof HttpError ? error.status : 500
         if (status >= 500) console.error(error)
-        return json({ error: error.message || '服务器错误' }, status, env, request)
+        return json(
+          { error: error.message || '服务器错误', ...(error.code ? { code: error.code } : {}) },
+          status,
+          env,
+          request,
+        )
       }
     }
     if (env.ASSETS) return env.ASSETS.fetch(request)

@@ -39,6 +39,7 @@ function rootOf(view: View): RootKey {
       return 'expenses'
     case 'profile':
     case 'sync':
+    case 'about':
       return 'profile'
     default:
       return 'trips'

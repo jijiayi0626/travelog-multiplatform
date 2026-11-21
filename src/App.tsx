@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useContext, useEffect, useState } from 'react'
+import { LockKey } from '@phosphor-icons/react'
 import type { TabKey, TripTemplate, View } from './lib/types'
 import {
   I18nContext,
@@ -17,6 +18,8 @@ import { AppShell, type RootKey } from './components/AppShell'
 import { SearchPalette } from './components/SearchPalette'
 import { InstallBanner } from './components/InstallBanner'
 import { ShortcutsSheet } from './components/ShortcutsSheet'
+import { Onboarding } from './components/Onboarding'
+import { AIJobHub, AIPaywall } from './components/AIJobHub'
 import { TripsPage } from './pages/TripsPage'
 import { TripDetailPage } from './pages/TripDetailPage'
 import { FootprintsPage } from './pages/FootprintsPage'
@@ -30,7 +33,9 @@ import { ExpenseEditor } from './pages/ExpenseEditor'
 import { FootprintEditor } from './pages/FootprintEditor'
 import { PlanEditor } from './pages/PlanEditor'
 import { SyncPage } from './pages/SyncPage'
+import { AboutPage } from './pages/AboutPage'
 import { AdminPage } from './pages/AdminPage'
+import { isDevMode, subscribeDevMode } from './lib/dev-mode'
 
 const TABS: TabKey[] = ['plan', 'timeline', 'ledger', 'checklist', 'members']
 const TEMPLATES: TripTemplate[] = ['blank', 'city', 'beach', 'road', 'ski']
@@ -74,6 +79,8 @@ function parseHash(): View {
       return { name: 'profile' }
     case 'sync':
       return { name: 'sync' }
+    case 'about':
+      return { name: 'about' }
     case 'admin':
       return { name: 'admin' }
     default:
@@ -111,6 +118,8 @@ function toHash(view: View): string {
       return '#/footprint-editor'
     case 'sync':
       return '#/sync'
+    case 'about':
+      return '#/about'
     case 'admin':
       return '#/admin'
   }
@@ -159,6 +168,9 @@ export default function App() {
   )
   const [toasts, setToasts] = useState<ToastItem[]>([])
   const [lang, setLangState] = useState<Lang>(() => getLang())
+  const [devMode, setDevModeState] = useState(() => isDevMode())
+
+  useEffect(() => subscribeDevMode(() => setDevModeState(isDevMode())), [])
 
   useEffect(() => {
     const onHashChange = () => setView(parseHash())
@@ -281,6 +293,14 @@ export default function App() {
     }, 2400)
   }, [])
 
+  useEffect(() => {
+    const onQueued = () => {
+      toast(translateText(lang, 'AI 已在后台执行，可以离开此页面，完成后在右上角查看'))
+    }
+    window.addEventListener('travelog:ai-queued', onQueued)
+    return () => window.removeEventListener('travelog:ai-queued', onQueued)
+  }, [lang, toast])
+
   const renderView = () => {
     if (!ready) return <StartupPlaceholder />
     switch (view.name) {
@@ -310,8 +330,10 @@ export default function App() {
         return <FootprintEditor />
       case 'sync':
         return <SyncPage />
+      case 'about':
+        return <AboutPage />
       case 'admin':
-        return <AdminPage />
+        return devMode ? <AdminPage /> : <DevModeRequired onOpenAbout={() => navigate({ name: 'about' })} />
     }
   }
 
@@ -343,7 +365,10 @@ export default function App() {
 
               <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
               <ShortcutsSheet open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+              <Onboarding />
               <InstallBanner />
+              <AIJobHub />
+              <AIPaywall />
 
               <div
                 className="pointer-events-none fixed inset-x-0 bottom-[calc(76px+env(safe-area-inset-bottom))] z-[70] flex flex-col items-center gap-2 px-4 lg:bottom-6"
@@ -383,6 +408,26 @@ function StartupPlaceholder() {
         <div className="skeleton h-[196px] rounded-[1.5rem]" />
         <div className="skeleton h-[196px] rounded-[1.5rem]" />
       </div>
+    </div>
+  )
+}
+
+function DevModeRequired({ onOpenAbout }: { onOpenAbout: () => void }) {
+  const { tr } = useContext(I18nContext)
+  return (
+    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-6 text-center">
+      <span className="flex h-14 w-14 items-center justify-center rounded-2xl border border-line bg-surface text-ink-2">
+        <LockKey size={24} />
+      </span>
+      <div>
+        <p className="text-title font-semibold tracking-tight text-ink">{tr('未开启开发者模式')}</p>
+        <p className="mx-auto mt-2 max-w-[36ch] text-body-sm leading-6 text-ink-3">
+          {tr('管理面板入口已移至「关于旅记」的开发者模式。连续点击版本号 7 次即可开启。')}
+        </p>
+      </div>
+      <button type="button" className="btn-primary h-10 px-5" onClick={onOpenAbout}>
+        {tr('前往关于旅记')}
+      </button>
     </div>
   )
 }

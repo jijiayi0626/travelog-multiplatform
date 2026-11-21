@@ -244,6 +244,10 @@ html[data-theme='dark'] {
     animation: fade-in 0.3s var(--ease-out-expo) both;
   }
 
+  .slide-in-right {
+    animation: slide-in-right 0.34s var(--ease-out-expo) both;
+  }
+
   .cover-0 {
     background: linear-gradient(135deg, #2563eb 0%, #1e3a8a 58%, #0f1b3d 100%);
   }
@@ -300,6 +304,17 @@ html[data-theme='dark'] {
   }
   to {
     opacity: 1;
+  }
+}
+
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translate3d(28px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 

@@ -5,7 +5,12 @@ export interface CloudConfig {
   syncCode: string
   nickname: string
   userId: string
-  cursor: number
+  /** 账号名（账号密码登录）；仅同步码登录的老账号为空 */
+  username: string
+  /** 会员到期时间（毫秒）；0 表示非会员 */
+  membershipExpiresAt: number
+  /** 同步游标：新版为 updatedAt~kind~id，兼容旧版的数字时间戳 */
+  cursor: string | number
   lastSyncAt: number
   autoSync: boolean
 }
@@ -17,6 +22,8 @@ const DEFAULT_CONFIG: CloudConfig = {
   syncCode: '',
   nickname: '',
   userId: '',
+  username: '',
+  membershipExpiresAt: 0,
   cursor: 0,
   lastSyncAt: 0,
   autoSync: true,
@@ -35,11 +42,13 @@ export function getCloudConfig(): CloudConfig {
 export function saveCloudConfig(patch: Partial<CloudConfig>): CloudConfig {
   const next = { ...getCloudConfig(), ...patch }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+  window.dispatchEvent(new CustomEvent('travelog:cloud-changed'))
   return next
 }
 
 export function clearCloudConfig(): CloudConfig {
   localStorage.removeItem(STORAGE_KEY)
+  window.dispatchEvent(new CustomEvent('travelog:cloud-changed'))
   return { ...DEFAULT_CONFIG }
 }
 
@@ -58,10 +67,12 @@ export function apiOrigin(): string {
 
 export class ApiError extends Error {
   status: number
+  code?: string
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, code?: string) {
     super(message)
     this.status = status
+    this.code = code
   }
 }
 
@@ -91,9 +102,13 @@ export async function api<T>(
       signal: controller.signal,
     })
     const text = await response.text()
-    const data = text ? (JSON.parse(text) as T & { error?: string }) : ({} as T)
+    const data = text ? (JSON.parse(text) as T & { error?: string; code?: string }) : ({} as T)
     if (!response.ok) {
-      throw new ApiError((data as { error?: string }).error || `请求失败（${response.status}）`, response.status)
+      throw new ApiError(
+        (data as { error?: string }).error || `请求失败（${response.status}）`,
+        response.status,
+        (data as { code?: string }).code,
+      )
     }
     return data as T
   } catch (error) {
@@ -117,43 +132,132 @@ export async function checkHealth(): Promise<HealthInfo> {
   return api<HealthInfo>('/health', { auth: false, timeoutMs: 8000 })
 }
 
+export interface MembershipInfo {
+  active: boolean
+  expiresAt: number
+}
+
 export interface AuthResult {
   userId: string
   token: string
   syncCode: string
   nickname: string
+  username: string
+  membership: MembershipInfo
+  needsCredentials: boolean
 }
 
-export async function registerCloud(nickname: string): Promise<AuthResult> {
-  const result = await api<AuthResult>('/auth/register', {
-    method: 'POST',
-    body: { nickname },
-    auth: false,
-  })
+function saveAuth(result: AuthResult): AuthResult {
   saveCloudConfig({
     userId: result.userId,
     token: result.token,
     syncCode: result.syncCode,
     nickname: result.nickname,
+    username: result.username || '',
+    membershipExpiresAt: result.membership?.expiresAt ?? 0,
     cursor: 0,
   })
   return result
 }
 
+export interface AuthConfig {
+  site: string
+  inviteRequired: boolean
+}
+
+export function getAuthConfig(): Promise<AuthConfig> {
+  return api<AuthConfig>('/auth/config', { auth: false })
+}
+
+export async function registerCloud(
+  nickname: string,
+  username: string,
+  password: string,
+  inviteCode?: string,
+): Promise<AuthResult> {
+  const result = await api<AuthResult>('/auth/register', {
+    method: 'POST',
+    body: { nickname, username, password, inviteCode: inviteCode || undefined },
+    auth: false,
+  })
+  return saveAuth(result)
+}
+
+/** 账号 + 密码登录 */
+export async function loginWithPassword(username: string, password: string): Promise<AuthResult> {
+  const result = await api<AuthResult>('/auth/login', {
+    method: 'POST',
+    body: { username, password },
+    auth: false,
+  })
+  return saveAuth(result)
+}
+
+/** 兼容登录：用 8 位同步码登录（多人共享/老账号） */
 export async function loginCloud(syncCode: string): Promise<AuthResult> {
   const result = await api<AuthResult>('/auth/login', {
     method: 'POST',
     body: { syncCode },
     auth: false,
   })
+  return saveAuth(result)
+}
+
+export interface AccountInfo {
+  userId: string
+  nickname: string
+  username: string
+  syncCode: string
+  createdAt: number
+  membership: MembershipInfo
+  needsCredentials: boolean
+}
+
+/** 当前账号资料 + 会员状态 */
+export async function getAccountMe(): Promise<AccountInfo> {
+  const result = await api<AccountInfo>('/auth/me')
   saveCloudConfig({
-    userId: result.userId,
-    token: result.token,
-    syncCode: result.syncCode,
     nickname: result.nickname,
-    cursor: 0,
+    username: result.username || '',
+    membershipExpiresAt: result.membership?.expiresAt ?? 0,
   })
   return result
+}
+
+/** 老账号补设 / 已有账号修改用户名密码 */
+export async function saveAccountCredentials(
+  username: string,
+  password: string,
+  currentPassword?: string,
+): Promise<{ username: string }> {
+  const result = await api<{ username: string }>('/auth/credentials', {
+    method: 'POST',
+    body: { username, password, currentPassword: currentPassword || undefined },
+  })
+  saveCloudConfig({ username: result.username })
+  return result
+}
+
+/** 兑换会员码 */
+export async function redeemMembershipCode(code: string): Promise<{ addedDays: number; membership: MembershipInfo }> {
+  const result = await api<{ addedDays: number; membership: MembershipInfo }>('/membership/redeem', {
+    method: 'POST',
+    body: { code },
+  })
+  saveCloudConfig({ membershipExpiresAt: result.membership?.expiresAt ?? 0 })
+  return result
+}
+
+/** 退出：通知服务端注销当前设备令牌，再清本地 */
+export async function logoutCloud(): Promise<void> {
+  if (getCloudConfig().token) {
+    try {
+      await api('/auth/logout', { method: 'POST' })
+    } catch {
+      /* 网络失败也清本地 */
+    }
+  }
+  clearCloudConfig()
 }
 
 /** 修改当前账号昵称；会同步到云端账号（旅伴、共享行程里的展示名） */
@@ -182,6 +286,29 @@ export async function aiComplete(
     body: { prompt, system, temperature },
     timeoutMs: 45000,
   })
+}
+
+/* ---------------- 照片（R2） ---------------- */
+
+export interface UploadedPhoto {
+  id: string
+  url: string
+  size: number
+  mime: string
+  createdAt: number
+}
+
+/** 把压缩后的 data URL 上传到 R2，返回可长期访问的能力地址 */
+export function uploadPhoto(dataUrl: string): Promise<UploadedPhoto> {
+  return api<UploadedPhoto>('/photos', {
+    method: 'POST',
+    body: { dataUrl },
+    timeoutMs: 60000,
+  })
+}
+
+export function deleteCloudPhoto(id: string): Promise<{ ok: boolean }> {
+  return api(`/photos/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
 export interface WeatherNow {
@@ -265,6 +392,9 @@ export interface AdminOverview {
   users: number
   active7Days: number
   entities: number
+  members: number
+  photos: { count: number; bytes: number }
+  registration: { inviteRequired: boolean }
   ai: {
     enabled: boolean
     provider: 'openai' | 'workers'
@@ -277,11 +407,20 @@ export interface AdminOverview {
 export interface AdminUser {
   id: string
   nickname: string | null
+  username: string
   syncCode: string
   createdAt: number
   lastSeenAt: number
   status: 'active' | 'disabled'
   entityCount: number
+  membership: MembershipInfo
+  lastLoginAt: number
+  lastIp: string
+  lastUserAgent: string
+  lastCountry: string
+  lastRegion: string
+  lastCity: string
+  lastColo: string
 }
 
 export interface AdminEndpoint {
@@ -299,12 +438,27 @@ export interface AdminEndpoint {
 
 export interface AdminSettings {
   site: { name: string }
+  registration: { inviteRequired: boolean }
   ai: {
     enabled: boolean
+    membershipRequired: boolean
     temperature: number
     workersBound: boolean
     endpoints: AdminEndpoint[]
   }
+}
+
+export interface AdminCode {
+  code: string
+  note: string
+  maxUses: number
+  usedCount: number
+  createdAt: number
+  /** 会员码 */
+  days?: number
+  expiresAt?: number
+  /** 邀请码 */
+  disabled?: boolean
 }
 
 export interface AdminAITestResult {
@@ -315,6 +469,25 @@ export interface AdminAITestResult {
   ok: boolean
   sample?: string
   error?: string
+}
+
+export interface AdminPhoto {
+  id: string
+  userId: string
+  nickname: string
+  username: string
+  syncCode: string
+  mime: string
+  size: number
+  createdAt: number
+  url: string
+}
+
+export function adminListPhotos(
+  limit = 60,
+  offset = 0,
+): Promise<{ total: number; bytes: number; photos: AdminPhoto[] }> {
+  return adminApi(`/admin/photos?limit=${limit}&offset=${offset}`)
 }
 
 export async function adminLogin(username: string, password: string): Promise<AdminSession> {
@@ -348,7 +521,7 @@ export function adminListUsers(query: string, limit = 50, offset = 0): Promise<{
 
 export function adminPatchUser(
   id: string,
-  patch: { status?: 'active' | 'disabled'; nickname?: string; note?: string },
+  patch: { status?: 'active' | 'disabled'; nickname?: string; note?: string; membershipDays?: number },
 ): Promise<{ ok: boolean }> {
   return adminApi(`/admin/users/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch })
 }
@@ -367,8 +540,10 @@ export function adminGetSettings(): Promise<AdminSettings> {
 
 export function adminSaveSettings(payload: {
   site?: { name?: string }
+  registration?: { inviteRequired?: boolean }
   ai?: {
     enabled?: boolean
+    membershipRequired?: boolean
     temperature?: number
     endpoints?: Array<Partial<AdminEndpoint>>
   }
@@ -386,6 +561,26 @@ export function adminListModels(endpointId: string): Promise<{ models: string[] 
 
 export function adminChangePassword(password: string): Promise<{ ok: boolean }> {
   return adminApi('/admin/password', { method: 'POST', body: { password } })
+}
+
+/* ---------------- 会员码 / 注册邀请码 ---------------- */
+
+export function adminListCodes(type: 'membership' | 'invite'): Promise<{ type: string; codes: AdminCode[] }> {
+  return adminApi(`/admin/codes?type=${type}`)
+}
+
+export function adminCreateCodes(payload: {
+  type: 'membership' | 'invite'
+  count?: number
+  days?: number
+  maxUses?: number
+  note?: string
+}): Promise<{ type: string; codes: string[]; days: number; maxUses: number }> {
+  return adminApi('/admin/codes', { method: 'POST', body: payload })
+}
+
+export function adminDeleteCode(type: 'membership' | 'invite', code: string): Promise<{ ok: boolean }> {
+  return adminApi(`/admin/codes/${type}/${encodeURIComponent(code)}`, { method: 'DELETE' })
 }
 
 /* ---------------- 旅伴邀请码（trip 级共享） ---------------- */
@@ -424,6 +619,9 @@ export interface PoiItem {
   latitude: number
   longitude: number
   type: string
+  city?: string
+  district?: string
+  street?: string
 }
 
 /**
@@ -442,4 +640,37 @@ export async function searchPoi(
   }
   const result = await api<{ results: PoiItem[] }>(`/poi?${params.toString()}`, { auth: false })
   return result.results ?? []
+}
+
+/* ---------------- 逆地理编码（区县 / 街道） ---------------- */
+
+export interface ReverseGeoResult {
+  found: boolean
+  name: string
+  displayName: string
+  country: string
+  countryCode: string
+  province: string
+  city: string
+  district: string
+  street: string
+  areaLabel: string
+  latitude: number
+  longitude: number
+}
+
+/** 把坐标解析到区县 / 街道；用于打卡自动填名与自动打卡 */
+export function reverseGeocode(
+  latitude: number,
+  longitude: number,
+  timeoutMs = 8000,
+): Promise<ReverseGeoResult> {
+  const params = new URLSearchParams({
+    lat: String(latitude),
+    lon: String(longitude),
+  })
+  return api<ReverseGeoResult>(`/geo/reverse?${params.toString()}`, {
+    auth: false,
+    timeoutMs,
+  })
 }

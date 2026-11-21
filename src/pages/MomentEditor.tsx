@@ -344,7 +344,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
           )}
         </button>
         <p className="text-caption leading-4 text-ink-3">
-          {tr('照片会压缩后保存在本地，不会上传到任何服务器。')}
+          {tr('照片会压缩后保存在本地，登录云同步后自动上传到云端。')}
         </p>
       </FormBlock>
 

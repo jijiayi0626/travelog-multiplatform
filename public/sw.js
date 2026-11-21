@@ -1,4 +1,5 @@
-const CACHE = 'travelog-shell-v3'
+const CACHE = 'travelog-shell-v5'
+const PHOTO_CACHE = 'travelog-photos-v1'
 const SHELL = ['./', './index.html', './manifest.webmanifest']
 
 self.addEventListener('install', (event) => {
@@ -14,7 +15,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))
+      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE && key !== PHOTO_CACHE).map((key) => caches.delete(key))))
       .then(() => self.clients.claim()),
   )
 })
@@ -22,6 +23,25 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const request = event.request
   if (request.method !== 'GET' || !request.url.startsWith(self.location.origin)) {
+    return
+  }
+
+  // API 与版本文件必须走网络：缓存会导致登录态与更新检查长期停留在旧结果
+  const url = new URL(request.url)
+  if (url.pathname.startsWith('/api/photos/')) {
+    // 云端照片：缓存优先，离线也能翻相册
+    event.respondWith(
+      caches.open(PHOTO_CACHE).then(async (cache) => {
+        const cached = await cache.match(request)
+        if (cached) return cached
+        const response = await fetch(request)
+        if (response.ok) await cache.put(request, response.clone())
+        return response
+      }),
+    )
+    return
+  }
+  if (url.pathname.includes('/api/') || url.pathname.endsWith('/version.json')) {
     return
   }
 

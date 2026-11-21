@@ -4,8 +4,13 @@ import { saveFootprint } from '../lib/repo'
 import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import { todayStart } from '../lib/utils'
 import { getBestFix, isNative } from '../lib/native'
-import { searchPoi, type PoiItem } from '../lib/cloud'
-import { CHINA_CITIES } from '../lib/chinaCities'
+import {
+  reverseGeocode,
+  searchPoi,
+  type PoiItem,
+  type ReverseGeoResult,
+} from '../lib/cloud'
+import { CHINA_CITIES, locateCity } from '../lib/chinaCities'
 import { EditorScreen, FormBlock } from '../components/EditorScreen'
 import { Field } from '../components/ui'
 
@@ -21,6 +26,8 @@ export function FootprintEditor() {
   const [latitude, setLatitude] = useState(0)
   const [longitude, setLongitude] = useState(0)
   const [locating, setLocating] = useState(false)
+  const [geoCoding, setGeoCoding] = useState(false)
+  const [geo, setGeo] = useState<ReverseGeoResult | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   // 输入法下 state 可能滞后，保存时以 DOM 值为准
@@ -58,6 +65,66 @@ export function FootprintEditor() {
 
   const [pickedCity, setPickedCity] = useState<(typeof CHINA_CITIES)[number] | null>(null)
 
+  // 拿到坐标后立刻反查区县 / 街道；识别失败时退回本地行政区划中心点
+  const applyFix = async (latitude: number, longitude: number) => {
+    setLatitude(latitude)
+    setLongitude(longitude)
+    setGeo(null)
+    setGeoCoding(true)
+    const fallback = locateCity(latitude, longitude)
+    try {
+      const info = await reverseGeocode(latitude, longitude)
+      setGeo(info)
+      const suggestedPlace =
+        info.name || info.district || info.street || fallback?.district?.name || ''
+      const suggestedCity = info.city || fallback?.city.name || ''
+      setPlaceName((prev) =>
+        prev.trim() || placeRef.current?.value.trim() ? prev : suggestedPlace,
+      )
+      setCity((prev) => (prev.trim() ? prev : suggestedCity))
+      if (info.district || info.street || info.name) {
+        toast(
+          tr('已定位到「{name}」', {
+            name: info.district || info.street || info.name,
+          }),
+        )
+      } else {
+        toast(tr('已取到当前位置'))
+      }
+    } catch {
+      if (fallback) {
+        const district = fallback.district?.name || ''
+        setGeo({
+          found: true,
+          name: district || fallback.city.name,
+          displayName: '',
+          country: '',
+          countryCode: '',
+          province: fallback.city.province,
+          city: fallback.city.name,
+          district,
+          street: '',
+          areaLabel: [fallback.city.province, fallback.city.name, district]
+            .filter(Boolean)
+            .join(' · '),
+          latitude,
+          longitude,
+        })
+        setPlaceName((prev) =>
+          prev.trim() || placeRef.current?.value.trim()
+            ? prev
+            : district || fallback.city.short,
+        )
+        setCity((prev) => (prev.trim() ? prev : fallback.city.name))
+        toast(tr('已取到当前位置，未能识别街道，可手动填写'))
+      } else {
+        toast(tr('已取到当前位置，可手动填写地点'))
+      }
+    } finally {
+      setGeoCoding(false)
+    }
+  }
+
   const locate = async () => {
     setLocating(true)
 
@@ -66,9 +133,7 @@ export function FootprintEditor() {
       const fix = await getBestFix()
       setLocating(false)
       if (fix) {
-        setLatitude(fix.latitude)
-        setLongitude(fix.longitude)
-        toast(tr('已取到当前位置'))
+        void applyFix(fix.latitude, fix.longitude)
       } else {
         toast(tr('定位失败，可手动填写地点'))
       }
@@ -82,10 +147,8 @@ export function FootprintEditor() {
     }
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setLatitude(position.coords.latitude)
-        setLongitude(position.coords.longitude)
         setLocating(false)
-        toast(tr('已取到当前位置'))
+        void applyFix(position.coords.latitude, position.coords.longitude)
       },
       () => {
         setLocating(false)
@@ -220,6 +283,15 @@ export function FootprintEditor() {
                       setPlaceName(item.name)
                       setLatitude(item.latitude)
                       setLongitude(item.longitude)
+                      setGeo(null)
+                      const cityName = item.city || item.district || ''
+                      if (cityName) {
+                        setCity((prev) => prev.trim() || cityName)
+                        const matched = CHINA_CITIES.find(
+                          (entry) => entry.name === item.city || entry.short === item.city,
+                        )
+                        if (matched) setPickedCity(matched)
+                      }
                       setPoiResults([])
                       toast(tr('已填入「{name}」', { name: item.name }))
                     }}
@@ -311,15 +383,21 @@ export function FootprintEditor() {
         </Field>
       </FormBlock>
 
-      <FormBlock title={tr('坐标')} hint={hasCoord ? tr('已记录') : tr('可选')}>
+      <FormBlock
+        title={tr('坐标')}
+        hint={hasCoord ? tr('已记录') : tr('可选')}
+      >
+        <p className="text-caption leading-4 text-ink-3">
+          {tr('定位会尽量识别到区县和街道；识别不准时可以搜索周边地点或手动修改。')}
+        </p>
         <button
           type="button"
           onClick={locate}
-          disabled={locating}
+          disabled={locating || geoCoding}
           className="press flex w-full items-center gap-3 rounded-xl border border-line bg-paper-2/50 px-3.5 py-3 text-left disabled:opacity-60"
         >
           <span className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-accent">
-            {locating ? (
+            {locating || geoCoding ? (
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent" />
             ) : (
               <Crosshair size={17} />
@@ -327,22 +405,82 @@ export function FootprintEditor() {
           </span>
           <span className="min-w-0 flex-1">
             <span className="block text-body-sm font-medium text-ink">
-              {locating ? tr('定位中…') : tr('使用当前位置')}
+              {locating
+                ? tr('定位中…')
+                : geoCoding
+                  ? tr('正在识别区县和街道…')
+                  : tr('使用当前位置')}
             </span>
             <span className="mt-0.5 block text-note tabular-nums text-ink-3">
               {hasCoord
                 ? `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`
-                : tr('允许定位后可在地图中查看这个地点')}
+                : tr('允许定位后自动识别区县与街道')}
             </span>
           </span>
           <MapPin size={16} className="shrink-0 text-ink-3" />
         </button>
+        {geo ? (
+          <div className="space-y-2 rounded-2xl border border-line bg-paper-2/50 p-3">
+            <p className="text-caption leading-4 text-ink-3">
+              {geo.areaLabel || geo.displayName || tr('已识别当前位置')}
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { label: geo.name, hint: tr('地点') },
+                { label: geo.district, hint: tr('区县') },
+                { label: geo.street, hint: tr('街道') },
+              ]
+                .filter(
+                  (option, index, list) =>
+                    option.label && list.findIndex((item) => item.label === option.label) === index,
+                )
+                .map((option) => (
+                  <button
+                    key={`${option.hint}-${option.label}`}
+                    type="button"
+                    onClick={() => {
+                      setPlaceName(option.label)
+                      toast(tr('已填入「{name}」', { name: option.label }))
+                    }}
+                    className={
+                      placeName === option.label
+                        ? 'chip chip-active px-2 py-1 text-caption'
+                        : 'chip px-2 py-1 text-caption'
+                    }
+                  >
+                    {option.hint} · {option.label}
+                  </button>
+                ))}
+              {geo.city ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCity(geo.city)
+                    const matched = CHINA_CITIES.find(
+                      (entry) => entry.name === geo.city || entry.short === geo.city,
+                    )
+                    setPickedCity(matched ?? null)
+                    toast(tr('城市已填为「{name}」', { name: geo.city }))
+                  }}
+                  className={
+                    city === geo.city
+                      ? 'chip chip-active px-2 py-1 text-caption'
+                      : 'chip px-2 py-1 text-caption'
+                  }
+                >
+                  {tr('城市')} · {geo.city}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
         {hasCoord ? (
           <button
             type="button"
             onClick={() => {
               setLatitude(0)
               setLongitude(0)
+              setGeo(null)
             }}
             className="press self-start text-note text-ink-3 underline-offset-2 hover:text-danger hover:underline"
           >

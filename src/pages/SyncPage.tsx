@@ -1,10 +1,11 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ArrowLeft,
   CheckCircle,
   CloudCheck,
   CloudSlash,
   Copy,
+  Crown,
   Key,
   Plugs,
   SignIn,
@@ -15,10 +16,18 @@ import { useNav, useI18n, useRefresh, useToast } from '../lib/app-context'
 import {
   checkHealth,
   clearCloudConfig,
+  getAccountMe,
+  getAuthConfig,
   getCloudConfig,
   loginCloud,
+  loginWithPassword,
+  logoutCloud,
+  redeemMembershipCode,
   registerCloud,
+  saveAccountCredentials,
   saveCloudConfig,
+  type AccountInfo,
+  type AuthConfig,
   type HealthInfo,
 } from '../lib/cloud'
 import { pullOverwrite, runSync } from '../lib/sync-engine'
@@ -28,14 +37,19 @@ import { cn } from '../lib/cn'
 import { Field, IconButton } from '../components/ui'
 
 const ENDPOINTS = [
-  { method: 'POST', path: '/api/auth/register', note: '创建同步账号' },
-  { method: 'POST', path: '/api/auth/login', note: '用同步码登录' },
-  { method: 'PATCH', path: '/api/account', note: '修改账号昵称' },
+  { method: 'POST', path: '/api/auth/register', note: '创建账号' },
+  { method: 'POST', path: '/api/auth/login', note: '账号密码 / 同步码登录' },
+  { method: 'GET', path: '/api/auth/me', note: '账号资料与会员状态' },
+  { method: 'POST', path: '/api/membership/redeem', note: '兑换会员码' },
   { method: 'GET', path: '/api/sync/pull', note: '游标增量拉取' },
   { method: 'POST', path: '/api/sync/push', note: 'LWW 增量推送' },
   { method: 'POST', path: '/api/ai/complete', note: 'AI 调用代理' },
-  { method: 'GET', path: '/api/weather', note: '天气代理' },
 ]
+
+function formatDate(ts: number): string {
+  if (!ts) return ''
+  return new Date(ts).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+}
 
 export function SyncPage() {
   const nav = useNav()
@@ -45,16 +59,68 @@ export function SyncPage() {
 
   const [config, setConfig] = useState(() => getCloudConfig())
   const [baseUrl, setBaseUrl] = useState(config.baseUrl)
-  const [nickname, setNickname] = useState('')
-  const [code, setCode] = useState('')
   const [health, setHealth] = useState<HealthInfo | null>(null)
-  const [busy, setBusy] = useState<'health' | 'register' | 'login' | 'sync' | 'restore' | null>(null)
+  const [busy, setBusy] = useState<
+    'health' | 'register' | 'login' | 'sync' | 'restore' | 'redeem' | 'credentials' | null
+  >(null)
   const [confirmRestore, setConfirmRestore] = useState(false)
   const [result, setResult] = useState('')
-  // 中文输入法下 React state 可能滞后，注册时以输入框实际值为准
+  const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null)
+  const [account, setAccount] = useState<AccountInfo | null>(null)
+
+  // 注册
   const nicknameRef = useRef<HTMLInputElement>(null)
+  const [regUsername, setRegUsername] = useState('')
+  const [regPassword, setRegPassword] = useState('')
+  const [regInvite, setRegInvite] = useState('')
+  // 登录
+  const [loginMode, setLoginMode] = useState<'password' | 'code'>('password')
+  const [loginUsername, setLoginUsername] = useState('')
+  const [loginPassword, setLoginPassword] = useState('')
+  const [code, setCode] = useState('')
+  // 老账号补设 / 修改密码
+  const [credForm, setCredForm] = useState(false)
+  const [credUsername, setCredUsername] = useState('')
+  const [credPassword, setCredPassword] = useState('')
+  const [credCurrent, setCredCurrent] = useState('')
+  // 会员码
+  const [memberCode, setMemberCode] = useState('')
 
   const signedIn = Boolean(config.token)
+  const hasCredentials = Boolean(account?.username || config.username)
+  const memberActive = (account?.membership.expiresAt ?? config.membershipExpiresAt) > Date.now()
+
+  useEffect(() => {
+    getAuthConfig()
+      .then(setAuthConfig)
+      .catch(() => setAuthConfig(null))
+  }, [])
+
+  useEffect(() => {
+    if (!signedIn) {
+      setAccount(null)
+      return
+    }
+    let cancelled = false
+    getAccountMe()
+      .then((info) => {
+        if (cancelled) return
+        setAccount(info)
+        setConfig(getCloudConfig())
+      })
+      .catch((error) => {
+        if (cancelled) return
+        if (error && typeof error === 'object' && 'status' in error && (error as { status: number }).status === 401) {
+          clearCloudConfig()
+          setConfig(getCloudConfig())
+          toast(tr('登录已过期，请重新登录'))
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+    // 只在登录状态变化时拉取账号资料；toast/tr 每次渲染都是新函数，不能放进依赖
+  }, [signedIn])
 
   const saveBaseUrl = () => {
     const next = saveCloudConfig({ baseUrl: baseUrl.trim() })
@@ -78,25 +144,32 @@ export function SyncPage() {
     }
   }
 
+  const applyNickname = async (nickname: string) => {
+    const localProfile = await getProfile()
+    if (nickname && localProfile.nickname !== nickname) {
+      await saveProfile({ ...localProfile, nickname })
+      bump()
+    }
+  }
+
   const doRegister = async () => {
-    const name = (nicknameRef.current?.value ?? nickname).trim()
+    const name = (nicknameRef.current?.value ?? '').trim()
     if (!name) {
       toast(tr('先填一个昵称'))
+      return
+    }
+    if (!regUsername.trim() || !regPassword) {
+      toast(tr('请填写账号和密码'))
       return
     }
     setBusy('register')
     try {
       saveCloudConfig({ baseUrl: baseUrl.trim() })
-      const auth = await registerCloud(name)
-      // 账号昵称与本地资料保持一致，避免两个名字各说各话
-      const localProfile = await getProfile()
-      if (localProfile.nickname !== auth.nickname) {
-        await saveProfile({ ...localProfile, nickname: auth.nickname })
-        bump()
-      }
+      const auth = await registerCloud(name, regUsername.trim(), regPassword, regInvite.trim())
+      await applyNickname(auth.nickname)
       setConfig(getCloudConfig())
-      setResult(tr('同步码：{code}', { code: auth.syncCode }))
-      toast(tr('账号已创建，请记下同步码'))
+      setResult(tr('账号已创建，同步码：{code}', { code: auth.syncCode }))
+      toast(tr('注册成功，已自动登录'))
     } catch (error) {
       toast(error instanceof Error ? error.message : tr('注册失败'))
     } finally {
@@ -105,6 +178,26 @@ export function SyncPage() {
   }
 
   const doLogin = async () => {
+    if (loginMode === 'password') {
+      if (!loginUsername.trim() || !loginPassword) {
+        toast(tr('请输入账号和密码'))
+        return
+      }
+      setBusy('login')
+      try {
+        saveCloudConfig({ baseUrl: baseUrl.trim() })
+        const auth = await loginWithPassword(loginUsername.trim(), loginPassword)
+        await applyNickname(auth.nickname)
+        setConfig(getCloudConfig())
+        toast(tr('登录成功，可以同步了'))
+      } catch (error) {
+        toast(error instanceof Error ? error.message : tr('登录失败'))
+      } finally {
+        setBusy(null)
+      }
+      return
+    }
+
     if (!code.trim()) {
       toast(tr('请输入同步码'))
       return
@@ -113,16 +206,55 @@ export function SyncPage() {
     try {
       saveCloudConfig({ baseUrl: baseUrl.trim() })
       const auth = await loginCloud(code.trim())
-      // 登录后把云端账号昵称写回本地资料
-      const localProfile = await getProfile()
-      if (auth.nickname && localProfile.nickname !== auth.nickname) {
-        await saveProfile({ ...localProfile, nickname: auth.nickname })
-        bump()
-      }
+      await applyNickname(auth.nickname)
       setConfig(getCloudConfig())
-      toast(tr('登录成功，可以同步了'))
+      toast(auth.needsCredentials ? tr('已用同步码登录，建议设置账号密码') : tr('登录成功，可以同步了'))
     } catch (error) {
       toast(error instanceof Error ? error.message : tr('登录失败'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const doSetCredentials = async () => {
+    if (!credUsername.trim() || !credPassword) {
+      toast(tr('请填写账号和密码'))
+      return
+    }
+    setBusy('credentials')
+    try {
+      const saved = await saveAccountCredentials(
+        credUsername.trim(),
+        credPassword,
+        hasCredentials ? credCurrent : undefined,
+      )
+      setConfig(getCloudConfig())
+      setAccount((prev) => (prev ? { ...prev, username: saved.username, needsCredentials: false } : prev))
+      setCredForm(false)
+      setCredPassword('')
+      setCredCurrent('')
+      toast(tr('账号密码已保存'))
+    } catch (error) {
+      toast(error instanceof Error ? error.message : tr('保存失败'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const doRedeem = async () => {
+    if (!memberCode.trim()) {
+      toast(tr('请输入会员码'))
+      return
+    }
+    setBusy('redeem')
+    try {
+      const res = await redeemMembershipCode(memberCode.trim().toUpperCase())
+      setConfig(getCloudConfig())
+      setAccount((prev) => (prev ? { ...prev, membership: res.membership } : prev))
+      setMemberCode('')
+      toast(tr('会员已到账，增加 {n} 天', { n: res.addedDays }))
+    } catch (error) {
+      toast(error instanceof Error ? error.message : tr('兑换失败'))
     } finally {
       setBusy(null)
     }
@@ -171,9 +303,9 @@ export function SyncPage() {
     }
   }
 
-  const doLogout = () => {
+  const doLogout = async () => {
     setConfirmRestore(false)
-    clearCloudConfig()
+    await logoutCloud()
     setConfig(getCloudConfig())
     setResult('')
     toast(tr('已退出云同步'))
@@ -210,8 +342,8 @@ export function SyncPage() {
               </h1>
               <p className="mt-1 text-note leading-5 text-ink-3">
                 {signedIn
-                  ? tr('多台设备可以共用同一个同步码，数据按 updatedAt 较新者为准合并。')
-                  : tr('所有数据都保存在这台设备。登录云同步后，手机、平板和网页之间可以互相同步。')}
+                  ? tr('数据按 updatedAt 较新者为准合并；同步码仍可用于多设备与多人共享。')
+                  : tr('所有数据都保存在这台设备。登录后，手机、平板和网页之间可以互相同步。')}
               </p>
             </div>
           </div>
@@ -225,8 +357,26 @@ export function SyncPage() {
             </div>
             {signedIn ? (
               <div className="flex items-center justify-between gap-3">
+                <dt className="shrink-0 text-ink-3">{tr('登录账号')}</dt>
+                <dd className="min-w-0 truncate text-ink">
+                  {account?.username || config.username || tr('仅同步码（建议设置密码）')}
+                </dd>
+              </div>
+            ) : null}
+            {signedIn ? (
+              <div className="flex items-center justify-between gap-3">
                 <dt className="shrink-0 text-ink-3">{tr('账号名称')}</dt>
                 <dd className="min-w-0 truncate text-ink">{config.nickname || tr('未设置')}</dd>
+              </div>
+            ) : null}
+            {signedIn ? (
+              <div className="flex items-center justify-between gap-3">
+                <dt className="shrink-0 text-ink-3">{tr('会员')}</dt>
+                <dd className={cn('text-right', memberActive ? 'text-accent' : 'text-ink-3')}>
+                  {memberActive
+                    ? tr('有效期至 {date}', { date: formatDate(account?.membership.expiresAt ?? config.membershipExpiresAt) })
+                    : tr('未开通')}
+                </dd>
               </div>
             ) : null}
             {signedIn ? (
@@ -315,9 +465,108 @@ export function SyncPage() {
                     ? tr('确认覆盖本机数据？')
                     : tr('从云端恢复本机数据')}
               </button>
+              <button
+                type="button"
+                className="btn-ghost h-9 w-full text-body-sm"
+                onClick={() => {
+                  setCredForm((open) => !open)
+                  setCredUsername(account?.username || config.username || '')
+                }}
+              >
+                <Key size={14} />
+                {hasCredentials ? tr('修改账号密码') : tr('设置账号密码')}
+              </button>
             </div>
           ) : null}
         </section>
+
+        {signedIn && credForm ? (
+          <section className="card space-y-3 p-5">
+            <h2 className="text-body-sm font-semibold tracking-tight text-ink">
+              {hasCredentials ? tr('修改账号密码') : tr('设置账号密码')}
+            </h2>
+            <p className="text-note leading-5 text-ink-3">
+              {tr('设置后可用账号密码登录；同步码继续用于多设备与多人共享。')}
+            </p>
+            <Field label={tr('账号')}>
+              <input
+                className="input"
+                autoComplete="username"
+                value={credUsername}
+                placeholder={tr('2–24 位字母、数字或汉字')}
+                onChange={(event) => setCredUsername(event.target.value)}
+              />
+            </Field>
+            {hasCredentials ? (
+              <Field label={tr('当前密码')}>
+                <input
+                  className="input"
+                  type="password"
+                  autoComplete="current-password"
+                  value={credCurrent}
+                  onChange={(event) => setCredCurrent(event.target.value)}
+                />
+              </Field>
+            ) : null}
+            <Field label={tr('新密码')} hint={tr('至少 6 位')}>
+              <input
+                className="input"
+                type="password"
+                autoComplete="new-password"
+                value={credPassword}
+                onChange={(event) => setCredPassword(event.target.value)}
+              />
+            </Field>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="btn-primary flex-1"
+                onClick={doSetCredentials}
+                disabled={busy === 'credentials'}
+              >
+                {busy === 'credentials' ? tr('保存中…') : tr('保存')}
+              </button>
+              <button type="button" className="btn-ghost" onClick={() => setCredForm(false)}>
+                {tr('取消')}
+              </button>
+            </div>
+          </section>
+        ) : null}
+
+        {signedIn ? (
+          <section className="card space-y-3 p-5">
+            <h2 className="flex items-center gap-1.5 text-body-sm font-semibold tracking-tight text-ink">
+              <Crown size={15} />
+              {tr('会员')}
+            </h2>
+            <p className="text-note leading-5 text-ink-3">
+              {memberActive
+                ? tr('会员有效期至 {date}。兑换新的会员码会自动累加天数。', {
+                    date: formatDate(account?.membership.expiresAt ?? config.membershipExpiresAt),
+                  })
+                : tr('输入会员码可开通会员；会员到期时间会在兑换后累加。')}
+            </p>
+            <div className="flex gap-2">
+              <input
+                className="input font-mono uppercase tracking-[0.18em]"
+                autoComplete="off"
+                autoCapitalize="characters"
+                value={memberCode}
+                placeholder={tr('会员码')}
+                maxLength={12}
+                onChange={(event) => setMemberCode(event.target.value.toUpperCase())}
+              />
+              <button
+                type="button"
+                className="btn-primary h-[46px] shrink-0 px-4"
+                onClick={doRedeem}
+                disabled={busy === 'redeem'}
+              >
+                {busy === 'redeem' ? tr('兑换中…') : tr('兑换')}
+              </button>
+            </div>
+          </section>
+        ) : null}
 
         <section className="card space-y-3 p-5">
           <h2 className="flex items-center gap-1.5 text-body-sm font-semibold tracking-tight text-ink">
@@ -363,54 +612,146 @@ export function SyncPage() {
             </h2>
 
             <div className="space-y-2 rounded-2xl border border-line p-3">
-              <p className="text-note text-ink-3">{tr('第一次用：创建一个同步账号')}</p>
-              <div className="flex gap-2">
-                <input
-                  ref={nicknameRef}
-                  type="text"
-                  inputMode="text"
-                  autoComplete="off"
-                  className="input"
-                  value={nickname}
-                  placeholder={tr('昵称')}
-                  maxLength={24}
-                  onChange={(event) => setNickname(event.target.value)}
-                />
+              <p className="text-note font-medium text-ink">{tr('登录')}</p>
+              <div className="flex rounded-xl bg-paper-2 p-1 text-note">
                 <button
                   type="button"
-                  className="btn-primary h-[46px] shrink-0 px-4"
-                  onClick={doRegister}
-                  disabled={busy === 'register'}
+                  className={cn(
+                    'press flex-1 rounded-lg px-2 py-1.5',
+                    loginMode === 'password' ? 'bg-surface text-ink shadow-sm' : 'text-ink-3',
+                  )}
+                  onClick={() => setLoginMode('password')}
                 >
-                  {busy === 'register' ? tr('创建中…') : tr('创建')}
+                  {tr('账号密码')}
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    'press flex-1 rounded-lg px-2 py-1.5',
+                    loginMode === 'code' ? 'bg-surface text-ink shadow-sm' : 'text-ink-3',
+                  )}
+                  onClick={() => setLoginMode('code')}
+                >
+                  {tr('同步码')}
                 </button>
               </div>
+
+              {loginMode === 'password' ? (
+                <div className="space-y-2">
+                  <input
+                    className="input"
+                    autoComplete="username"
+                    value={loginUsername}
+                    placeholder={tr('账号')}
+                    onChange={(event) => setLoginUsername(event.target.value)}
+                  />
+                  <div className="flex gap-2">
+                    <input
+                      className="input"
+                      type="password"
+                      autoComplete="current-password"
+                      value={loginPassword}
+                      placeholder={tr('密码')}
+                      onChange={(event) => setLoginPassword(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') doLogin()
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn-primary h-[46px] shrink-0 px-4"
+                      onClick={doLogin}
+                      disabled={busy === 'login'}
+                    >
+                      <SignIn size={15} />
+                      {tr('登录')}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      inputMode="text"
+                      autoComplete="off"
+                      autoCapitalize="characters"
+                      className="input font-mono uppercase tracking-[0.2em]"
+                      value={code}
+                      placeholder="ABCD2345"
+                      maxLength={8}
+                      onChange={(event) => setCode(event.target.value.toUpperCase())}
+                    />
+                    <button
+                      type="button"
+                      className="btn-ghost h-[46px] shrink-0 px-4"
+                      onClick={doLogin}
+                      disabled={busy === 'login'}
+                    >
+                      <SignIn size={15} />
+                      {tr('登录')}
+                    </button>
+                  </div>
+                  <p className="text-caption leading-4 text-ink-3">
+                    {tr('同步码适合老账号或多设备共享；登录后建议设置账号密码。')}
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2 rounded-2xl border border-line p-3">
-              <p className="text-note text-ink-3">{tr('已有账号：输入 8 位同步码')}</p>
-              <div className="flex gap-2">
+              <p className="text-note font-medium text-ink">{tr('注册新账号')}</p>
+              <input
+                ref={nicknameRef}
+                type="text"
+                inputMode="text"
+                autoComplete="nickname"
+                className="input"
+                placeholder={tr('昵称')}
+                maxLength={24}
+              />
+              <input
+                className="input"
+                autoComplete="username"
+                value={regUsername}
+                placeholder={tr('账号（2–24 位）')}
+                onChange={(event) => setRegUsername(event.target.value)}
+              />
+              <input
+                className="input"
+                type="password"
+                autoComplete="new-password"
+                value={regPassword}
+                placeholder={tr('密码（至少 6 位）')}
+                onChange={(event) => setRegPassword(event.target.value)}
+              />
+              {authConfig?.inviteRequired || regInvite ? (
                 <input
-                  type="text"
-                  inputMode="text"
+                  className="input font-mono uppercase tracking-[0.18em]"
                   autoComplete="off"
                   autoCapitalize="characters"
-                  className="input font-mono tracking-[0.2em] uppercase"
-                  value={code}
-                  placeholder="ABCD2345"
-                  maxLength={8}
-                  onChange={(event) => setCode(event.target.value.toUpperCase())}
+                  value={regInvite}
+                  placeholder={authConfig?.inviteRequired ? tr('邀请码（必填）') : tr('邀请码（选填）')}
+                  maxLength={12}
+                  onChange={(event) => setRegInvite(event.target.value.toUpperCase())}
                 />
+              ) : (
                 <button
                   type="button"
-                  className="btn-ghost h-[46px] shrink-0 px-4"
-                  onClick={doLogin}
-                  disabled={busy === 'login'}
+                  className="press text-left text-caption text-ink-3 underline-offset-2 hover:underline"
+                  onClick={() => setRegInvite(' ')}
                 >
-                  <SignIn size={15} />
-                  {tr('登录')}
+                  {tr('有邀请码？点此填写')}
                 </button>
-              </div>
+              )}
+              <button
+                type="button"
+                className="btn-primary h-10 w-full"
+                onClick={doRegister}
+                disabled={busy === 'register'}
+              >
+                {busy === 'register' ? tr('创建中…') : tr('注册并登录')}
+              </button>
             </div>
           </section>
         ) : null}
