@@ -2071,30 +2071,57 @@ async function handleAdminPhotos(request, env, url) {
   await requireAdmin(request, env)
   const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 60), 1), 200)
   const offset = Math.max(Number(url.searchParams.get('offset') || 0), 0)
-  const [total, rows] = await Promise.all([
+  const q = (url.searchParams.get('q') || '').trim().slice(0, 80)
+  const mimeRaw = (url.searchParams.get('mime') || '').trim().toLowerCase()
+  const mime = /^image\/(jpeg|png|webp)$/.test(mimeRaw) ? mimeRaw : ''
+
+  const where = []
+  const binds = []
+  if (q) {
+    where.push('(p.id LIKE ? OR p.user_id LIKE ? OR u.nickname LIKE ? OR u.sync_code LIKE ? OR c.username LIKE ?)')
+    const like = `%${q}%`
+    binds.push(like, like, like, like, like)
+  }
+  if (mime) {
+    where.push('p.mime = ?')
+    binds.push(mime)
+  }
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+  const fromSql = `FROM photos p
+       JOIN users u ON u.id = p.user_id
+       LEFT JOIN user_credentials c ON c.user_id = p.user_id`
+  const [total, overall, rows] = await Promise.all([
+    env.DB.prepare(
+      `SELECT COUNT(*) AS n, COALESCE(SUM(p.size), 0) AS bytes, COUNT(DISTINCT p.user_id) AS users
+       ${fromSql} ${whereSql}`,
+    )
+      .bind(...binds)
+      .first(),
     env.DB.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS bytes FROM photos').first(),
     env.DB.prepare(
       `SELECT p.id, p.user_id, p.access_key, p.mime, p.size, p.created_at,
-              u.nickname, u.sync_code, c.username
-       FROM photos p
-       JOIN users u ON u.id = p.user_id
-       LEFT JOIN user_credentials c ON c.user_id = p.user_id
+              u.nickname, u.sync_code, u.created_at AS user_created_at, c.username
+       ${fromSql} ${whereSql}
        ORDER BY p.created_at DESC
        LIMIT ? OFFSET ?`,
     )
-      .bind(limit, offset)
+      .bind(...binds, limit, offset)
       .all(),
   ])
   return json(
     {
       total: total?.n ?? 0,
       bytes: total?.bytes ?? 0,
+      users: total?.users ?? 0,
+      allTotal: overall?.n ?? 0,
+      allBytes: overall?.bytes ?? 0,
       photos: (rows.results || []).map((row) => ({
         id: row.id,
         userId: row.user_id,
         nickname: row.nickname || '',
         username: row.username || '',
         syncCode: row.sync_code || '',
+        userCreatedAt: row.user_created_at || 0,
         mime: row.mime,
         size: row.size,
         createdAt: row.created_at,
@@ -2105,6 +2132,15 @@ async function handleAdminPhotos(request, env, url) {
     env,
     request,
   )
+}
+
+async function handleAdminPhotoDelete(request, env, id) {
+  await requireAdmin(request, env)
+  const row = await env.DB.prepare('SELECT r2_key FROM photos WHERE id = ?').bind(id).first()
+  if (!row) throw new HttpError(404, '照片不存在')
+  if (env.PHOTOS) await env.PHOTOS.delete(row.r2_key)
+  await env.DB.prepare('DELETE FROM photos WHERE id = ?').bind(id).run()
+  return json({ ok: true }, 200, env, request)
 }
 
 /* ---------------- 入口 ---------------- */
@@ -2140,6 +2176,11 @@ async function handleApi(request, env, url, ctx) {
   if (route === 'GET /api/admin/codes') return await handleAdminCodesList(request, env, url)
   if (route === 'POST /api/admin/codes') return await handleAdminCodesCreate(request, env)
   if (route === 'GET /api/admin/photos') return await handleAdminPhotos(request, env, url)
+
+  const adminPhotoMatch = url.pathname.match(/^\/api\/admin\/photos\/([^/]+)$/)
+  if (adminPhotoMatch && request.method === 'DELETE') {
+    return await handleAdminPhotoDelete(request, env, decodeURIComponent(adminPhotoMatch[1]))
+  }
 
   const adminCodeMatch = url.pathname.match(/^\/api\/admin\/codes\/(membership|invite)\/([^/]+)$/)
   if (adminCodeMatch && request.method === 'DELETE') {

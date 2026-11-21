@@ -78,7 +78,7 @@ function parseHash(): View {
     case 'profile':
       return { name: 'profile' }
     case 'sync':
-      return { name: 'sync' }
+      return a === 'login' || a === 'register' ? { name: 'sync', mode: a } : { name: 'sync' }
     case 'about':
       return { name: 'about' }
     case 'admin':
@@ -117,7 +117,7 @@ function toHash(view: View): string {
     case 'footprintEditor':
       return '#/footprint-editor'
     case 'sync':
-      return '#/sync'
+      return view.mode ? `#/sync/${view.mode}` : '#/sync'
     case 'about':
       return '#/about'
     case 'admin':
@@ -329,7 +329,7 @@ export default function App() {
       case 'footprintEditor':
         return <FootprintEditor />
       case 'sync':
-        return <SyncPage />
+        return <SyncPage mode={view.mode} />
       case 'about':
         return <AboutPage />
       case 'admin':

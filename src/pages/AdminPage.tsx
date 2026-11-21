@@ -5,6 +5,7 @@ import {
   CheckCircle,
   Copy,
   Crown,
+  DownloadSimple,
   Images,
   MagnifyingGlass,
   Plus,
@@ -17,6 +18,7 @@ import {
   adminChangePassword,
   adminCreateCodes,
   adminDeleteCode,
+  adminDeletePhoto,
   adminDeleteUser,
   adminGetSettings,
   adminListCodes,
@@ -37,6 +39,7 @@ import {
   type AdminEndpoint,
   type AdminOverview,
   type AdminPhoto,
+  type AdminPhotoPage,
   type AdminSettings,
   type AdminUser,
 } from '../lib/cloud'
@@ -49,6 +52,7 @@ import {
   Field,
   IconButton,
   SegmentedTabs,
+  Sheet,
   SkeletonList,
   StatTile,
 } from '../components/ui'
@@ -509,24 +513,51 @@ function formatBytes(bytes: number): string {
 
 const PHOTO_PAGE = 60
 
+const PHOTO_MIME_FILTERS = [
+  { value: '', label: '全部' },
+  { value: 'image/jpeg', label: 'JPEG' },
+  { value: 'image/png', label: 'PNG' },
+  { value: 'image/webp', label: 'WebP' },
+] as const
+
+function mimeExt(mime: string): string {
+  if (mime === 'image/png') return 'png'
+  if (mime === 'image/webp') return 'webp'
+  return 'jpg'
+}
+
 function PhotosPanel({ onError }: { onError: (error: unknown) => void }) {
   const { tr } = useI18n()
+  const toast = useToast()
   const [offset, setOffset] = useState(0)
+  const [query, setQuery] = useState('')
+  const [search, setSearch] = useState('')
+  const [mime, setMime] = useState('')
   const [items, setItems] = useState<AdminPhoto[]>([])
-  const [total, setTotal] = useState(0)
-  const [bytes, setBytes] = useState(0)
+  const [summary, setSummary] = useState<AdminPhotoPage | null>(null)
   const [loading, setLoading] = useState(false)
+  const [activeId, setActiveId] = useState<string | null>(null)
   const [preview, setPreview] = useState<number | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<AdminPhoto | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [dimensions, setDimensions] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSearch(query.trim())
+      setOffset(0)
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [query])
 
   const load = useCallback(
     async (nextOffset: number) => {
       setLoading(true)
       try {
-        const result = await adminListPhotos(PHOTO_PAGE, nextOffset)
+        const result = await adminListPhotos(PHOTO_PAGE, nextOffset, { q: search, mime })
         setItems(result.photos)
-        setTotal(result.total)
-        setBytes(result.bytes)
-        setPreview(null)
+        setSummary(result)
+        setActiveId((current) => (result.photos.some((photo) => photo.id === current) ? current : null))
       } catch (error) {
         onError(error)
       } finally {
@@ -534,24 +565,70 @@ function PhotosPanel({ onError }: { onError: (error: unknown) => void }) {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [search, mime],
   )
 
   useEffect(() => {
     void load(offset)
   }, [offset, load])
 
+  const active = items.find((photo) => photo.id === activeId) ?? null
+  const filtered = Boolean(search || mime)
   const previewPhotos = items.map((photo) => ({
     id: photo.id,
     src: photo.url,
     caption: `${photo.nickname || photo.username || photo.syncCode} · ${formatDateCn(photo.createdAt)} · ${formatBytes(photo.size)}`,
   }))
 
+  const downloadPhoto = async (photo: AdminPhoto) => {
+    try {
+      const response = await fetch(photo.url)
+      if (!response.ok) throw new Error(tr('下载失败'))
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `travelog-${photo.id}.${mimeExt(photo.mime)}`
+      anchor.click()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (error) {
+      onError(error)
+    }
+  }
+
+  const confirmDelete = async () => {
+    if (!pendingDelete || deleting) return
+    setDeleting(true)
+    try {
+      await adminDeletePhoto(pendingDelete.id)
+      toast(tr('照片已删除'))
+      setPendingDelete(null)
+      setActiveId(null)
+      if (items.length === 1 && offset > 0) setOffset(Math.max(0, offset - PHOTO_PAGE))
+      else void load(offset)
+    } catch (error) {
+      onError(error)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   return (
     <section className="space-y-3">
       <div className="flex items-center gap-2">
         <p className="min-w-0 flex-1 text-caption text-ink-3">
-          {tr('共 {n} 张照片 · {size}', { n: total, size: formatBytes(bytes) })}
+          {summary
+            ? filtered
+              ? tr('筛选出 {n} 张 · {size}', {
+                  n: summary.total,
+                  size: formatBytes(summary.bytes),
+                })
+              : tr('共 {n} 张照片 · {size} · {users} 位用户', {
+                  n: summary.allTotal,
+                  size: formatBytes(summary.allBytes),
+                  users: summary.users,
+                })
+            : tr('加载中…')}
         </p>
         <button
           type="button"
@@ -564,23 +641,55 @@ function PhotosPanel({ onError }: { onError: (error: unknown) => void }) {
         </button>
       </div>
 
+      <div className="flex items-center gap-2 rounded-full border border-line bg-surface px-3">
+        <MagnifyingGlass size={14} className="shrink-0 text-ink-3" />
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={tr('搜索昵称、账号、同步码、照片 ID')}
+          className="h-9 min-w-0 flex-1 bg-transparent text-note text-ink outline-none placeholder:text-ink-3"
+        />
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {PHOTO_MIME_FILTERS.map((item) => (
+          <button
+            key={item.value}
+            type="button"
+            onClick={() => {
+              setMime(item.value)
+              setOffset(0)
+            }}
+            className={cn(
+              'press rounded-full border px-3 py-1 text-caption transition-colors',
+              mime === item.value
+                ? 'border-ink bg-ink text-paper'
+                : 'border-line text-ink-2 hover:text-ink',
+            )}
+          >
+            {item.value === '' ? tr('全部') : item.label}
+          </button>
+        ))}
+      </div>
+
       {loading ? (
         <SkeletonList rows={2} />
       ) : items.length === 0 ? (
         <div className="card">
           <EmptyState
             icon={<Images size={24} />}
-            title={tr('暂无云端照片')}
-            hint={tr('用户同步照片后会出现在这里。')}
+            title={filtered ? tr('没有匹配的照片') : tr('暂无云端照片')}
+            hint={filtered ? tr('换个关键词或类型再试。') : tr('用户同步照片后会出现在这里。')}
           />
         </div>
       ) : (
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-5">
-          {items.map((photo, index) => (
+          {items.map((photo) => (
             <button
               key={photo.id}
               type="button"
-              onClick={() => setPreview(index)}
+              onClick={() => setActiveId(photo.id)}
               className="press group relative aspect-square overflow-hidden rounded-xl border border-line bg-surface"
             >
               <img
@@ -589,7 +698,7 @@ function PhotosPanel({ onError }: { onError: (error: unknown) => void }) {
                 loading="lazy"
                 className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
               />
-              <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2 pb-1.5 pt-5 text-left">
+              <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-2 pb-1.5 pt-5 text-left">
                 <span className="block truncate text-[11px] font-medium text-white">
                   {photo.nickname || photo.username || photo.syncCode}
                 </span>
@@ -597,12 +706,15 @@ function PhotosPanel({ onError }: { onError: (error: unknown) => void }) {
                   {formatDateCn(photo.createdAt)} · {formatBytes(photo.size)}
                 </span>
               </span>
+              <span className="absolute right-1.5 top-1.5 rounded-full bg-black/45 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-white/85 backdrop-blur-sm">
+                {mimeExt(photo.mime)}
+              </span>
             </button>
           ))}
         </div>
       )}
 
-      {total > PHOTO_PAGE ? (
+      {summary && summary.total > PHOTO_PAGE ? (
         <div className="flex items-center justify-center gap-3">
           <button
             type="button"
@@ -613,12 +725,12 @@ function PhotosPanel({ onError }: { onError: (error: unknown) => void }) {
             {tr('上一页')}
           </button>
           <span className="text-caption tabular-nums text-ink-3">
-            {Math.floor(offset / PHOTO_PAGE) + 1} / {Math.ceil(total / PHOTO_PAGE)}
+            {Math.floor(offset / PHOTO_PAGE) + 1} / {Math.ceil(summary.total / PHOTO_PAGE)}
           </span>
           <button
             type="button"
             className="btn-ghost h-9 px-3 text-caption"
-            disabled={offset + PHOTO_PAGE >= total || loading}
+            disabled={offset + PHOTO_PAGE >= summary.total || loading}
             onClick={() => setOffset(offset + PHOTO_PAGE)}
           >
             {tr('下一页')}
@@ -626,10 +738,156 @@ function PhotosPanel({ onError }: { onError: (error: unknown) => void }) {
         </div>
       ) : null}
 
+      <Sheet
+        open={active !== null}
+        title={active ? active.nickname || active.username || tr('照片详情') : tr('照片详情')}
+        onClose={() => setActiveId(null)}
+        wide
+        footer={
+          active ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="btn-ghost h-10 flex-1 px-3 text-note"
+                onClick={() => {
+                  const index = items.findIndex((photo) => photo.id === active.id)
+                  if (index >= 0) setPreview(index)
+                }}
+              >
+                <Images size={15} />
+                {tr('查看大图')}
+              </button>
+              <button
+                type="button"
+                className="btn-ghost h-10 flex-1 px-3 text-note"
+                onClick={() => void downloadPhoto(active)}
+              >
+                <DownloadSimple size={15} />
+                {tr('下载')}
+              </button>
+              <button
+                type="button"
+                className="press flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-danger/30 px-3 text-note text-danger"
+                onClick={() => setPendingDelete(active)}
+              >
+                <Trash size={15} />
+                {tr('删除')}
+              </button>
+            </div>
+          ) : null
+        }
+      >
+        {active ? (
+          <div className="space-y-4">
+            <div className="overflow-hidden rounded-xl bg-paper-2">
+              <img
+                src={active.url}
+                alt=""
+                className="mx-auto max-h-[46vh] w-auto object-contain"
+                onLoad={(event) =>
+                  setDimensions((current) => ({
+                    ...current,
+                    [active.id]: `${event.currentTarget.naturalWidth} × ${event.currentTarget.naturalHeight}`,
+                  }))
+                }
+              />
+            </div>
+
+            <dl className="divide-y divide-line rounded-xl border border-line px-3">
+              <PhotoDetailRow label={tr('上传者')} value={active.nickname || tr('未设置昵称')} />
+              <PhotoDetailRow label={tr('账号')} value={active.username ? `@${active.username}` : tr('未设置账号')} />
+              <PhotoDetailRow label={tr('同步码')} value={active.syncCode || '—'} mono />
+              <PhotoDetailRow
+                label={tr('照片 ID')}
+                value={active.id}
+                mono
+                onCopy={() => {
+                  void copyText(active.id)
+                  toast(tr('已复制照片 ID'))
+                }}
+              />
+              <PhotoDetailRow
+                label={tr('用户 ID')}
+                value={active.userId}
+                mono
+                onCopy={() => {
+                  void copyText(active.userId)
+                  toast(tr('已复制用户 ID'))
+                }}
+              />
+              <PhotoDetailRow label={tr('类型')} value={active.mime} mono />
+              <PhotoDetailRow
+                label={tr('尺寸')}
+                value={dimensions[active.id] ?? tr('读取中…')}
+              />
+              <PhotoDetailRow label={tr('大小')} value={formatBytes(active.size)} />
+              <PhotoDetailRow
+                label={tr('上传时间')}
+                value={`${formatDateCn(active.createdAt)} · ${relativeTime(active.createdAt)}`}
+              />
+              <PhotoDetailRow
+                label={tr('注册时间')}
+                value={active.userCreatedAt ? formatDateCn(active.userCreatedAt) : '—'}
+              />
+            </dl>
+          </div>
+        ) : null}
+      </Sheet>
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={tr('删除这张照片？')}
+        message={
+          pendingDelete
+            ? tr('「{id}」会从 R2 存储和数据库里永久删除，无法恢复。', { id: pendingDelete.id })
+            : ''
+        }
+        confirmText={deleting ? tr('删除中…') : tr('删除')}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={() => void confirmDelete()}
+      />
+
       {preview !== null ? (
         <Lightbox photos={previewPhotos} startIndex={preview} onClose={() => setPreview(null)} />
       ) : null}
     </section>
+  )
+}
+
+function PhotoDetailRow({
+  label,
+  value,
+  mono = false,
+  onCopy,
+}: {
+  label: string
+  value: string
+  mono?: boolean
+  onCopy?: () => void
+}) {
+  const { tr } = useI18n()
+  return (
+    <div className="flex items-start gap-3 py-2.5">
+      <dt className="w-20 shrink-0 text-caption leading-5 text-ink-3">{label}</dt>
+      <dd
+        className={cn(
+          'min-w-0 flex-1 break-all text-note leading-5 text-ink',
+          mono && 'font-mono text-caption',
+        )}
+      >
+        {value}
+      </dd>
+      {onCopy ? (
+        <button
+          type="button"
+          className="press flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink"
+          onClick={onCopy}
+          aria-label={tr('复制')}
+        >
+          <Copy size={12} />
+        </button>
+      ) : null}
+    </div>
   )
 }
 

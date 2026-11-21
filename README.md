@@ -114,9 +114,12 @@ npm run preview    # 本地预览生产构建
 
 | 触发 | 产物 |
 | --- | --- |
-| push 到 `main` | Debug APK artifact |
-| 手动触发 workflow | 额外构建 Release APK |
-| 推送 `v*` tag | 构建并自动发布 GitHub Release |
+| 手动触发 workflow | Debug APK artifact；勾选 `build_release` 时额外构建 Release APK |
+| 手动选择 `v*` tag 触发 | 构建 Debug / Release APK 并自动发布 GitHub Release |
+
+> 推送到 `main` 或提交 Pull Request **不会**自动构建，避免每次提交都占用 Actions 额度；需要出包时在 Actions 页面手动运行 `Android APK`。
+>
+> 当前仓库里的 `Android APK` 工作流已暂停；要在仓库内改成「仅手动触发」，需要用带 `workflow` 权限的 token 推送 YAML 改动，然后在 Actions 页面重新启用工作流。
 
 > 本机若为 ARM64（Apple Silicon、鲲鹏等），Android SDK 的 `aapt2` / `zipalign` 只有 x86_64 二进制，需在 x86_64 runner 或支持转译的环境构建。
 

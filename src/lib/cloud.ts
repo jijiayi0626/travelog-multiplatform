@@ -477,17 +477,35 @@ export interface AdminPhoto {
   nickname: string
   username: string
   syncCode: string
+  userCreatedAt: number
   mime: string
   size: number
   createdAt: number
   url: string
 }
 
+export interface AdminPhotoPage {
+  total: number
+  bytes: number
+  users: number
+  allTotal: number
+  allBytes: number
+  photos: AdminPhoto[]
+}
+
 export function adminListPhotos(
   limit = 60,
   offset = 0,
-): Promise<{ total: number; bytes: number; photos: AdminPhoto[] }> {
-  return adminApi(`/admin/photos?limit=${limit}&offset=${offset}`)
+  filters: { q?: string; mime?: string } = {},
+): Promise<AdminPhotoPage> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  if (filters.q?.trim()) params.set('q', filters.q.trim())
+  if (filters.mime) params.set('mime', filters.mime)
+  return adminApi(`/admin/photos?${params.toString()}`)
+}
+
+export function adminDeletePhoto(id: string): Promise<{ ok: boolean }> {
+  return adminApi(`/admin/photos/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
 export async function adminLogin(username: string, password: string): Promise<AdminSession> {

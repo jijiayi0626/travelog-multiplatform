@@ -2,29 +2,33 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   BookOpen,
+  CaretDown,
   CaretRight,
   CloudSlash,
   DownloadSimple,
+  Crown,
   Images,
   Info,
   Translate,
   MapPinLine,
+  SignIn,
   Sparkle,
   Moon,
   PaintBrush,
   PencilSimple,
   Sun,
   UploadSimple,
+  UserPlus,
 } from '@phosphor-icons/react'
 import type { AppStats, Profile } from '../lib/types'
 import { exportAll, getProfile, importAll, saveProfile, stats } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
 import { useI18n, useNav, useRefresh, useToast } from '../lib/app-context'
 import { ACCENTS, type AccentName, currentTheme, getAccent, setAccent, setThemeMode } from '../lib/theme'
-import { downloadText, formatCny, readTextFile } from '../lib/utils'
+import { downloadText, readTextFile } from '../lib/utils'
 import { getBestFix, isNative, shareTextFile } from '../lib/native'
 import { ensureExactAlarmPermission, ensureNotificationPermission } from '../lib/reminder'
-import { isSignedIn, saveCloudConfig, updateAccountNickname } from '../lib/cloud'
+import { getCloudConfig, isSignedIn, saveCloudConfig, updateAccountNickname } from '../lib/cloud'
 import {
   getActiveAIJobs,
   getAIJobs,
@@ -81,12 +85,24 @@ export function ProfilePage() {
   const signedIn = isSignedIn()
   const [importing, setImporting] = useState(false)
   const [aiJobs, setAIJobs] = useState<AIJob[]>(() => getAIJobs())
+  const [guestTools, setGuestTools] = useState(false)
+  const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null)
+  const [lastBackupAt, setLastBackupAt] = useState(() =>
+    Number(localStorage.getItem('travelog.lastBackupAt') || 0),
+  )
 
   useEffect(() => {
     if (data.profile) setNickname(data.profile.nickname)
   }, [data.profile])
 
   useEffect(() => subscribeAIJobs(setAIJobs), [])
+
+  useEffect(() => {
+    navigator.storage
+      ?.estimate?.()
+      .then((info) => setStorage({ usage: info.usage ?? 0, quota: info.quota ?? 0 }))
+      .catch(() => undefined)
+  }, [])
 
   const aiActive = getActiveAIJobs(aiJobs)
   const aiUnread = getUnreadAIJobs(aiJobs)
@@ -175,6 +191,9 @@ export function ProfilePage() {
     const name = `travelog-backup-${new Date().toISOString().slice(0, 10)}.json`
     const shared = await shareTextFile(name, json)
     if (!shared) downloadText(name, json, 'application/json')
+    const at = Date.now()
+    localStorage.setItem('travelog.lastBackupAt', String(at))
+    setLastBackupAt(at)
     toast(shared ? `备份已交给系统保存：${name}` : '备份已导出到浏览器下载目录')
   }
 
@@ -194,10 +213,288 @@ export function ProfilePage() {
     }
   }
 
+
+  const setHomeLocation = async () => {
+    const fix = isNative()
+      ? await getBestFix()
+      : await new Promise<{ latitude: number; longitude: number } | null>((resolve) => {
+          if (!navigator.geolocation) return resolve(null)
+          navigator.geolocation.getCurrentPosition(
+            (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+            () => resolve(null),
+          )
+        })
+    if (!fix) {
+      toast('定位失败，稍后再试')
+      return
+    }
+    const next = setAutoCheckinSettings({
+      homeLat: fix.latitude,
+      homeLng: fix.longitude,
+      homeRadius: 500,
+    })
+    setAutoCheckin(next)
+    toast('已设为常驻地，附近 500 米不再自动打卡')
+  }
+
+  const requestNotification = async () => {
+    const granted = await ensureNotificationPermission()
+    if (!granted) {
+      toast('未获得通知权限，请在系统设置里开启')
+      return
+    }
+    const exact = await ensureExactAlarmPermission()
+    toast(
+      exact ? '已获得通知权限，日程提醒会正常发出' : '通知已开启；精确提醒未授权，系统可能延迟送达',
+    )
+  }
+
   const profile = data.profile
   const ThemeGlyph = theme === 'dark' ? Moon : Sun
-  const planRatio =
-    data.stats.planCount > 0 ? Math.round((data.stats.planDoneCount / data.stats.planCount) * 100) : 0
+
+  const cloudConfig = getCloudConfig()
+  const memberActive = cloudConfig.membershipExpiresAt > Date.now()
+  const pendingSync = data.stats.pendingSync
+  const autoSummary = autoCheckin.enabled
+    ? `已开启 · 半径 ${autoCheckin.radius}m`
+    : '进入常去地点附近自动补足迹'
+  const appearanceSummary = `${theme === 'dark' ? '深色' : '浅色'} · ${lang === 'zh' ? '中文' : 'English'}`
+  const backupSummary = lastBackupAt
+    ? `上次备份 ${new Date(lastBackupAt).toLocaleDateString('zh-CN')}`
+    : '导出 / 导入 JSON 备份'
+
+  const autoCheckinGroup = (
+    <SettingsGroup
+      icon={<MapPinLine size={17} />}
+      title={tr('自动打卡')}
+      summary={autoSummary}
+    >
+      <div className="space-y-3">
+        <div className="flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-body-sm text-ink">自动记录到访地点</p>
+            <p className="mt-0.5 text-caption leading-4 text-ink-3">
+              开启后会在常去城市附近补一条足迹，不会重复打卡。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={toggleAutoCheckin}
+            aria-pressed={autoCheckin.enabled}
+            className={cn(
+              'press relative h-6 w-11 shrink-0 rounded-full transition-colors',
+              autoCheckin.enabled ? 'bg-accent' : 'bg-paper-2',
+            )}
+          >
+            <span
+              className={cn(
+                'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all',
+                autoCheckin.enabled ? 'left-[22px]' : 'left-0.5',
+              )}
+            />
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {autoCheckin.enabled ? (
+            <button type="button" className="chip px-2.5 py-1 text-caption" onClick={cycleRadius}>
+              半径 {autoCheckin.radius}m
+            </button>
+          ) : null}
+          <button type="button" className="chip px-2.5 py-1 text-caption" onClick={setHomeLocation}>
+            {autoCheckin.homeLat != null ? '重新设置常驻地' : '把当前位置设为常驻地'}
+          </button>
+          <button type="button" className="chip px-2.5 py-1 text-caption" onClick={requestNotification}>
+            通知权限
+          </button>
+        </div>
+        {autoCheckin.enabled ? (
+          <div className="rounded-xl bg-paper-2/60 p-3 text-caption leading-4 text-ink-3">
+            <p>
+              {checkinStatus.running ? '监听中' : '未启动'}
+              {checkinStatus.lastFixAt > 0
+                ? ` · 最近定位 ${new Date(checkinStatus.lastFixAt).toLocaleTimeString()}`
+                : ' · 还没拿到定位（检查系统定位权限 / GPS 是否开启）'}
+            </p>
+            {checkinStatus.lastMatch ? <p>匹配：{checkinStatus.lastMatch}</p> : null}
+            {checkinStatus.lastEvent ? <p>最近：{checkinStatus.lastEvent}</p> : null}
+            <p className="pt-0.5">半径 {autoCheckin.radius}m · 无已知地点时按最近城市/区县补足迹</p>
+          </div>
+        ) : null}
+      </div>
+    </SettingsGroup>
+  )
+
+  const appearanceGroup = (
+    <SettingsGroup
+      icon={<PaintBrush size={17} />}
+      title={tr('外观与语言')}
+      summary={appearanceSummary}
+    >
+      <Row
+        icon={<ThemeGlyph size={16} />}
+        title={t('profile.appearance')}
+        value={theme === 'dark' ? '深色' : '浅色'}
+        onClick={toggleTheme}
+      />
+      <div className="flex items-center gap-3 border-b border-line py-3">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-ink-2">
+          <PaintBrush size={15} />
+        </span>
+        <span className="min-w-0 flex-1 text-body-sm text-ink">主题色</span>
+        <div className="flex shrink-0 gap-2">
+          {ACCENTS.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              aria-label={item.label}
+              onClick={() => chooseAccent(item.value)}
+              className={cn(
+                'press h-6 w-6 rounded-full ring-2 ring-offset-2 ring-offset-surface transition-all',
+                accent === item.value ? 'ring-ink/50' : 'ring-transparent',
+              )}
+              style={{ backgroundColor: item.swatch }}
+            />
+          ))}
+        </div>
+      </div>
+      <Row
+        icon={<Translate size={16} />}
+        title={lang === 'zh' ? '语言' : 'Language'}
+        value={lang === 'zh' ? '中文' : 'English'}
+        onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
+      />
+    </SettingsGroup>
+  )
+
+  const dataGroup = (
+    <SettingsGroup
+      icon={<DownloadSimple size={17} />}
+      title={tr('数据与备份')}
+      summary={backupSummary}
+    >
+      <Row
+        icon={<DownloadSimple size={16} />}
+        title={t('profile.export')}
+        value="JSON"
+        onClick={doExport}
+      />
+      <Row
+        icon={<UploadSimple size={16} />}
+        title={importing ? t('common.loading') : t('profile.import')}
+        value="JSON"
+        onClick={() => fileRef.current?.click()}
+      />
+      <div className="mt-2 rounded-xl bg-paper-2/60 p-3 text-caption leading-4 text-ink-3">
+        <p>
+          本地占用 {storage ? formatBytes(storage.usage) : '计算中…'}
+          {storage?.quota ? ` · 可用 ${formatBytes(storage.quota)}` : ''}
+        </p>
+        <p>
+          上次备份：
+          {lastBackupAt ? new Date(lastBackupAt).toLocaleString('zh-CN') : '还没有备份'}
+        </p>
+        {pendingSync > 0 ? <p className="text-accent">还有 {pendingSync} 条等待同步</p> : null}
+      </div>
+    </SettingsGroup>
+  )
+
+  const aboutGroup = (
+    <SettingsGroup
+      icon={<Info size={17} />}
+      title={tr('关于与帮助')}
+      summary={`v${__APP_VERSION__}`}
+    >
+      <Row
+        icon={<BookOpen size={16} />}
+        title={tr('新手引导')}
+        value={tr('再看一遍')}
+        onClick={() => openOnboarding()}
+      />
+      <Row
+        icon={<Info size={16} />}
+        title={tr('关于旅记')}
+        value={`v${__APP_VERSION__}`}
+        onClick={() => nav.navigate({ name: 'about' })}
+      />
+    </SettingsGroup>
+  )
+
+  if (!signedIn) {
+    return (
+      <div className="mx-auto w-full max-w-[620px] space-y-4">
+        <header className="pt-4">
+          <p className="text-caption uppercase tracking-[0.22em] text-ink-3">Account</p>
+          <h1 className="mt-1.5 text-heading font-semibold leading-none tracking-tight text-ink sm:text-display">
+            {t('profile.title')}
+          </h1>
+        </header>
+
+        <section className="card overflow-hidden">
+          <div className="p-5">
+            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-accent-soft text-accent">
+              <CloudSlash size={22} />
+            </span>
+            <h2 className="mt-4 text-title font-semibold tracking-tight text-ink">登录或注册</h2>
+            <p className="mt-1.5 text-body-sm leading-6 text-ink-3">
+              登录后可以在手机、平板和网页之间同步行程、照片与账本。已有账号直接登录，第一次使用可以注册。
+            </p>
+          </div>
+          <div className="grid gap-2 px-5 pb-5">
+            <button
+              type="button"
+              className="btn-primary h-11 w-full"
+              onClick={() => nav.navigate({ name: 'sync', mode: 'login' })}
+            >
+              <SignIn size={16} />
+              登录已有账号
+            </button>
+            <button
+              type="button"
+              className="btn-ghost h-11 w-full"
+              onClick={() => nav.navigate({ name: 'sync', mode: 'register' })}
+            >
+              <UserPlus size={16} />
+              注册新账号
+            </button>
+          </div>
+        </section>
+
+        <button
+          type="button"
+          onClick={() => setGuestTools((open) => !open)}
+          aria-expanded={guestTools}
+          className="press mx-auto flex items-center gap-1 text-caption text-ink-3 hover:text-ink"
+        >
+          {guestTools ? '收起本地功能' : '暂不登录，使用本地功能'}
+          <CaretDown
+            size={12}
+            className={cn('transition-transform', guestTools && 'rotate-180')}
+          />
+        </button>
+
+        {guestTools ? (
+          <section className="overflow-hidden rounded-2xl border border-line bg-surface">
+            {autoCheckinGroup}
+            {appearanceGroup}
+            {dataGroup}
+            {aboutGroup}
+          </section>
+        ) : null}
+
+        <p className="pb-2 text-center text-caption text-ink-3">
+          所有本地数据仍保存在这台设备，登录不会覆盖它。
+        </p>
+
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(event) => doImport(event.target.files?.[0])}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="mx-auto w-full max-w-[820px] space-y-5">
@@ -214,9 +511,28 @@ export function ProfilePage() {
           <p className="truncate text-title font-semibold tracking-tight text-ink">
             {loading ? tr('加载中…') : profile?.nickname}
           </p>
-          <p className="mt-0.5 text-note text-ink-3">{tr('本地账号 · 数据保存在这台设备')}</p>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <span
+              className={cn(
+                'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-caption',
+                memberActive ? 'bg-accent-soft text-accent' : 'bg-paper-2 text-ink-3',
+              )}
+            >
+              {memberActive ? <Crown size={11} weight="fill" /> : null}
+              {memberActive
+                ? `会员至 ${new Date(cloudConfig.membershipExpiresAt).toLocaleDateString('zh-CN')}`
+                : '本地账号'}
+            </span>
+            <span className="min-w-0 truncate text-caption text-ink-3">
+              {cloudConfig.username ? `@${cloudConfig.username}` : '已连接云端'}
+            </span>
+          </div>
         </div>
-        <button type="button" className="btn-ghost h-9 shrink-0 px-3 text-note" onClick={() => setEditing(true)}>
+        <button
+          type="button"
+          className="btn-ghost h-9 shrink-0 px-3 text-note"
+          onClick={() => setEditing(true)}
+        >
           <PencilSimple size={14} />
           {tr('编辑')}
         </button>
@@ -237,56 +553,22 @@ export function ProfilePage() {
         </div>
       </div>
 
-      <section className="card p-4">
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-note font-semibold tracking-tight text-ink">{t('profile.recap')}</h2>
-          <button
-            type="button"
-            onClick={() => nav.navigate({ name: 'recap' })}
-            className="press inline-flex items-center gap-0.5 text-caption text-accent"
-          >
-            {tr('查看完整')}
-            <CaretRight size={12} />
-          </button>
-        </div>
-        <div className="mt-3 grid grid-cols-2 gap-4">
-          <StatTile label={tr('在路上')} value={tr('{n} 天', { n: data.stats.totalDays })} />
-          <StatTile label={tr('照片')} value={tr('{n} 张', { n: data.stats.photoCount })} />
-          <StatTile label={tr('城市')} value={tr('{n} 座', { n: data.stats.cityCount })} />
-          <StatTile label={tr('总花费')} value={formatCny(data.stats.totalCny)} />
-        </div>
-        <div className="mt-3 border-t border-line pt-3">
-          <div className="flex items-baseline justify-between text-note">
-            <span className="text-ink-3">{tr('日程完成度')}</span>
-            <span className="tabular-nums text-ink-2">
-              {data.stats.planDoneCount}/{data.stats.planCount} · {planRatio}%
-            </span>
-          </div>
-          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-paper-2">
-            <div
-              className="h-full rounded-full bg-accent transition-[width] duration-500"
-              style={{ width: `${planRatio}%` }}
-            />
-          </div>
-        </div>
-      </section>
-
-      <section className="overflow-hidden rounded-2xl border border-line bg-surface">
-        <SettingRow
-          icon={<Images size={17} />}
+      <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <QuickAction
+          icon={<Images size={18} />}
           title={lang === 'zh' ? '相册' : 'Album'}
-          value={`${data.stats.photoCount} 张照片`}
+          value={`${data.stats.photoCount} 张`}
           onClick={() => nav.navigate({ name: 'album' })}
         />
-        <SettingRow
-          icon={<CloudSlash size={17} />}
+        <QuickAction
+          icon={<CloudSlash size={18} />}
           title={t('profile.sync')}
-          value={data.stats.pendingSync > 0 ? `${data.stats.pendingSync} 条待同步` : '未连接云端'}
+          value={pendingSync > 0 ? `${pendingSync} 条待同步` : '已连接'}
           onClick={() => nav.navigate({ name: 'sync' })}
         />
-        {signedIn && aiJobs.length > 0 ? (
-          <SettingRow
-            icon={<Sparkle size={17} />}
+        {aiJobs.length > 0 ? (
+          <QuickAction
+            icon={<Sparkle size={18} />}
             title={tr('AI 任务')}
             value={
               aiActive.length > 0
@@ -297,165 +579,27 @@ export function ProfilePage() {
             }
             onClick={() => window.dispatchEvent(new Event('travelog:ai-open'))}
           />
-        ) : null}
-        <SettingRow
-          icon={<Info size={17} />}
-          title={tr('关于旅记')}
-          value={`v${__APP_VERSION__}`}
-          onClick={() => nav.navigate({ name: 'about' })}
+        ) : (
+          <QuickAction
+            icon={<Crown size={18} />}
+            title={tr('会员')}
+            value={memberActive ? '已开通' : '未开通'}
+            onClick={() => nav.navigate({ name: 'sync' })}
+          />
+        )}
+        <QuickAction
+          icon={<BookOpen size={18} />}
+          title={t('profile.recap')}
+          value={tr('{n} 天', { n: data.stats.totalDays })}
+          onClick={() => nav.navigate({ name: 'recap' })}
         />
-        <SettingRow
-          icon={<BookOpen size={17} />}
-          title={tr('新手引导')}
-          value={tr('再看一遍')}
-          onClick={() => openOnboarding()}
-        />
-        <div className="flex w-full items-center gap-3 border-b border-line px-4 py-3.5">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-ink-2">
-            <MapPinLine size={17} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-body text-ink">自动打卡</p>
-            <p className="text-caption text-ink-3">
-              {autoCheckin.enabled ? `已开启 · 半径 ${autoCheckin.radius}m（点右侧切换）` : '进入常去地点附近自动补足迹'}
-            </p>
-          </div>
-          {autoCheckin.enabled ? (
-            <button
-              type="button"
-              onClick={cycleRadius}
-              className="press shrink-0 rounded-full border border-line px-2 py-0.5 text-caption text-ink-2"
-            >
-              {autoCheckin.radius}m
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={toggleAutoCheckin}
-            aria-pressed={autoCheckin.enabled}
-            className={cn(
-              'press relative h-6 w-11 shrink-0 rounded-full transition-colors',
-              autoCheckin.enabled ? 'bg-accent' : 'bg-paper-2',
-            )}
-          >
-            <span
-              className={cn(
-                'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all',
-                autoCheckin.enabled ? 'left-[22px]' : 'left-0.5',
-              )}
-            />
-          </button>
-        </div>
-        {autoCheckin.enabled ? (
-          <div className="space-y-0.5 px-4 pb-3 text-caption leading-4 text-ink-3">
-            <p>
-              {checkinStatus.running ? '监听中' : '未启动'}
-              {checkinStatus.lastFixAt > 0
-                ? ` · 最近定位 ${new Date(checkinStatus.lastFixAt).toLocaleTimeString()}`
-                : ' · 还没拿到定位（检查系统定位权限 / GPS 是否开启）'}
-            </p>
-            {checkinStatus.lastMatch ? <p>匹配：{checkinStatus.lastMatch}</p> : null}
-            {checkinStatus.lastEvent ? <p>最近：{checkinStatus.lastEvent}</p> : null}
-            <p className="pt-0.5">半径 {autoCheckin.radius}m · 无已知地点时按最近城市/区县补足迹</p>
-          </div>
-        ) : null}
-        {/* 这两个入口不依赖自动打卡开关，始终保持可见 */}
-        <div className="flex flex-wrap gap-1.5 px-4 pb-3">
-          <button
-            type="button"
-            className="chip px-2.5 py-1 text-caption"
-            onClick={async () => {
-              const fix = isNative()
-                ? await getBestFix()
-                : await new Promise<{ latitude: number; longitude: number } | null>((resolve) => {
-                    if (!navigator.geolocation) return resolve(null)
-                    navigator.geolocation.getCurrentPosition(
-                      (pos) =>
-                        resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
-                      () => resolve(null),
-                    )
-                  })
-              if (!fix) {
-                toast('定位失败，稍后再试')
-                return
-              }
-              const next = setAutoCheckinSettings({
-                homeLat: fix.latitude,
-                homeLng: fix.longitude,
-                homeRadius: 500,
-              })
-              setAutoCheckin(next)
-              toast('已设为常驻地，附近 500 米不再自动打卡')
-            }}
-          >
-            {autoCheckin.homeLat != null ? '重新设置常驻地' : '把当前位置设为常驻地'}
-          </button>
-          <button
-            type="button"
-            className="chip px-2.5 py-1 text-caption"
-            onClick={async () => {
-              const granted = await ensureNotificationPermission()
-              if (!granted) {
-                toast('未获得通知权限，请在系统设置里开启')
-                return
-              }
-              const exact = await ensureExactAlarmPermission()
-              toast(
-                exact
-                  ? '已获得通知权限，日程提醒会正常发出'
-                  : '通知已开启；精确提醒未授权，系统可能延迟送达',
-              )
-            }}
-          >
-            开启通知权限
-          </button>
-        </div>
-        <SettingRow
-          icon={<Sparkle size={17} />}
-          title="AI 助手"
-          value={signedIn ? '已就绪' : '需登录云同步'}
-          onClick={() => nav.navigate({ name: 'sync' })}
-        />
-        <SettingRow
-          icon={<Translate size={17} />}
-          title={lang === 'zh' ? '语言' : 'Language'}
-          value={lang === 'zh' ? '中文' : 'English'}
-          onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
-        />
-        <SettingRow
-          icon={<ThemeGlyph size={17} />}
-          title={t('profile.appearance')}
-          value={theme === 'dark' ? '深色' : '浅色'}
-          onClick={toggleTheme}
-        />
-        <div className="flex w-full items-center gap-3 border-b border-line px-4 py-3.5">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-ink-2">
-            <PaintBrush size={17} />
-          </span>
-          <span className="min-w-0 flex-1 text-body text-ink">主题色</span>
-          <div className="flex shrink-0 gap-2">
-            {ACCENTS.map((item) => (
-              <button
-                key={item.value}
-                type="button"
-                aria-label={item.label}
-                onClick={() => chooseAccent(item.value)}
-                className={cn(
-                  'press h-6 w-6 rounded-full ring-2 ring-offset-2 ring-offset-surface transition-all',
-                  accent === item.value ? 'ring-ink/50' : 'ring-transparent',
-                )}
-                style={{ backgroundColor: item.swatch }}
-              />
-            ))}
-          </div>
-        </div>
-        <SettingRow icon={<DownloadSimple size={17} />} title={t('profile.export')} value="JSON" onClick={doExport} />
-        <SettingRow
-          icon={<UploadSimple size={17} />}
-          title={importing ? t('common.loading') : t('profile.import')}
-          value="JSON"
-          onClick={() => fileRef.current?.click()}
-        />
+      </section>
+
+      <section className="overflow-hidden rounded-2xl border border-line bg-surface">
+        {autoCheckinGroup}
+        {appearanceGroup}
+        {dataGroup}
+        {aboutGroup}
       </section>
 
       <input
@@ -508,7 +652,77 @@ export function ProfilePage() {
   )
 }
 
-function SettingRow({
+function SettingsGroup({
+  icon,
+  title,
+  summary,
+  children,
+  defaultOpen = false,
+}: {
+  icon: ReactNode
+  title: string
+  summary?: string
+  children: ReactNode
+  defaultOpen?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div className="border-b border-line last:border-b-0">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="press flex w-full items-center gap-3 px-4 py-3.5 text-left"
+      >
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-ink-2">
+          {icon}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-body text-ink">{title}</span>
+          {summary ? (
+            <span className="mt-0.5 block truncate text-caption text-ink-3">{summary}</span>
+          ) : null}
+        </span>
+        <CaretDown
+          size={15}
+          className={cn('shrink-0 text-ink-3 transition-transform', open && 'rotate-180')}
+        />
+      </button>
+      {open ? <div className="border-t border-line/70 px-4 py-3">{children}</div> : null}
+    </div>
+  )
+}
+
+function Row({
+  icon,
+  title,
+  value,
+  onClick,
+}: {
+  icon?: ReactNode
+  title: string
+  value?: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="press flex w-full items-center gap-3 border-b border-line py-3 text-left last:border-b-0"
+    >
+      {icon ? (
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-ink-2">
+          {icon}
+        </span>
+      ) : null}
+      <span className="min-w-0 flex-1 text-body-sm text-ink">{title}</span>
+      {value ? <span className="shrink-0 text-note text-ink-3">{value}</span> : null}
+      <CaretRight size={13} className="shrink-0 text-ink-3" />
+    </button>
+  )
+}
+
+function QuickAction({
   icon,
   title,
   value,
@@ -523,14 +737,23 @@ function SettingRow({
     <button
       type="button"
       onClick={onClick}
-      className="press flex w-full items-center gap-3 border-b border-line px-4 py-3.5 text-left last:border-b-0 hover:bg-paper-2/60"
+      className="press card flex items-start gap-2.5 p-3.5 text-left"
     >
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-ink-2">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
         {icon}
       </span>
-      <span className="min-w-0 flex-1 text-body text-ink">{title}</span>
-      <span className="shrink-0 text-note text-ink-3">{value}</span>
-      <CaretRight size={14} className="shrink-0 text-ink-3" />
+      <span className="min-w-0 flex-1">
+        <span className="block text-body-sm font-medium text-ink">{title}</span>
+        <span className="mt-0.5 block truncate text-caption text-ink-3">{value}</span>
+      </span>
     </button>
   )
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
 }

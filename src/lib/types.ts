@@ -177,7 +177,7 @@ export type View =
   | { name: 'expenseEditor'; tripId: string; expenseId?: string }
   | { name: 'footprintEditor' }
   | { name: 'planEditor'; tripId: string; planId?: string; dayIndex?: number }
-  | { name: 'sync' }
+  | { name: 'sync'; mode?: 'login' | 'register' }
   | { name: 'about' }
   | { name: 'admin' }
 
