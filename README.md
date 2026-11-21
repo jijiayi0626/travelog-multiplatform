@@ -108,7 +108,7 @@ npm run preview    # 本地预览生产构建
 
 包名 `com.travellog.app`，minSdk 23 / targetSdk 35，versionCode 34 / versionName 2.0.0。应用为 WebView + Java 实现，**不含 native 库**，单个 APK 兼容 `arm64-v8a` / `armeabi-v7a` / `x86_64`。
 
-### 自动构建
+### 构建 APK
 
 `.github/workflows/android-apk.yml`：
 
@@ -119,7 +119,6 @@ npm run preview    # 本地预览生产构建
 
 > 推送到 `main` 或提交 Pull Request **不会**自动构建，避免每次提交都占用 Actions 额度；需要出包时在 Actions 页面手动运行 `Android APK`。
 >
-> 当前仓库里的 `Android APK` 工作流已暂停；要在仓库内改成「仅手动触发」，需要用带 `workflow` 权限的 token 推送 YAML 改动，然后在 Actions 页面重新启用工作流。
 
 > 本机若为 ARM64（Apple Silicon、鲲鹏等），Android SDK 的 `aapt2` / `zipalign` 只有 x86_64 二进制，需在 x86_64 runner 或支持转译的环境构建。
 

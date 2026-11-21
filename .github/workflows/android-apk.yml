@@ -1,10 +1,7 @@
 name: Android APK
 
+# 只在手动触发时构建；push / PR 不会自动出包。
 on:
-  push:
-    branches: [main]
-    tags: ['v*']
-  pull_request:
   workflow_dispatch:
     inputs:
       build_release:

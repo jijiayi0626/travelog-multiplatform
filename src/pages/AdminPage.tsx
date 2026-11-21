@@ -784,12 +784,14 @@ function PhotosPanel({ onError }: { onError: (error: unknown) => void }) {
                 src={active.url}
                 alt=""
                 className="mx-auto max-h-[46vh] w-auto object-contain"
-                onLoad={(event) =>
+                onLoad={(event) => {
+                  // 先取出尺寸再 setState：updater 延迟执行时 currentTarget 已被置空
+                  const { naturalWidth, naturalHeight } = event.currentTarget
                   setDimensions((current) => ({
                     ...current,
-                    [active.id]: `${event.currentTarget.naturalWidth} × ${event.currentTarget.naturalHeight}`,
+                    [active.id]: `${naturalWidth} × ${naturalHeight}`,
                   }))
-                }
+                }}
               />
             </div>
 
