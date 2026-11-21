@@ -647,9 +647,11 @@ export function SyncPage({ mode }: { mode?: 'login' | 'register' }) {
 
             <p className="mt-2 text-caption leading-4 text-ink-3">
               {config.autoSync
-                ? tr('自动同步已开启：打开应用、切回前台或改动后自动同步，前台每 {n} 分钟检查一次。', {
-                    n: config.syncIntervalMinutes,
-                  }) + (config.wifiOnly ? tr('仅在 Wi-Fi 下自动同步。') : '')
+                ? (config.syncIntervalMinutes === 0
+                    ? tr('自动同步已开启：实时模式，修改后立即同步，前台约每 20 秒检查一次云端更新。')
+                    : tr('自动同步已开启：打开应用、切回前台或改动后自动同步，前台每 {n} 分钟检查一次。', {
+                        n: config.syncIntervalMinutes,
+                      })) + (config.wifiOnly ? tr('仅在 Wi-Fi 下自动同步。') : '')
                 : tr('自动同步已关闭：只有点击「立即同步」时才会同步。')}
             </p>
 

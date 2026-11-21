@@ -6,8 +6,13 @@ CREATE TABLE IF NOT EXISTS users (
   sync_code TEXT UNIQUE NOT NULL,
   token TEXT NOT NULL,
   nickname TEXT,
+  email TEXT,
+  email_lower TEXT,
   created_at INTEGER NOT NULL
 );
+
+-- 邮箱唯一（为空时允许多个；老库用下面两行 ALTER 迁移）
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users (email_lower) WHERE email_lower IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS entities (
   user_id TEXT NOT NULL,
@@ -72,7 +77,10 @@ CREATE TABLE IF NOT EXISTS user_tokens (
   token TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  last_seen_at INTEGER
+  last_seen_at INTEGER,
+  device_name TEXT,
+  user_agent TEXT,
+  ip TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_tokens_user ON user_tokens (user_id);

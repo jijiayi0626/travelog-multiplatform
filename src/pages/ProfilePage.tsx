@@ -6,6 +6,7 @@ import {
   CaretRight,
   CloudCheck,
   CloudSlash,
+  Devices,
   DownloadSimple,
   Crown,
   Images,
@@ -13,6 +14,7 @@ import {
   Translate,
   MapPinLine,
   SignIn,
+  ShieldCheck,
   Sparkle,
   Moon,
   PaintBrush,
@@ -31,12 +33,17 @@ import { getBestFix, isNative, shareTextFile } from '../lib/native'
 import { ensureExactAlarmPermission, ensureNotificationPermission } from '../lib/reminder'
 import {
   deleteAvatar,
+  getAccountMe,
   getCloudConfig,
   getStorageInfo,
   isSignedIn,
+  listAccountDevices,
+  revokeAccountDevice,
   saveCloudConfig,
-  updateAccountNickname,
+  updateAccountProfile,
   uploadAvatar,
+  type AccountDevice,
+  type AccountInfo,
   type CloudConfig,
   type StorageInfo,
 } from '../lib/cloud'
@@ -92,6 +99,11 @@ export function ProfilePage() {
   const [accent, setAccentState] = useState<AccentName>(() => getAccent())
   const [editing, setEditing] = useState(false)
   const [nickname, setNickname] = useState('')
+  const [email, setEmail] = useState('')
+  const [account, setAccount] = useState<AccountInfo | null>(null)
+  const [devicesOpen, setDevicesOpen] = useState(false)
+  const [devices, setDevices] = useState<AccountDevice[]>([])
+  const [devicesBusy, setDevicesBusy] = useState(false)
   // 中文输入法下 React state 可能滞后，保存时以输入框实际值为准
   const nicknameRef = useRef<HTMLInputElement>(null)
   const [autoCheckin, setAutoCheckin] = useState(() => getAutoCheckinSettings())
@@ -120,6 +132,59 @@ export function ProfilePage() {
     window.addEventListener('travelog:cloud-changed', onCloud)
     return () => window.removeEventListener('travelog:cloud-changed', onCloud)
   }, [])
+
+  // 账号资料（邮箱 / 密码状态 / 设备数）与登录设备
+  useEffect(() => {
+    if (!signedIn) {
+      setAccount(null)
+      setDevices([])
+      return
+    }
+    let active = true
+    const loadAccount = async (attempt = 0) => {
+      try {
+        const info = await getAccountMe()
+        if (!active) return
+        setAccount(info)
+        setEmail(info.email || '')
+        setCloudConfig(getCloudConfig())
+      } catch {
+        // 弱网下首次读取可能超时，稍后自动重试
+        if (active && attempt < 2) window.setTimeout(() => void loadAccount(attempt + 1), 1500)
+      }
+    }
+    void loadAccount()
+    return () => {
+      active = false
+    }
+  }, [signedIn])
+
+  const openDevices = async () => {
+    setDevicesOpen(true)
+    setDevicesBusy(true)
+    try {
+      const result = await listAccountDevices()
+      setDevices(result.devices)
+    } catch (error) {
+      toast(`读取登录设备失败：${error instanceof Error ? error.message : '请稍后重试'}`)
+    } finally {
+      setDevicesBusy(false)
+    }
+  }
+
+  const revokeDevice = async (device: AccountDevice) => {
+    setDevicesBusy(true)
+    try {
+      await revokeAccountDevice(device.id)
+      setDevices((list) => list.filter((item) => item.id !== device.id))
+      setAccount((prev) => (prev ? { ...prev, deviceCount: Math.max(0, prev.deviceCount - 1) } : prev))
+      toast(`已让「${device.name}」下线`)
+    } catch (error) {
+      toast(`操作失败：${error instanceof Error ? error.message : '请稍后重试'}`)
+    } finally {
+      setDevicesBusy(false)
+    }
+  }
 
   // 云存储占用：进入页面、同步完成后刷新，方便随时看到 R2 用量
   useEffect(() => {
@@ -214,6 +279,11 @@ export function ProfilePage() {
       toast('昵称最多 24 个字符')
       return
     }
+    const nextEmail = email.trim()
+    if (nextEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(nextEmail)) {
+      toast('邮箱格式不正确')
+      return
+    }
     try {
       const base: Profile =
         data.profile ?? { id: 'local-user', nickname: name, avatar: '', createdAt: Date.now() }
@@ -223,8 +293,11 @@ export function ProfilePage() {
       bump()
       if (isSignedIn()) {
         try {
-          await updateAccountNickname(name)
-          toast('昵称已更新并同步到云端')
+          const saved = await updateAccountProfile({ nickname: name, email: nextEmail })
+          setAccount((prev) =>
+            prev ? { ...prev, nickname: saved.nickname, email: saved.email } : prev,
+          )
+          toast(saved.email ? '昵称与邮箱已同步到云端' : '昵称已更新并同步到云端')
         } catch (error) {
           saveCloudConfig({ nickname: name })
           toast(`昵称已保存到本机，云端同步失败：${error instanceof Error ? error.message : '请稍后重试'}`)
@@ -235,6 +308,12 @@ export function ProfilePage() {
     } catch (error) {
       toast(`保存失败：${error instanceof Error ? error.message : '请稍后重试'}`)
     }
+  }
+
+  const openEdit = () => {
+    setNickname(data.profile?.nickname || '')
+    setEmail(account?.email || cloudConfig.email || '')
+    setEditing(true)
   }
 
   const pickAvatar = async (file: File | undefined) => {
@@ -362,7 +441,9 @@ export function ProfilePage() {
     ? `上次备份 ${new Date(lastBackupAt).toLocaleDateString('zh-CN')}`
     : '导出 / 导入 JSON 备份'
   const syncSummary = cloudConfig.autoSync
-    ? `自动 · 每 ${cloudConfig.syncIntervalMinutes} 分钟${cloudConfig.wifiOnly ? ' · 仅 Wi-Fi' : ''}`
+    ? cloudConfig.syncIntervalMinutes === 0
+      ? `实时同步${cloudConfig.wifiOnly ? ' · 仅 Wi-Fi' : ''}`
+      : `自动 · 每 ${cloudConfig.syncIntervalMinutes} 分钟${cloudConfig.wifiOnly ? ' · 仅 Wi-Fi' : ''}`
     : '仅手动同步'
 
   const patchCloud = (patch: Partial<CloudConfig>) => setCloudConfig(saveCloudConfig(patch))
@@ -380,7 +461,7 @@ export function ProfilePage() {
           <div className="min-w-0 flex-1">
             <p className="text-body-sm text-ink">自动同步</p>
             <p className="mt-0.5 text-caption leading-4 text-ink-3">
-              打开应用、切回前台或修改后自动同步。
+              默认实时：修改后立即同步，前台每约 20 秒检查一次云端更新。
             </p>
           </div>
           <button
@@ -406,7 +487,7 @@ export function ProfilePage() {
             <div>
               <p className="text-caption text-ink-3">同步间隔</p>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {[1, 5, 15, 30].map((minutes) => (
+                {[0, 1, 5, 15, 30].map((minutes) => (
                   <button
                     key={minutes}
                     type="button"
@@ -416,7 +497,7 @@ export function ProfilePage() {
                     )}
                     onClick={() => patchCloud({ syncIntervalMinutes: minutes })}
                   >
-                    {minutes} 分钟
+                    {minutes === 0 ? '实时' : `${minutes} 分钟`}
                   </button>
                 ))}
               </div>
@@ -491,6 +572,56 @@ export function ProfilePage() {
       </div>
     </SettingsGroup>
   )
+
+  const accountUsername = account?.username ?? cloudConfig.username
+  const accountEmail = account?.email ?? cloudConfig.email
+  const accountHasPassword = account?.hasPassword ?? Boolean(cloudConfig.username)
+
+  const securityGroup = signedIn ? (
+    <SettingsGroup
+      icon={<ShieldCheck size={17} />}
+      title={tr('账号与安全')}
+      summary={accountEmail || (accountUsername ? `@${accountUsername}` : '同步码登录')}
+    >
+      <div className="space-y-2.5">
+        <div className="rounded-xl bg-paper-2/60 p-3 text-caption leading-5 text-ink-3">
+          <p>
+            账号：{accountUsername ? `@${accountUsername}` : '未设置账号名'}
+            {accountHasPassword ? '' : ' · 建议设置密码'}
+          </p>
+          <p>邮箱：{accountEmail || '未绑定'}</p>
+          <p>
+            密码：{accountHasPassword ? '已设置（服务端仅保存加盐哈希，无法查看原文）' : '未设置'}
+          </p>
+          <p>登录设备：{account ? `${account.deviceCount} 台` : '读取中…'}</p>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            className="chip px-2.5 py-1 text-caption"
+            onClick={openEdit}
+          >
+            修改昵称 / 邮箱
+          </button>
+          <button
+            type="button"
+            className="chip px-2.5 py-1 text-caption"
+            onClick={() => nav.navigate({ name: 'sync' })}
+          >
+            {accountHasPassword ? '修改密码' : '设置密码'}
+          </button>
+          <button
+            type="button"
+            className="chip px-2.5 py-1 text-caption"
+            onClick={() => void openDevices()}
+          >
+            <Devices size={12} />
+            登录设备
+          </button>
+        </div>
+      </div>
+    </SettingsGroup>
+  ) : null
 
   const autoCheckinGroup = (
     <SettingsGroup
@@ -760,7 +891,7 @@ export function ProfilePage() {
         <button
           type="button"
           className="btn-ghost h-9 shrink-0 px-3 text-note"
-          onClick={() => setEditing(true)}
+          onClick={openEdit}
         >
           <PencilSimple size={14} />
           {tr('编辑')}
@@ -826,6 +957,7 @@ export function ProfilePage() {
 
       <section className="overflow-hidden rounded-2xl border border-line bg-surface">
         {syncGroup}
+        {securityGroup}
         {autoCheckinGroup}
         {appearanceGroup}
         {dataGroup}
@@ -903,6 +1035,76 @@ export function ProfilePage() {
               placeholder="给自己起个名字"
             />
           </Field>
+          {signedIn ? (
+            <Field label="邮箱" hint="仅用于账号联系与找回，不会公开">
+              <input
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                className="input"
+                value={email}
+                maxLength={120}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="you@example.com"
+              />
+            </Field>
+          ) : null}
+        </div>
+      </Sheet>
+
+      <Sheet
+        open={devicesOpen}
+        title="登录设备"
+        onClose={() => setDevicesOpen(false)}
+        footer={
+          <button type="button" className="btn-ghost w-full" onClick={() => setDevicesOpen(false)}>
+            关闭
+          </button>
+        }
+      >
+        <div className="space-y-2">
+          <p className="text-caption leading-5 text-ink-3">
+            同一账号可在多台设备同时登录。发现陌生设备时，可立即让它下线；修改密码会让全部设备重新登录。
+          </p>
+          {devicesBusy && devices.length === 0 ? (
+            <p className="py-6 text-center text-caption text-ink-3">正在读取设备…</p>
+          ) : devices.length === 0 ? (
+            <p className="py-6 text-center text-caption text-ink-3">还没有其他登录设备</p>
+          ) : (
+            devices.map((device) => (
+              <div key={device.id} className="rounded-xl border border-line p-3">
+                <div className="flex items-center gap-2">
+                  <Devices size={16} className="shrink-0 text-ink-3" />
+                  <p className="min-w-0 flex-1 truncate text-body-sm text-ink">{device.name}</p>
+                  {device.current ? (
+                    <span className="shrink-0 rounded-full bg-accent-soft px-1.5 py-0.5 text-caption text-accent">
+                      当前设备
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="chip px-2.5 py-1 text-caption text-danger"
+                      disabled={devicesBusy}
+                      onClick={() => void revokeDevice(device)}
+                    >
+                      下线
+                    </button>
+                  )}
+                </div>
+                <p className="mt-1 text-caption text-ink-3">
+                  {device.lastSeenAt > 0
+                    ? `最近活跃 ${relativeTime(device.lastSeenAt)}`
+                    : `登录于 ${relativeTime(device.createdAt)}`}
+                  {device.ip ? ` · ${device.ip}` : ''}
+                </p>
+                {device.userAgent ? (
+                  <p className="mt-0.5 truncate text-caption text-ink-3" title={device.userAgent}>
+                    {device.userAgent}
+                  </p>
+                ) : null}
+              </div>
+            ))
+          )}
         </div>
       </Sheet>
     </div>

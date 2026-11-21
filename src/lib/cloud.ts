@@ -7,19 +7,22 @@ export interface CloudConfig {
   userId: string
   /** 账号名（账号密码登录）；仅同步码登录的老账号为空 */
   username: string
+  /** 账号邮箱（可在用户中心或后台修改） */
+  email: string
   /** 会员到期时间（毫秒）；0 表示非会员 */
   membershipExpiresAt: number
   /** 同步游标：新版为 updatedAt~kind~id，兼容旧版的数字时间戳 */
   cursor: string | number
   lastSyncAt: number
   autoSync: boolean
-  /** 前台自动同步间隔（分钟） */
+  /** 前台自动同步间隔（分钟）；0 = 实时（约 20 秒一次） */
   syncIntervalMinutes: number
   /** 仅在 Wi-Fi 下自动同步 */
   wifiOnly: boolean
 }
 
 const STORAGE_KEY = 'travelog.cloud'
+const REALTIME_MIGRATION_KEY = 'travelog.cloud.syncRealtime'
 const DEFAULT_CONFIG: CloudConfig = {
   baseUrl: '',
   token: '',
@@ -27,11 +30,12 @@ const DEFAULT_CONFIG: CloudConfig = {
   nickname: '',
   userId: '',
   username: '',
+  email: '',
   membershipExpiresAt: 0,
   cursor: 0,
   lastSyncAt: 0,
   autoSync: true,
-  syncIntervalMinutes: 5,
+  syncIntervalMinutes: 0,
   wifiOnly: false,
 }
 
@@ -39,7 +43,21 @@ export function getCloudConfig(): CloudConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return { ...DEFAULT_CONFIG }
-    return { ...DEFAULT_CONFIG, ...(JSON.parse(raw) as Partial<CloudConfig>) }
+    const next = { ...DEFAULT_CONFIG, ...(JSON.parse(raw) as Partial<CloudConfig>) }
+    // v2.3.0：默认切换为「实时同步」。一次性把旧的 5 分钟默认值升级为实时，
+    // 用户之后手动选择的 1/5/15/30 分钟不再被覆盖。
+    try {
+      if (!localStorage.getItem(REALTIME_MIGRATION_KEY)) {
+        localStorage.setItem(REALTIME_MIGRATION_KEY, '1')
+        if (next.syncIntervalMinutes === 5) {
+          next.syncIntervalMinutes = 0
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+        }
+      }
+    } catch {
+      /* 隐私模式下忽略迁移标记 */
+    }
+    return next
   } catch {
     return { ...DEFAULT_CONFIG }
   }
@@ -149,6 +167,7 @@ export interface AuthResult {
   syncCode: string
   nickname: string
   username: string
+  email?: string
   membership: MembershipInfo
   needsCredentials: boolean
 }
@@ -160,6 +179,7 @@ function saveAuth(result: AuthResult): AuthResult {
     syncCode: result.syncCode,
     nickname: result.nickname,
     username: result.username || '',
+    email: result.email || '',
     membershipExpiresAt: result.membership?.expiresAt ?? 0,
     cursor: 0,
   })
@@ -169,6 +189,22 @@ function saveAuth(result: AuthResult): AuthResult {
 export interface AuthConfig {
   site: string
   inviteRequired: boolean
+}
+
+/** 给登录设备起个可读名字，显示在「登录设备」列表里 */
+export function deviceLabel(): string {
+  const capacitor = (window as unknown as { Capacitor?: { getPlatform?: () => string } }).Capacitor
+  const platform = capacitor?.getPlatform?.()
+  if (platform === 'android') return 'Android 应用'
+  if (platform === 'ios') return 'iOS 应用'
+  const ua = navigator.userAgent
+  if (/iPad/.test(ua)) return 'iPad 浏览器'
+  if (/iPhone/.test(ua)) return 'iPhone 浏览器'
+  if (/Android/.test(ua)) return 'Android 浏览器'
+  if (/Macintosh/.test(ua)) return 'Mac 浏览器'
+  if (/Windows/.test(ua)) return 'Windows 浏览器'
+  if (/Linux/.test(ua)) return 'Linux 浏览器'
+  return '网页浏览器'
 }
 
 export function getAuthConfig(): Promise<AuthConfig> {
@@ -183,7 +219,7 @@ export async function registerCloud(
 ): Promise<AuthResult> {
   const result = await api<AuthResult>('/auth/register', {
     method: 'POST',
-    body: { nickname, username, password, inviteCode: inviteCode || undefined },
+    body: { nickname, username, password, inviteCode: inviteCode || undefined, deviceName: deviceLabel() },
     auth: false,
   })
   return saveAuth(result)
@@ -193,7 +229,7 @@ export async function registerCloud(
 export async function loginWithPassword(username: string, password: string): Promise<AuthResult> {
   const result = await api<AuthResult>('/auth/login', {
     method: 'POST',
-    body: { username, password },
+    body: { username, password, deviceName: deviceLabel() },
     auth: false,
   })
   return saveAuth(result)
@@ -203,7 +239,7 @@ export async function loginWithPassword(username: string, password: string): Pro
 export async function loginCloud(syncCode: string): Promise<AuthResult> {
   const result = await api<AuthResult>('/auth/login', {
     method: 'POST',
-    body: { syncCode },
+    body: { syncCode, deviceName: deviceLabel() },
     auth: false,
   })
   return saveAuth(result)
@@ -213,10 +249,14 @@ export interface AccountInfo {
   userId: string
   nickname: string
   username: string
+  email: string
   syncCode: string
   createdAt: number
   membership: MembershipInfo
   needsCredentials: boolean
+  hasPassword: boolean
+  passwordUpdatedAt: number
+  deviceCount: number
 }
 
 /** 当前账号资料 + 会员状态 */
@@ -225,6 +265,7 @@ export async function getAccountMe(): Promise<AccountInfo> {
   saveCloudConfig({
     nickname: result.nickname,
     username: result.username || '',
+    email: result.email || '',
     membershipExpiresAt: result.membership?.expiresAt ?? 0,
   })
   return result
@@ -266,14 +307,43 @@ export async function logoutCloud(): Promise<void> {
   clearCloudConfig()
 }
 
-/** 修改当前账号昵称；会同步到云端账号（旅伴、共享行程里的展示名） */
-export async function updateAccountNickname(nickname: string): Promise<{ nickname: string }> {
-  const result = await api<{ nickname: string }>('/account', {
+/** 修改当前账号昵称 / 邮箱；会同步到云端账号（旅伴、共享行程里的展示名） */
+export async function updateAccountProfile(patch: {
+  nickname?: string
+  email?: string
+}): Promise<{ nickname: string; email: string }> {
+  const result = await api<{ nickname: string; email: string }>('/account', {
     method: 'PATCH',
-    body: { nickname },
+    body: patch,
   })
-  saveCloudConfig({ nickname: result.nickname })
+  saveCloudConfig({ nickname: result.nickname, email: result.email })
   return result
+}
+
+export function updateAccountNickname(nickname: string): Promise<{ nickname: string; email: string }> {
+  return updateAccountProfile({ nickname })
+}
+
+/* ---------------- 登录设备 ---------------- */
+
+export interface AccountDevice {
+  id: string
+  name: string
+  userAgent: string
+  ip: string
+  createdAt: number
+  lastSeenAt: number
+  current: boolean
+}
+
+/** 当前账号的登录设备列表 */
+export function listAccountDevices(): Promise<{ devices: AccountDevice[] }> {
+  return api('/account/devices')
+}
+
+/** 让指定设备下线（传当前设备的 id 等于退出当前设备） */
+export function revokeAccountDevice(deviceId: string): Promise<{ ok: boolean }> {
+  return api(`/account/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' })
 }
 
 export interface AIResult {
@@ -462,7 +532,11 @@ export interface AdminOverview {
 export interface AdminUser {
   id: string
   nickname: string | null
+  email: string
   username: string
+  hasPassword: boolean
+  passwordUpdatedAt: number
+  deviceCount: number
   syncCode: string
   createdAt: number
   lastSeenAt: number
@@ -597,9 +671,36 @@ export function adminListUsers(query: string, limit = 50, offset = 0): Promise<{
 
 export function adminPatchUser(
   id: string,
-  patch: { status?: 'active' | 'disabled'; nickname?: string; note?: string; membershipDays?: number },
-): Promise<{ ok: boolean }> {
+  patch: {
+    status?: 'active' | 'disabled'
+    nickname?: string
+    email?: string
+    username?: string
+    password?: string
+    note?: string
+    membershipDays?: number
+  },
+): Promise<{
+  ok: boolean
+  nickname: string
+  email: string
+  username: string
+  hasPassword: boolean
+}> {
   return adminApi(`/admin/users/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch })
+}
+
+/** 管理员查看某个用户的登录设备 */
+export function adminListUserDevices(userId: string): Promise<{ devices: AccountDevice[] }> {
+  return adminApi(`/admin/users/${encodeURIComponent(userId)}/devices`)
+}
+
+/** 管理员强制某个用户的设备下线 */
+export function adminRevokeUserDevice(userId: string, deviceId: string): Promise<{ ok: boolean }> {
+  return adminApi(
+    `/admin/users/${encodeURIComponent(userId)}/devices/${encodeURIComponent(deviceId)}`,
+    { method: 'DELETE' },
+  )
 }
 
 export function adminDeleteUser(id: string): Promise<{ ok: boolean }> {

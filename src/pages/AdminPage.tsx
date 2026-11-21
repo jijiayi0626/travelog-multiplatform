@@ -5,9 +5,11 @@ import {
   CheckCircle,
   Copy,
   Crown,
+  Devices,
   DownloadSimple,
   Images,
   MagnifyingGlass,
+  PencilSimple,
   Plus,
   SignOut,
   Sparkle,
@@ -24,16 +26,19 @@ import {
   adminListCodes,
   adminListModels,
   adminListPhotos,
+  adminListUserDevices,
   adminListUsers,
   adminLogin,
   adminLogout,
   adminOverview,
   adminPatchUser,
   adminResetSyncCode,
+  adminRevokeUserDevice,
   adminSaveSettings,
   adminTestAI,
   ApiError,
   getAdminSession,
+  type AccountDevice,
   type AdminAITestResult,
   type AdminCode,
   type AdminEndpoint,
@@ -78,6 +83,14 @@ export function AdminPage() {
   const [loading, setLoading] = useState(false)
   const [settings, setSettings] = useState<AdminSettings | null>(null)
   const [pendingDelete, setPendingDelete] = useState<AdminUser | null>(null)
+  const [managing, setManaging] = useState<AdminUser | null>(null)
+  const [formNickname, setFormNickname] = useState('')
+  const [formEmail, setFormEmail] = useState('')
+  const [formUsername, setFormUsername] = useState('')
+  const [formPassword, setFormPassword] = useState('')
+  const [savingUser, setSavingUser] = useState(false)
+  const [devices, setDevices] = useState<AccountDevice[]>([])
+  const [devicesLoading, setDevicesLoading] = useState(false)
 
   const signedIn = Boolean(session?.token)
 
@@ -142,6 +155,73 @@ export function AdminPage() {
       handleError(error)
     } finally {
       setLoggingIn(false)
+    }
+  }
+
+  const refreshDevices = async (userId: string) => {
+    setDevicesLoading(true)
+    try {
+      const result = await adminListUserDevices(userId)
+      setDevices(result.devices)
+    } catch (error) {
+      handleError(error)
+    } finally {
+      setDevicesLoading(false)
+    }
+  }
+
+  const openManage = (user: AdminUser) => {
+    setManaging(user)
+    setFormNickname(user.nickname || '')
+    setFormEmail(user.email || '')
+    setFormUsername(user.username || '')
+    setFormPassword('')
+    setDevices([])
+    void refreshDevices(user.id)
+  }
+
+  const saveManagedUser = async () => {
+    if (!managing) return
+    if (formPassword && formPassword.length < 6) {
+      toast(tr('新密码至少 6 位'))
+      return
+    }
+    setSavingUser(true)
+    try {
+      const passwordChanged = Boolean(formPassword)
+      await adminPatchUser(managing.id, {
+        nickname: formNickname.trim(),
+        email: formEmail.trim(),
+        username: formUsername.trim() || undefined,
+        password: formPassword || undefined,
+      })
+      toast(
+        passwordChanged
+          ? tr('已保存，密码已重置，该用户的所有设备已下线')
+          : tr('用户资料已更新'),
+      )
+      setManaging(null)
+      setFormPassword('')
+      void load()
+    } catch (error) {
+      handleError(error)
+    } finally {
+      setSavingUser(false)
+    }
+  }
+
+  const revokeManagedDevice = async (device: AccountDevice) => {
+    if (!managing) return
+    setDevicesLoading(true)
+    try {
+      await adminRevokeUserDevice(managing.id, device.id)
+      setDevices((list) => list.filter((item) => item.id !== device.id))
+      toast(tr('已强制该设备下线'))
+      void load()
+    } catch (error) {
+      handleError(error)
+    } finally {
+      setDevicesLoading(false)
     }
   }
 
@@ -348,6 +428,13 @@ export function AdminPage() {
                           <span className="mx-1.5">·</span>
                           <span className="font-mono tracking-[0.14em]">{user.syncCode}</span>
                         </p>
+                        <p className="mt-0.5 text-caption text-ink-3">
+                          {user.email || tr('未绑定邮箱')}
+                          <span className="mx-1.5">·</span>
+                          {user.hasPassword ? tr('密码已设置') : tr('未设密码')}
+                          <span className="mx-1.5">·</span>
+                          {tr('{n} 台设备在线', { n: user.deviceCount ?? 0 })}
+                        </p>
                       </div>
                       <span className="shrink-0 text-caption tabular-nums text-ink-3">
                         {user.entityCount} {tr('条')}
@@ -392,6 +479,14 @@ export function AdminPage() {
                     ) : null}
 
                     <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        className="chip px-2.5 py-1 text-caption"
+                        onClick={() => openManage(user)}
+                      >
+                        <PencilSimple size={12} />
+                        {tr('编辑资料')}
+                      </button>
                       {user.photoCount > 0 ? (
                         <button
                           type="button"
@@ -504,6 +599,118 @@ export function AdminPage() {
           <SiteSettings settings={settings} onSaved={() => void load()} onError={handleError} />
         ) : null}
       </div>
+
+      <Sheet
+        open={managing !== null}
+        title={tr('编辑用户')}
+        onClose={() => {
+          if (!savingUser) setManaging(null)
+        }}
+        footer={
+          <button
+            type="button"
+            className="btn-primary w-full"
+            onClick={() => void saveManagedUser()}
+            disabled={savingUser}
+          >
+            {savingUser ? tr('保存中…') : tr('保存修改')}
+          </button>
+        }
+      >
+        {managing ? (
+          <div className="space-y-4">
+            <div className="rounded-xl bg-paper-2/60 p-3 text-caption leading-5 text-ink-3">
+              <p className="font-mono tracking-[0.14em] text-ink-2">{managing.syncCode}</p>
+              <p className="break-all">{managing.id}</p>
+            </div>
+            <Field label={tr('昵称')}>
+              <input
+                className="input"
+                type="text"
+                value={formNickname}
+                maxLength={24}
+                onChange={(event) => setFormNickname(event.target.value)}
+              />
+            </Field>
+            <Field label={tr('邮箱')} hint={tr('可留空；同一邮箱只能绑定一个账号')}>
+              <input
+                className="input"
+                type="email"
+                inputMode="email"
+                autoComplete="off"
+                value={formEmail}
+                maxLength={120}
+                placeholder="you@example.com"
+                onChange={(event) => setFormEmail(event.target.value)}
+              />
+            </Field>
+            <Field label={tr('账号名')} hint={tr('用于账号密码登录，2–24 位')}>
+              <input
+                className="input"
+                type="text"
+                autoComplete="off"
+                value={formUsername}
+                onChange={(event) => setFormUsername(event.target.value)}
+              />
+            </Field>
+            <Field
+              label={tr('重置密码')}
+              hint={tr('留空则不修改。密码只保存加盐哈希，无法查看原文；重置后该用户所有设备会下线。')}
+            >
+              <input
+                className="input"
+                type="password"
+                autoComplete="new-password"
+                value={formPassword}
+                placeholder={tr('至少 6 位')}
+                onChange={(event) => setFormPassword(event.target.value)}
+              />
+            </Field>
+
+            <div className="space-y-2 border-t border-line pt-3">
+              <div className="flex items-center gap-2">
+                <p className="min-w-0 flex-1 text-body-sm font-medium text-ink">
+                  {tr('登录设备（{n}）', { n: devices.length })}
+                </p>
+                <button
+                  type="button"
+                  className="chip px-2.5 py-1 text-caption"
+                  disabled={devicesLoading}
+                  onClick={() => void refreshDevices(managing.id)}
+                >
+                  {devicesLoading ? tr('读取中…') : tr('刷新')}
+                </button>
+              </div>
+              {devices.length === 0 && !devicesLoading ? (
+                <p className="py-2 text-caption text-ink-3">{tr('没有已登录设备')}</p>
+              ) : (
+                devices.map((device) => (
+                  <div key={device.id} className="flex items-start gap-2 rounded-xl border border-line p-2.5">
+                    <Devices size={15} className="mt-0.5 shrink-0 text-ink-3" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-body-sm text-ink">{device.name}</p>
+                      <p className="text-caption text-ink-3">
+                        {device.lastSeenAt > 0
+                          ? tr('最近活跃 {time}', { time: relativeTime(device.lastSeenAt) })
+                          : tr('登录于 {time}', { time: relativeTime(device.createdAt) })}
+                        {device.ip ? ` · ${device.ip}` : ''}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="chip shrink-0 px-2 py-1 text-caption text-danger"
+                      disabled={devicesLoading}
+                      onClick={() => void revokeManagedDevice(device)}
+                    >
+                      {tr('下线')}
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        ) : null}
+      </Sheet>
 
       <ConfirmDialog
         open={pendingDelete !== null}

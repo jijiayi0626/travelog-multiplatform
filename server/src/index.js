@@ -94,6 +94,7 @@ async function hashPassword(password, salt) {
 /* ---------------- 账号 / 风控 / 审计 ---------------- */
 
 const USERNAME_RE = /^[\p{L}\p{N}_.-]{2,24}$/u
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
 function normalizeUsername(raw) {
   const username = String(raw || '').trim()
@@ -101,6 +102,17 @@ function normalizeUsername(raw) {
     throw new HttpError(400, '账号需为 2–24 位字母、数字、汉字或 _ . -')
   }
   return username
+}
+
+function normalizeEmail(raw) {
+  const email = String(raw || '').trim()
+  if (!email) return ''
+  if (email.length > 120 || !EMAIL_RE.test(email)) throw new HttpError(400, '邮箱格式不正确')
+  return email
+}
+
+function emailLower(email) {
+  return email ? email.toLowerCase() : null
 }
 
 function checkPassword(password) {
@@ -181,9 +193,11 @@ function membershipPayload(expiresAt) {
 }
 
 /** 签发多设备令牌，并兼容旧版单 token 字段 */
-async function issueUserToken(env, userId) {
+async function issueUserToken(env, userId, meta = {}) {
   const token = randomToken()
   const now = Date.now()
+  const info = meta.info || {}
+  const deviceName = String(meta.deviceName || '').trim().slice(0, 80) || '未命名设备'
   // 升级前的老设备可能只在 users.token 里保存令牌，先迁移到 user_tokens 再换新，
   // 这样在新设备登录不会把老设备顶下线。
   const previous = await env.DB.prepare('SELECT token FROM users WHERE id = ?').bind(userId).first()
@@ -196,12 +210,62 @@ async function issueUserToken(env, userId) {
     )
   }
   statements.push(
-    env.DB.prepare('INSERT INTO user_tokens (token, user_id, created_at, last_seen_at) VALUES (?, ?, ?, ?)')
-      .bind(token, userId, now, now),
+    env.DB.prepare(
+      `INSERT INTO user_tokens (token, user_id, created_at, last_seen_at, device_name, user_agent, ip)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(token, userId, now, now, deviceName, info.userAgent || '', info.ip || ''),
     env.DB.prepare('UPDATE users SET token = ? WHERE id = ?').bind(token, userId),
   )
   await env.DB.batch(statements)
   return token
+}
+
+/** 设备列表里只暴露令牌的哈希摘要，不泄露原始令牌 */
+async function deviceIdOf(token) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(token)))
+  return [...new Uint8Array(digest).slice(0, 12)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+async function listDevices(env, userId, currentToken = '') {
+  const { results } = await env.DB.prepare(
+    `SELECT token, device_name, user_agent, ip, created_at, last_seen_at
+     FROM user_tokens WHERE user_id = ?
+     ORDER BY COALESCE(last_seen_at, created_at) DESC`,
+  )
+    .bind(userId)
+    .all()
+  return Promise.all(
+    (results || []).map(async (row) => ({
+      id: await deviceIdOf(row.token),
+      name: row.device_name || '未命名设备',
+      userAgent: row.user_agent || '',
+      ip: row.ip || '',
+      createdAt: row.created_at,
+      lastSeenAt: row.last_seen_at || 0,
+      current: Boolean(currentToken) && row.token === currentToken,
+    })),
+  )
+}
+
+async function revokeDevice(env, userId, deviceId) {
+  const { results } = await env.DB.prepare('SELECT token FROM user_tokens WHERE user_id = ?')
+    .bind(userId)
+    .all()
+  let match = ''
+  for (const row of results || []) {
+    if ((await deviceIdOf(row.token)) === deviceId) {
+      match = row.token
+      break
+    }
+  }
+  if (!match) throw new HttpError(404, '设备不存在或已退出')
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM user_tokens WHERE token = ?').bind(match),
+    env.DB.prepare('UPDATE users SET token = ? WHERE id = ? AND token = ?').bind('', userId, match),
+  ])
+  return match
 }
 
 async function registrationSettings(env) {
@@ -365,10 +429,10 @@ async function handleAdminUsers(request, env, url) {
               ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC) AS rn
        FROM user_activity
      )
-     SELECT u.id, u.nickname, u.sync_code, u.created_at,
+     SELECT u.id, u.nickname, u.sync_code, u.created_at, u.email,
             COALESCE(m.status, 'active') AS status,
             m.last_seen_at,
-            c.username,
+            c.username, c.updated_at AS password_updated_at,
             um.expires_at AS membership_expires_at,
             la.ip AS last_ip, la.user_agent AS last_user_agent, la.country AS last_country,
             la.region AS last_region, la.city AS last_city, la.colo AS last_colo,
@@ -376,24 +440,25 @@ async function handleAdminUsers(request, env, url) {
             (SELECT COUNT(*) FROM entities e WHERE e.user_id = u.id AND e.deleted = 0) AS entity_count,
             (SELECT COUNT(*) FROM photos p WHERE p.user_id = u.id) AS photo_count,
             (SELECT COALESCE(SUM(size), 0) FROM photos p WHERE p.user_id = u.id) AS photo_bytes,
-            (SELECT COALESCE(SUM(size), 0) FROM avatars a WHERE a.user_id = u.id) AS avatar_bytes
+            (SELECT COALESCE(SUM(size), 0) FROM avatars a WHERE a.user_id = u.id) AS avatar_bytes,
+            (SELECT COUNT(*) FROM user_tokens t WHERE t.user_id = u.id) AS device_count
      FROM users u
      LEFT JOIN user_meta m ON m.user_id = u.id
      LEFT JOIN user_credentials c ON c.user_id = u.id
      LEFT JOIN user_membership um ON um.user_id = u.id
      LEFT JOIN last_activity la ON la.user_id = u.id AND la.rn = 1
-     WHERE (? = '' OR u.nickname LIKE ? OR u.sync_code LIKE ? OR c.username LIKE ?)
+     WHERE (? = '' OR u.nickname LIKE ? OR u.sync_code LIKE ? OR c.username LIKE ? OR u.email LIKE ?)
      ORDER BY u.created_at DESC
      LIMIT ? OFFSET ?`,
   )
-    .bind(query, like, like, like, limit, offset)
+    .bind(query, like, like, like, like, limit, offset)
     .all()
   const total = await env.DB.prepare(
     `SELECT COUNT(*) AS n FROM users u
      LEFT JOIN user_credentials c ON c.user_id = u.id
-     WHERE (? = '' OR u.nickname LIKE ? OR u.sync_code LIKE ? OR c.username LIKE ?)`,
+     WHERE (? = '' OR u.nickname LIKE ? OR u.sync_code LIKE ? OR c.username LIKE ? OR u.email LIKE ?)`,
   )
-    .bind(query, like, like, like)
+    .bind(query, like, like, like, like)
     .first()
   return json(
     {
@@ -401,7 +466,11 @@ async function handleAdminUsers(request, env, url) {
       users: (results || []).map((row) => ({
         id: row.id,
         nickname: row.nickname,
+        email: row.email || '',
         username: row.username || '',
+        hasPassword: Boolean(row.username),
+        passwordUpdatedAt: row.password_updated_at || 0,
+        deviceCount: row.device_count || 0,
         syncCode: row.sync_code,
         createdAt: row.created_at,
         lastSeenAt: row.last_seen_at || 0,
@@ -429,11 +498,23 @@ async function handleAdminUsers(request, env, url) {
 async function handleAdminUserPatch(request, env, userId) {
   await requireAdmin(request, env)
   const body = await readJSON(request)
-  const exists = await env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(userId).first()
+  const exists = await env.DB.prepare('SELECT id, email FROM users WHERE id = ?').bind(userId).first()
   if (!exists) throw new HttpError(404, '用户不存在')
   if (body.nickname !== undefined) {
     await env.DB.prepare('UPDATE users SET nickname = ? WHERE id = ?')
       .bind(String(body.nickname).slice(0, 24), userId)
+      .run()
+  }
+  if (body.email !== undefined) {
+    const email = normalizeEmail(body.email)
+    if (email) {
+      const taken = await env.DB.prepare('SELECT id FROM users WHERE email_lower = ? AND id != ?')
+        .bind(email.toLowerCase(), userId)
+        .first()
+      if (taken) throw new HttpError(409, '这个邮箱已被其他账号使用')
+    }
+    await env.DB.prepare('UPDATE users SET email = ?, email_lower = ? WHERE id = ?')
+      .bind(email || null, emailLower(email), userId)
       .run()
   }
   if (body.status !== undefined) {
@@ -471,6 +552,82 @@ async function handleAdminUserPatch(request, env, userId) {
         .run()
     }
   }
+
+  // 管理员可改账号名 / 重置密码；密码只存 PBKDF2 加盐哈希，不可反向查看
+  const wantsPassword = body.password !== undefined && String(body.password).length > 0
+  const wantsUsername = body.username !== undefined && String(body.username).trim().length > 0
+  if (wantsPassword || wantsUsername) {
+    const existing = await env.DB.prepare(
+      'SELECT username, salt, password_hash FROM user_credentials WHERE user_id = ?',
+    )
+      .bind(userId)
+      .first()
+    const username = wantsUsername ? normalizeUsername(body.username) : existing?.username || ''
+    if (!username) throw new HttpError(400, '该用户还没有账号名，请同时填写账号名')
+    if (wantsUsername) {
+      const taken = await env.DB.prepare(
+        'SELECT user_id FROM user_credentials WHERE username_lower = ? AND user_id != ?',
+      )
+        .bind(username.toLowerCase(), userId)
+        .first()
+      if (taken) throw new HttpError(409, '这个账号名已被使用')
+    }
+    const salt = wantsPassword ? randomToken(16) : existing?.salt
+    const passwordHash = wantsPassword
+      ? await hashPassword(checkPassword(body.password), salt)
+      : existing?.password_hash
+    if (!salt || !passwordHash) throw new HttpError(400, '请设置新密码')
+    await env.DB.prepare(
+      `INSERT INTO user_credentials (user_id, username, username_lower, salt, password_hash, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (user_id) DO UPDATE SET
+         username = excluded.username, username_lower = excluded.username_lower,
+         salt = excluded.salt, password_hash = excluded.password_hash, updated_at = excluded.updated_at`,
+    )
+      .bind(userId, username, username.toLowerCase(), salt, passwordHash, Date.now())
+      .run()
+    if (wantsPassword) {
+      // 管理员重置密码后，所有设备令牌立即失效，用户需用新密码重新登录
+      await env.DB.batch([
+        env.DB.prepare('DELETE FROM user_tokens WHERE user_id = ?').bind(userId),
+        env.DB.prepare('UPDATE users SET token = ? WHERE id = ?').bind('', userId),
+      ])
+      await logActivity(env, request, userId, 'admin-password-reset').catch(() => {})
+    }
+  }
+
+  const updated = await env.DB.prepare(
+    'SELECT u.nickname, u.email, c.username FROM users u LEFT JOIN user_credentials c ON c.user_id = u.id WHERE u.id = ?',
+  )
+    .bind(userId)
+    .first()
+  return json(
+    {
+      ok: true,
+      nickname: updated?.nickname || '',
+      email: updated?.email || '',
+      username: updated?.username || '',
+      hasPassword: Boolean(updated?.username),
+    },
+    200,
+    env,
+    request,
+  )
+}
+
+/** 管理员查看某用户的登录设备 */
+async function handleAdminUserDevices(request, env, userId) {
+  await requireAdmin(request, env)
+  const exists = await env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(userId).first()
+  if (!exists) throw new HttpError(404, '用户不存在')
+  return json({ devices: await listDevices(env, userId) }, 200, env, request)
+}
+
+/** 管理员强制某台设备下线 */
+async function handleAdminUserDeviceRevoke(request, env, userId, deviceId) {
+  await requireAdmin(request, env)
+  await revokeDevice(env, userId, deviceId)
+  await logActivity(env, request, userId, 'admin-device-revoke').catch(() => {})
   return json({ ok: true }, 200, env, request)
 }
 
@@ -485,10 +642,13 @@ async function handleAdminUserResetCode(request, env, userId) {
 
 async function handleAdminUserDelete(request, env, userId) {
   await requireAdmin(request, env)
-  // 先清 R2 里的照片文件，再删数据库记录
+  // 先清 R2 里的照片与头像文件，再删数据库记录
   if (env.PHOTOS) {
-    const { results } = await env.DB.prepare('SELECT r2_key FROM photos WHERE user_id = ?').bind(userId).all()
-    const keys = (results || []).map((row) => row.r2_key)
+    const [photoRows, avatarRows] = await Promise.all([
+      env.DB.prepare('SELECT r2_key FROM photos WHERE user_id = ?').bind(userId).all(),
+      env.DB.prepare('SELECT r2_key FROM avatars WHERE user_id = ?').bind(userId).all(),
+    ])
+    const keys = [...(photoRows.results || []), ...(avatarRows.results || [])].map((row) => row.r2_key)
     for (let index = 0; index < keys.length; index += 900) {
       try {
         await env.PHOTOS.delete(keys.slice(index, index + 900))
@@ -501,6 +661,7 @@ async function handleAdminUserDelete(request, env, userId) {
     env.DB.prepare('DELETE FROM entities WHERE user_id = ?').bind(userId),
     env.DB.prepare('DELETE FROM ai_jobs WHERE user_id = ?').bind(userId),
     env.DB.prepare('DELETE FROM photos WHERE user_id = ?').bind(userId),
+    env.DB.prepare('DELETE FROM avatars WHERE user_id = ?').bind(userId),
     env.DB.prepare('DELETE FROM user_meta WHERE user_id = ?').bind(userId),
     env.DB.prepare('DELETE FROM user_credentials WHERE user_id = ?').bind(userId),
     env.DB.prepare('DELETE FROM user_tokens WHERE user_id = ?').bind(userId),
@@ -793,7 +954,8 @@ function bearerToken(request) {
 async function requireUser(request, env) {
   const token = bearerToken(request)
   if (!token) throw new HttpError(401, '缺少访问令牌')
-  const select = `SELECT u.id, u.sync_code, u.nickname, u.created_at, c.username,
+  const select = `SELECT u.id, u.sync_code, u.nickname, u.created_at, u.email,
+                         c.username, c.updated_at AS password_updated_at,
                          um.expires_at AS membership_expires_at
                   FROM users u
                   LEFT JOIN user_credentials c ON c.user_id = u.id
@@ -832,6 +994,8 @@ async function requireUser(request, env) {
     ...row,
     membership: membershipPayload(row.membership_expires_at),
     needsCredentials: !row.username,
+    hasPassword: Boolean(row.username),
+    passwordUpdatedAt: row.password_updated_at || 0,
   }
 }
 
@@ -851,6 +1015,7 @@ function authPayload(userId, token, row, username) {
     syncCode: row.sync_code,
     nickname: row.nickname,
     username: username || '',
+    email: row.email || '',
     membership: membershipPayload(row.membership_expires_at),
     needsCredentials: !username,
   }
@@ -895,6 +1060,8 @@ async function handleRegister(request, env) {
   const syncCode = await uniqueSyncCode(env)
   const token = randomToken()
   const now = Date.now()
+  const info = clientInfo(request)
+  const deviceName = String(body.deviceName || '').trim().slice(0, 80) || '未命名设备'
   const statements = [
     env.DB.prepare(
       'INSERT INTO users (id, sync_code, token, nickname, created_at) VALUES (?, ?, ?, ?, ?)',
@@ -904,8 +1071,9 @@ async function handleRegister(request, env) {
        ON CONFLICT (user_id) DO UPDATE SET last_seen_at = excluded.last_seen_at`,
     ).bind(id, now),
     env.DB.prepare(
-      'INSERT INTO user_tokens (token, user_id, created_at, last_seen_at) VALUES (?, ?, ?, ?)',
-    ).bind(token, id, now, now),
+      `INSERT INTO user_tokens (token, user_id, created_at, last_seen_at, device_name, user_agent, ip)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(token, id, now, now, deviceName, info.userAgent, info.ip),
   ]
   if (withCredentials) {
     const salt = randomToken(16)
@@ -945,7 +1113,7 @@ async function handleLogin(request, env) {
     await rateLimit(env, `login-user:${usernameRaw.toLowerCase()}`, 10, 900, '该账号尝试次数过多，请 15 分钟后再试')
     const cred = await env.DB.prepare(
       `SELECT c.user_id, c.username, c.salt, c.password_hash,
-              u.nickname, u.sync_code, u.created_at
+              u.nickname, u.sync_code, u.created_at, u.email
        FROM user_credentials c JOIN users u ON u.id = c.user_id
        WHERE c.username_lower = ?`,
     )
@@ -956,7 +1124,10 @@ async function handleLogin(request, env) {
     if (hash !== cred.password_hash) throw new HttpError(401, '账号或密码不正确')
     const meta = await env.DB.prepare('SELECT status FROM user_meta WHERE user_id = ?').bind(cred.user_id).first()
     if (meta?.status === 'disabled') throw new HttpError(403, '该账号已被停用')
-    const token = await issueUserToken(env, cred.user_id)
+    const token = await issueUserToken(env, cred.user_id, {
+      deviceName: String(body.deviceName || '').trim(),
+      info: clientInfo(request),
+    })
     await logActivity(env, request, cred.user_id, 'login')
     const membership = await getMembership(env, cred.user_id)
     return json(
@@ -966,6 +1137,7 @@ async function handleLogin(request, env) {
         syncCode: cred.sync_code,
         nickname: cred.nickname,
         username: cred.username,
+        email: cred.email || '',
         membership,
         needsCredentials: false,
       },
@@ -980,7 +1152,7 @@ async function handleLogin(request, env) {
   if (!code) throw new HttpError(400, '请输入账号密码或同步码')
   await rateLimit(env, bucketKey(request, 'login-code'), 20, 900, '登录尝试过于频繁，请 15 分钟后再试')
   const row = await env.DB.prepare(
-    'SELECT id, nickname, sync_code, created_at FROM users WHERE sync_code = ?',
+    'SELECT id, nickname, sync_code, created_at, email FROM users WHERE sync_code = ?',
   )
     .bind(code)
     .first()
@@ -988,7 +1160,10 @@ async function handleLogin(request, env) {
   const meta = await env.DB.prepare('SELECT status FROM user_meta WHERE user_id = ?').bind(row.id).first()
   if (meta?.status === 'disabled') throw new HttpError(403, '该账号已被停用')
   const cred = await env.DB.prepare('SELECT username FROM user_credentials WHERE user_id = ?').bind(row.id).first()
-  const token = await issueUserToken(env, row.id)
+  const token = await issueUserToken(env, row.id, {
+    deviceName: String(body.deviceName || '').trim(),
+    info: clientInfo(request),
+  })
   await logActivity(env, request, row.id, 'login-code')
   const membership = await getMembership(env, row.id)
   return json(
@@ -998,6 +1173,7 @@ async function handleLogin(request, env) {
       syncCode: row.sync_code,
       nickname: row.nickname,
       username: cred?.username || '',
+      email: row.email || '',
       membership,
       needsCredentials: !cred,
       loginMethod: 'syncCode',
@@ -1024,15 +1200,22 @@ async function handleLogout(request, env) {
 /** GET /api/auth/me：账号资料 + 会员状态 */
 async function handleMe(request, env) {
   const user = await requireUser(request, env)
+  const device = await env.DB.prepare('SELECT COUNT(*) AS n FROM user_tokens WHERE user_id = ?')
+    .bind(user.id)
+    .first()
   return json(
     {
       userId: user.id,
       nickname: user.nickname,
       username: user.username || '',
+      email: user.email || '',
       syncCode: user.sync_code,
       createdAt: user.created_at,
       membership: user.membership,
       needsCredentials: user.needsCredentials,
+      hasPassword: user.hasPassword,
+      passwordUpdatedAt: user.passwordUpdatedAt,
+      deviceCount: device?.n ?? 0,
     },
     200,
     env,
@@ -1134,15 +1317,46 @@ async function handleMembershipRedeem(request, env) {
   )
 }
 
-/** 修改当前账号昵称（登录后可用，影响旅伴与共享行程中的展示名） */
+/** 修改当前账号昵称 / 邮箱（登录后可用） */
 async function handleUpdateAccount(request, env) {
   const user = await requireUser(request, env)
   const body = await readJSON(request).catch(() => ({}))
-  const nickname = String(body.nickname || '').trim()
-  if (!nickname) throw new HttpError(400, '昵称不能为空')
-  if (nickname.length > 24) throw new HttpError(400, '昵称最多 24 个字符')
-  await env.DB.prepare('UPDATE users SET nickname = ? WHERE id = ?').bind(nickname, user.id).run()
-  return json({ userId: user.id, nickname }, 200, env, request)
+  let nickname = user.nickname || ''
+  let email = user.email || ''
+  if (body.nickname !== undefined) {
+    nickname = String(body.nickname || '').trim()
+    if (!nickname) throw new HttpError(400, '昵称不能为空')
+    if (nickname.length > 24) throw new HttpError(400, '昵称最多 24 个字符')
+    await env.DB.prepare('UPDATE users SET nickname = ? WHERE id = ?').bind(nickname, user.id).run()
+  }
+  if (body.email !== undefined) {
+    email = normalizeEmail(body.email)
+    if (email) {
+      const taken = await env.DB.prepare('SELECT id FROM users WHERE email_lower = ? AND id != ?')
+        .bind(email.toLowerCase(), user.id)
+        .first()
+      if (taken) throw new HttpError(409, '这个邮箱已被其他账号使用')
+    }
+    await env.DB.prepare('UPDATE users SET email = ?, email_lower = ? WHERE id = ?')
+      .bind(email || null, emailLower(email), user.id)
+      .run()
+  }
+  return json({ userId: user.id, nickname, email }, 200, env, request)
+}
+
+/** 当前账号的登录设备列表 */
+async function handleAccountDevices(request, env) {
+  const user = await requireUser(request, env)
+  const devices = await listDevices(env, user.id, bearerToken(request))
+  return json({ devices }, 200, env, request)
+}
+
+/** 当前账号主动让某台设备下线 */
+async function handleAccountDeviceRevoke(request, env, deviceId) {
+  const user = await requireUser(request, env)
+  const token = await revokeDevice(env, user.id, deviceId)
+  await logActivity(env, request, user.id, token === bearerToken(request) ? 'logout' : 'device-revoke')
+  return json({ ok: true }, 200, env, request)
 }
 
 /**
@@ -2355,6 +2569,19 @@ async function handleApi(request, env, url, ctx) {
   if (userMatch && request.method === 'DELETE') {
     return await handleAdminUserDelete(request, env, decodeURIComponent(userMatch[1]))
   }
+  const userDevicesMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)\/devices$/)
+  if (userDevicesMatch && request.method === 'GET') {
+    return await handleAdminUserDevices(request, env, decodeURIComponent(userDevicesMatch[1]))
+  }
+  const userDeviceMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)\/devices\/([^/]+)$/)
+  if (userDeviceMatch && request.method === 'DELETE') {
+    return await handleAdminUserDeviceRevoke(
+      request,
+      env,
+      decodeURIComponent(userDeviceMatch[1]),
+      decodeURIComponent(userDeviceMatch[2]),
+    )
+  }
   const resetMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)\/reset-code$/)
   if (resetMatch && request.method === 'POST') {
     return await handleAdminUserResetCode(request, env, decodeURIComponent(resetMatch[1]))
@@ -2369,6 +2596,11 @@ async function handleApi(request, env, url, ctx) {
   if (route === 'POST /api/membership/redeem') return await handleMembershipRedeem(request, env)
   if (route === 'PATCH /api/account') return await handleUpdateAccount(request, env)
   if (route === 'GET /api/account/storage') return await handleAccountStorage(request, env)
+  if (route === 'GET /api/account/devices') return await handleAccountDevices(request, env)
+  const accountDeviceMatch = url.pathname.match(/^\/api\/account\/devices\/([A-Za-z0-9]+)$/)
+  if (accountDeviceMatch && request.method === 'DELETE') {
+    return await handleAccountDeviceRevoke(request, env, accountDeviceMatch[1])
+  }
   if (route === 'POST /api/photos') return await handlePhotoUpload(request, env)
   if (route === 'GET /api/photos') return await handlePhotoList(request, env, url)
   const photoMatch = url.pathname.match(/^\/api\/photos\/([A-Za-z0-9]+)$/)

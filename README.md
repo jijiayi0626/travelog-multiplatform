@@ -107,7 +107,7 @@ npm run preview    # 本地预览生产构建
 - [Debug APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v2.0.0/travelog-2.0.0-debug.apk)（约 4 MB，可直接安装）
 - [Release APK](https://github.com/jijiayi0626/travelog-multiplatform/releases/download/v2.0.0/travelog-2.0.0-release.apk)（约 3 MB，CI 临时签名，正式发布请换成自有 keystore）
 
-包名 `com.travellog.app`，minSdk 23 / targetSdk 35，versionCode 34 / versionName 2.0.0。应用为 WebView + Java 实现，**不含 native 库**，单个 APK 兼容 `arm64-v8a` / `armeabi-v7a` / `x86_64`。
+包名 `com.travellog.app`，minSdk 23 / targetSdk 35，versionCode 38 / versionName 2.3.0。应用为 WebView + Java 实现，**不含 native 库**，单个 APK 兼容 `arm64-v8a` / `armeabi-v7a` / `x86_64`。
 
 ### 构建 APK
 

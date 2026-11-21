@@ -12,8 +12,8 @@ import {
 import { compressDataUrl } from './utils'
 import type { Photo } from './types'
 
-/** 单次同步最多上传的张数，避免一次同步耗时过长、流量过大 */
-const MAX_UPLOADS_PER_RUN = 24
+/** 单次同步最多上传的张数；实时模式下一次同步会尽量把积压的图片全部传完 */
+const MAX_UPLOADS_PER_RUN = 200
 /** 超过这个体积先在前端再压一次，避免历史大图上传失败 */
 const MAX_DIRECT_BYTES = 6 * 1024 * 1024
 

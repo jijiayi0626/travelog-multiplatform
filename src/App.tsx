@@ -208,7 +208,7 @@ export default function App() {
   }, [])
 
   // 自动同步：启动、回到前台、联网、定时各检查一次。
-  // 没有本地改动时只拉取，减少 Worker/D1 写入；间隔与仅 Wi-Fi 可在「我的」里设置。
+  // 默认实时（约 20 秒）；没有本地改动时只拉取，间隔与仅 Wi-Fi 可在「我的」里设置。
   useEffect(() => {
     let stopped = false
     let lastRun = 0
@@ -230,11 +230,15 @@ export default function App() {
       void runSync({ pullOnly: !hasPendingLocalChanges() }).catch(() => {})
     }
 
-    const intervalMs = () =>
-      Math.min(Math.max(getCloudConfig().syncIntervalMinutes || 5, 1), 120) * 60_000
+    // 0 表示实时：约 20 秒检查一次，配合修改后的 1.5 秒延迟同步
+    const intervalMs = () => {
+      const minutes = getCloudConfig().syncIntervalMinutes
+      if (!minutes) return 20_000
+      return Math.min(Math.max(minutes, 1), 120) * 60_000
+    }
 
     syncIfDue({ force: true })
-    const timer = window.setInterval(() => syncIfDue({ minGapMs: intervalMs() }), 60_000)
+    const timer = window.setInterval(() => syncIfDue({ minGapMs: intervalMs() }), 10_000)
     const onVisible = () => {
       if (document.visibilityState === 'visible') syncIfDue()
     }
