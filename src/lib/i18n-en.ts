@@ -641,6 +641,7 @@ export const EN_TEXT: Record<string, string> = {
   少: 'Less',
   多: 'More',
   点击停止: 'Tap to stop',
+  '没识别到金额，请手动填写': 'No amount found — please enter it manually',
   需要麦克风权限才能语音输入: 'Microphone permission is required for voice input',
   当前设备不支持语音识别: 'Speech recognition is not supported on this device',
   '已选最快线路 {label}（{ms} ms），完成后到系统「下载」目录查看':

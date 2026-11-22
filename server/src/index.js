@@ -1931,45 +1931,6 @@ function parseReceipt(text) {
   }
 }
 
-/** 把 data URL / 图片地址转成 Workers AI 需要的字节数组 */
-async function imageBytes(image) {
-  if (image.startsWith('data:')) {
-    const base64 = image.slice(image.indexOf(',') + 1)
-    const binary = atob(base64)
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
-    return bytes
-  }
-  const response = await fetch(image)
-  if (!response.ok) throw new Error('图片下载失败')
-  return new Uint8Array(await response.arrayBuffer())
-}
-
-/**
- * 文本模型看不了图时，用 Workers AI 的视觉模型兜底，
- * 避免用户配置的 OpenAI 兼容接口只支持纯文本导致识别必失败。
- */
-async function receiptFromWorkersAIVision(env, image) {
-  if (!env.AI) return null
-  const bytes = await imageBytes(image)
-  const result = await env.AI.run('@cf/meta/llama-3.2-11b-vision-instruct', {
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: `${RECEIPT_SYSTEM_PROMPT}\n请识别这张小票，严格按要求只返回 JSON。`,
-          },
-          { type: 'image', image: Array.from(bytes) },
-        ],
-      },
-    ],
-    max_tokens: 512,
-  })
-  return result?.response || ''
-}
-
 async function handleReceipt(request, env) {
   const user = await requireUser(request, env)
   await requireAIAccess(env, user)
@@ -1990,24 +1951,18 @@ async function handleReceipt(request, env) {
       ],
     },
   ]
-  // 先用 Workers AI 视觉模型（如果开通），再尝试用户配置的接口；
-  // 两条路都拿不到合法 JSON 才算识别失败。
   let receipt = null
   try {
-    receipt = parseReceipt(await receiptFromWorkersAIVision(env, image))
+    const result = await runAI(env, messages, 0.1)
+    receipt = parseReceipt(result.text)
   } catch {
     receipt = null
   }
   if (!receipt) {
-    try {
-      const result = await runAI(env, messages, 0.1)
-      receipt = parseReceipt(result.text)
-    } catch {
-      receipt = null
-    }
-  }
-  if (!receipt) {
-    throw new HttpError(422, '没能识别小票内容，请换一张更清晰的照片或手动填写')
+    throw new HttpError(
+      422,
+      '当前 AI 模型不支持看图识别，请在管理后台换用支持图片的模型；也可以手动填写金额',
+    )
   }
 
   return json(receipt, 200, env, request)

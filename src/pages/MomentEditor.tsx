@@ -78,6 +78,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
   const [listening, setListening] = useState(false)
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const nativeListenersRef = useRef<Array<{ remove: () => Promise<void> }>>([])
+  const nativeStoppingRef = useRef(false)
   // 输入法下 state 可能滞后，保存时以 DOM 值为准
   const contentRef = useRef<HTMLTextAreaElement>(null)
   const locationRef = useRef<HTMLInputElement>(null)
@@ -119,20 +120,27 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
     }
   }, [tripId, momentId])
 
+  const clearNativeListeners = () => {
+    const listeners = nativeListenersRef.current
+    nativeListenersRef.current = []
+    for (const listener of listeners) void listener.remove().catch(() => undefined)
+  }
+
+  /**
+   * 插件的 stop() 在 Android 上不会 resolve，所以不能 await；
+   * 先立刻恢复按钮状态，再等一小会儿收最终识别结果，最后移除监听。
+   */
   const stopNativeListening = () => {
-    void (async () => {
-      try {
-        const { SpeechRecognition: NativeSpeech } = await import(
-          '@capacitor-community/speech-recognition'
-        )
-        await NativeSpeech.stop()
-      } catch {
-        /* 已经停止 */
-      }
-      await Promise.all(nativeListenersRef.current.map((listener) => listener.remove().catch(() => undefined)))
-      nativeListenersRef.current = []
-      setListening(false)
-    })()
+    if (nativeStoppingRef.current) return
+    nativeStoppingRef.current = true
+    setListening(false)
+    void import('@capacitor-community/speech-recognition')
+      .then(({ SpeechRecognition: NativeSpeech }) => NativeSpeech.stop())
+      .catch(() => undefined)
+    window.setTimeout(() => {
+      clearNativeListeners()
+      nativeStoppingRef.current = false
+    }, 1200)
   }
 
   useEffect(() => {
@@ -187,17 +195,27 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
           if (error) setError('')
         })
         const state = await NativeSpeech.addListener('listeningState', (data) => {
-          if (data.status === 'stopped') stopNativeListening()
+          if (data.status === 'stopped' && !nativeStoppingRef.current) {
+            setListening(false)
+            clearNativeListeners()
+          }
         })
         nativeListenersRef.current = [partial, state]
-        await NativeSpeech.start({
+        // partialResults 模式下 start() 不会 resolve，不能 await
+        setListening(true)
+        void NativeSpeech.start({
           language: 'zh-CN',
+          maxResults: 5,
           partialResults: true,
           popup: false,
+        }).catch(() => {
+          setListening(false)
+          clearNativeListeners()
+          toast(tr('没能听清，请再试一次'))
         })
-        setListening(true)
       } catch {
-        stopNativeListening()
+        setListening(false)
+        clearNativeListeners()
         toast(tr('没能听清，请再试一次'))
       }
       return
@@ -219,7 +237,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
     const base = content
     recognition.lang = 'zh-CN'
     recognition.interimResults = false
-    recognition.continuous = true
+    recognition.continuous = false
     recognition.onresult = (event) => {
       let text = ''
       for (let i = 0; i < event.results.length; i += 1) {

@@ -166,8 +166,15 @@ export async function openExternal(url: string): Promise<void> {
     await Browser.open({ url })
     return
   }
-  const opened = window.open(url, '_blank', 'noopener')
-  if (!opened) window.location.href = url
+  // 直接触发 <a download>，避免测速 await 之后 window.open 被浏览器拦截
+  const link = document.createElement('a')
+  link.href = url
+  link.download = url.split('?')[0].split('/').pop() || 'travelog.apk'
+  link.rel = 'noopener'
+  link.style.display = 'none'
+  document.body.appendChild(link)
+  link.click()
+  window.setTimeout(() => link.remove(), 1500)
 }
 
 export async function downloadApk(

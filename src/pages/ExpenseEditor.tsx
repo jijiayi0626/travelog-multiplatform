@@ -27,6 +27,7 @@ import {
 } from '../lib/utils'
 import { cn } from '../lib/cn'
 import { readReceipt } from '../lib/cloud'
+import { hasOnDeviceOcr, parseReceiptText, recognizeReceiptText } from '../lib/receipt-ocr'
 import { guessCategory } from '../lib/ai'
 import { EditorScreen, FormBlock } from '../components/EditorScreen'
 import { ConfirmDialog, Field } from '../components/ui'
@@ -157,7 +158,13 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
     setReceiptBusy(true)
     try {
       const image = await compressImage(file)
-      const result = await readReceipt(image)
+      const result = hasOnDeviceOcr()
+        ? parseReceiptText(await recognizeReceiptText(image))
+        : await readReceipt(image)
+      if (!result) {
+        toast(tr('没识别到金额，请手动填写'))
+        return
+      }
       setAmountText(String(result.amount))
       setCurrency(result.currency)
       setCategory(result.category)
