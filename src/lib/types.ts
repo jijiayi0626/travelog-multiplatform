@@ -70,6 +70,10 @@ export interface Expense {
   syncState: SyncState
   currency?: Currency
   amountCny?: number
+  /** 付款的旅伴 id，用于同行分摊结算 */
+  payerId?: string
+  /** 付款人昵称快照，旅伴被移除后仍可显示 */
+  payerName?: string
 }
 
 export interface ChecklistItem {
@@ -79,6 +83,9 @@ export interface ChecklistItem {
   done: boolean
   createdAt: number
   group?: string
+  /** 勾选完成的人，便于多人协作时看到是谁做的 */
+  doneBy?: string
+  doneAt?: number
 }
 
 /** 行程计划：出发前或旅途中排好的一天日程 */
@@ -182,7 +189,10 @@ export type View =
   | { name: 'planEditor'; tripId: string; planId?: string; dayIndex?: number }
   | { name: 'sync'; mode?: 'login' | 'register' }
   | { name: 'about' }
+  | { name: 'download' }
+  | { name: 'changelog' }
   | { name: 'admin' }
+  | { name: 'share'; code: string }
 
 export interface SearchResult {
   kind: 'trip' | 'moment' | 'expense' | 'footprint' | 'plan'

@@ -1,7 +1,14 @@
-import { useEffect, useState } from 'react'
-import { Trash } from '@phosphor-icons/react'
-import type { Currency, Expense, ExpenseCategory, Trip } from '../lib/types'
-import { deleteExpense, getTrip, listExpenses, saveExpense } from '../lib/repo'
+import { useEffect, useRef, useState } from 'react'
+import { Receipt, Trash } from '@phosphor-icons/react'
+import type { Currency, Expense, ExpenseCategory, Member, Trip } from '../lib/types'
+import {
+  deleteExpense,
+  getTrip,
+  listExpenses,
+  listMembers,
+  saveExpense,
+  sumExpenseCny,
+} from '../lib/repo'
 import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import {
   CATEGORY_COLOR,
@@ -11,6 +18,7 @@ import {
   CURRENCY_ORDER,
   CURRENCY_RATE_TO_CNY,
   CURRENCY_SYMBOL,
+  compressImage,
   formatDate,
   formatMoney,
   fromDateInputValue,
@@ -18,6 +26,7 @@ import {
   toDateInputValue,
 } from '../lib/utils'
 import { cn } from '../lib/cn'
+import { readReceipt } from '../lib/cloud'
 import { guessCategory } from '../lib/ai'
 import { EditorScreen, FormBlock } from '../components/EditorScreen'
 import { ConfirmDialog, Field } from '../components/ui'
@@ -44,6 +53,10 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
   const [recent, setRecent] = useState<Expense[]>([])
   const [categoryTouched, setCategoryTouched] = useState(Boolean(expenseId))
   const [autoHint, setAutoHint] = useState('')
+  const [members, setMembers] = useState<Member[]>([])
+  const [payerId, setPayerId] = useState('')
+  const [receiptBusy, setReceiptBusy] = useState(false)
+  const receiptRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     let alive = true
@@ -51,6 +64,12 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
       if (tripId) {
         const loaded = await getTrip(tripId)
         if (alive) setTrip(loaded)
+        const tripMembers = await listMembers(tripId)
+        if (alive) {
+          setMembers(tripMembers)
+          const owner = tripMembers.find((member) => member.role === 'owner') ?? tripMembers[0]
+          if (owner) setPayerId(owner.id)
+        }
       }
       if (expenseId) {
         const expenses = await listExpenses(tripId || undefined)
@@ -62,6 +81,7 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
           setNote(target.note)
           setSpentAt(target.spentAt || todayStart())
           setCurrency(target.currency ?? 'CNY')
+          setPayerId(target.payerId ?? '')
         }
         if (alive) setLoading(false)
       }
@@ -98,24 +118,64 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
     setError('')
     setSaving(true)
     try {
+      const targetTripId = original?.tripId ?? tripId
       await saveExpense({
         id: original?.id ?? '',
-        tripId: original?.tripId ?? tripId,
+        tripId: targetTripId,
         amount: Math.round(amount * 100) / 100,
         category,
         note: note.trim(),
         spentAt,
         currency,
+        payerId: payerId || undefined,
+        payerName: members.find((member) => member.id === payerId)?.name,
         createdAt: original?.createdAt ?? 0,
         syncState: 1,
       })
       bump()
-      toast(tr('账目已保存'))
+      const nextExpenses = await listExpenses(targetTripId || undefined)
+      const spent = sumExpenseCny(nextExpenses)
+      if (trip && trip.budget && trip.budget > 0 && spent > trip.budget) {
+        toast(
+          tr('已超出预算 ¥{amount}', {
+            amount: formatMoney(spent - trip.budget),
+          }),
+        )
+      } else {
+        toast(tr('账目已保存'))
+      }
       nav.back()
     } catch (error) {
       toast(error instanceof Error ? error.message : tr('保存失败，请重试'))
     } finally {
       setSaving(false)
+    }
+  }
+
+  const recognizeReceipt = async (file: File | undefined) => {
+    if (!file) return
+    setReceiptBusy(true)
+    try {
+      const image = await compressImage(file)
+      const result = await readReceipt(image)
+      setAmountText(String(result.amount))
+      setCurrency(result.currency)
+      setCategory(result.category)
+      setCategoryTouched(true)
+      setAutoHint('')
+      if (result.note) setNote(result.note)
+      if (error) setError('')
+      toast(
+        tr('已识别：{currency} {amount}', {
+          currency: result.currency,
+          amount: formatMoney(result.amount),
+        }),
+      )
+    } catch (error) {
+      toast(error instanceof Error ? error.message : tr('识别失败，请重试'))
+    } finally {
+      setReceiptBusy(false)
+      if (receiptRef.current) receiptRef.current.value = ''
     }
   }
 
@@ -151,6 +211,33 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
             />
           </div>
         </Field>
+
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-caption leading-4 text-ink-3">
+            {tr('拍下小票，自动填金额和分类')}
+          </span>
+          <button
+            type="button"
+            disabled={receiptBusy}
+            onClick={() => receiptRef.current?.click()}
+            className="press inline-flex shrink-0 items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-note text-ink-2 disabled:opacity-50 hover:text-accent"
+          >
+            {receiptBusy ? (
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-ink-3 border-t-transparent" />
+            ) : (
+              <Receipt size={14} />
+            )}
+            {receiptBusy ? tr('识别中…') : tr('拍小票识别')}
+          </button>
+          <input
+            ref={receiptRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(event) => recognizeReceipt(event.target.files?.[0])}
+          />
+        </div>
 
         <div className="flex flex-wrap gap-1.5 pt-1">
           {CURRENCY_ORDER.map((item) => (
@@ -226,6 +313,34 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
           })}
         </div>
       </FormBlock>
+
+      {members.length > 0 ? (
+        <FormBlock title={tr('谁付款')}>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => setPayerId('')}
+              className={cn('chip px-2.5 py-1 text-note', !payerId && 'chip-active')}
+            >
+              {tr('不指定')}
+            </button>
+            {members.map((member) => (
+              <button
+                key={member.id}
+                type="button"
+                onClick={() => setPayerId(member.id)}
+                className={cn('chip px-2.5 py-1 text-note', payerId === member.id && 'chip-active')}
+              >
+                {member.name}
+                {member.role === 'owner' ? tr('（我）') : ''}
+              </button>
+            ))}
+          </div>
+          <p className="text-caption text-ink-3">
+            {tr('用于同行分摊，不指定则不参与结算。')}
+          </p>
+        </FormBlock>
+      ) : null}
 
       <FormBlock title={tr('明细')}>
         <Field label={tr('日期')}>

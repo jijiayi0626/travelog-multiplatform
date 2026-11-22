@@ -1596,6 +1596,82 @@ async function handleListShares(request, env) {
   )
 }
 
+/** 公开的只读分享：按邀请码返回旅程与日程，不含账目、成员、照片 */
+async function handleSharedTrip(request, env, rawCode) {
+  const code = String(rawCode || '')
+    .trim()
+    .toUpperCase()
+  if (!code) throw new HttpError(404, '分享链接无效或已取消')
+
+  const row = await env.DB.prepare(
+    `SELECT user_id, id, data FROM entities
+     WHERE kind = 'trips' AND deleted = 0 AND json_extract(data, '$.inviteCode') = ?
+     LIMIT 1`,
+  )
+    .bind(code)
+    .first()
+  if (!row) throw new HttpError(404, '分享链接无效或已取消')
+
+  let trip = {}
+  try {
+    trip = JSON.parse(row.data)
+  } catch {
+    trip = {}
+  }
+
+  const { results } = await env.DB.prepare(
+    `SELECT data FROM entities
+     WHERE user_id = ? AND kind = 'plans' AND deleted = 0
+       AND json_extract(data, '$.tripId') = ?`,
+  )
+    .bind(row.user_id, row.id)
+    .all()
+
+  const plans = (results || [])
+    .map((item) => {
+      try {
+        return JSON.parse(item.data)
+      } catch {
+        return null
+      }
+    })
+    .filter(Boolean)
+    .sort(
+      (a, b) =>
+        (Number(a.dayIndex) || 1) - (Number(b.dayIndex) || 1) ||
+        String(a.time || '').localeCompare(String(b.time || '')) ||
+        (Number(a.order) || 0) - (Number(b.order) || 0),
+    )
+    .map((plan) => ({
+      dayIndex: Number(plan.dayIndex) || 1,
+      time: String(plan.time || ''),
+      title: String(plan.title || ''),
+      place: String(plan.place || ''),
+      kind: String(plan.kind || 'activity'),
+      done: Boolean(plan.done),
+      note: String(plan.note || ''),
+      order: Number(plan.order) || 0,
+    }))
+
+  return json(
+    {
+      trip: {
+        title: String(trip.title || ''),
+        destination: String(trip.destination || ''),
+        startDate: Number(trip.startDate) || 0,
+        endDate: Number(trip.endDate) || 0,
+        note: String(trip.note || ''),
+        cover: Number(trip.cover) || 0,
+        coverImage: String(trip.coverImage || ''),
+      },
+      plans,
+    },
+    200,
+    env,
+    request,
+  )
+}
+
 async function handleLeaveShare(request, env, tripId) {
   const user = await requireUser(request, env)
   const share = await env.DB.prepare(
@@ -1810,6 +1886,78 @@ async function handleAI(request, env) {
   const result = await runAI(env, messages, temperature, endpointId)
   console.log(`ai user=${user.id} model=${result.model} chars=${result.text.length}`)
   return json(result, 200, env, request)
+}
+
+/* ---------------- 小票 OCR ---------------- */
+
+const RECEIPT_CURRENCIES = ['CNY', 'JPY', 'USD', 'EUR', 'THB']
+const RECEIPT_CATEGORIES = ['food', 'transport', 'stay', 'ticket', 'shopping', 'other']
+
+const RECEIPT_SYSTEM_PROMPT = `你是旅行记账助手，负责从小票或收据照片中提取信息。
+只返回一个 JSON 对象，不要输出任何解释、Markdown 或代码块围栏。字段要求：
+- amount：number，消费总金额（不含货币符号）
+- currency：string，只能是 CNY / JPY / USD / EUR / THB 之一，无法判断时用 CNY
+- category：string，只能是 food / transport / stay / ticket / shopping / other 之一
+- note：string，不超过 20 字的简短说明，例如店名或消费内容
+看不清时尽量推断；金额必须大于 0。`
+
+function parseJsonText(text) {
+  return String(text || '')
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim()
+}
+
+async function handleReceipt(request, env) {
+  const user = await requireUser(request, env)
+  await requireAIAccess(env, user)
+  await rateLimit(env, bucketKey(request, 'ai-receipt'), 30, 3600, '识别太频繁，请稍后再试')
+
+  const body = await readJSON(request)
+  const image = String(body.image || '').trim()
+  if (!image) throw new HttpError(400, '请提供小票图片')
+  if (image.length > 8_000_000) throw new HttpError(400, '图片过大，请压缩后重试')
+
+  const messages = [
+    { role: 'system', content: RECEIPT_SYSTEM_PROMPT },
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: '请识别这张小票，严格按要求只返回 JSON。' },
+        { type: 'image_url', image_url: { url: image } },
+      ],
+    },
+  ]
+  const result = await runAI(env, messages, 0.1)
+
+  let parsed
+  try {
+    parsed = JSON.parse(parseJsonText(result.text))
+  } catch {
+    throw new HttpError(422, '没能识别小票内容，请换一张更清晰的照片')
+  }
+
+  const amount = Number(parsed?.amount)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new HttpError(422, '没有识别到有效金额，请重试或手动填写')
+  }
+  const currency = String(parsed?.currency || '').toUpperCase()
+  if (!RECEIPT_CURRENCIES.includes(currency)) {
+    throw new HttpError(422, '识别到的币种暂不支持，请手动选择')
+  }
+  const category = String(parsed?.category || '').toLowerCase()
+  if (!RECEIPT_CATEGORIES.includes(category)) {
+    throw new HttpError(422, '识别到的分类暂不支持，请手动选择')
+  }
+  const note = String(parsed?.note || '').slice(0, 60)
+
+  return json(
+    { amount: Math.round(amount * 100) / 100, currency, category, note },
+    200,
+    env,
+    request,
+  )
 }
 
 /* ---------------- AI 异步任务 ---------------- */
@@ -2728,11 +2876,16 @@ async function handleApi(request, env, url, ctx) {
   if (route === 'GET /api/sync/stats') return await handleStats(request, env)
   if (route === 'POST /api/trips/join') return await handleJoinTrip(request, env)
   if (route === 'GET /api/trips/shares') return await handleListShares(request, env)
+  const shareMatch = url.pathname.match(/^\/api\/share\/([^/]+)$/)
+  if (shareMatch && request.method === 'GET') {
+    return await handleSharedTrip(request, env, decodeURIComponent(shareMatch[1]))
+  }
   const leaveMatch = url.pathname.match(/^\/api\/trips\/shares\/([^/]+)$/)
   if (leaveMatch && request.method === 'DELETE') {
     return await handleLeaveShare(request, env, decodeURIComponent(leaveMatch[1]))
   }
   if (route === 'POST /api/ai/complete') return await handleAI(request, env)
+  if (route === 'POST /api/ai/receipt') return await handleReceipt(request, env)
   if (route === 'GET /api/ai/config') return await handleAIConfig(request, env)
   if (route === 'GET /api/ai/models') return await handleAIModels(request, env)
   if (route === 'POST /api/ai/jobs') return await handleAIJobCreate(request, env, ctx)

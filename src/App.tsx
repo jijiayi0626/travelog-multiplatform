@@ -33,6 +33,10 @@ import { ExpenseEditor } from './pages/ExpenseEditor'
 import { FootprintEditor } from './pages/FootprintEditor'
 import { PlanEditor } from './pages/PlanEditor'
 import { AboutPage } from './pages/AboutPage'
+import { DownloadPage } from './pages/DownloadPage'
+import { ChangelogPage } from './pages/ChangelogPage'
+import { SharePage } from './pages/SharePage'
+import { UpdatePrompt } from './components/UpdatePrompt'
 import { isDevMode, subscribeDevMode } from './lib/dev-mode'
 
 const TABS: TabKey[] = ['plan', 'timeline', 'ledger', 'checklist', 'members']
@@ -81,8 +85,14 @@ function parseHash(): View {
       return a === 'login' || a === 'register' ? { name: 'sync', mode: a } : { name: 'sync' }
     case 'about':
       return { name: 'about' }
+    case 'download':
+      return { name: 'download' }
+    case 'changelog':
+      return { name: 'changelog' }
     case 'admin':
       return { name: 'admin' }
+    case 'share':
+      return a ? { name: 'share', code: a } : { name: 'trips' }
     default:
       return { name: 'trips' }
   }
@@ -122,8 +132,14 @@ function toHash(view: View): string {
       return view.mode ? `#/sync/${view.mode}` : '#/sync'
     case 'about':
       return '#/about'
+    case 'download':
+      return '#/download'
+    case 'changelog':
+      return '#/changelog'
     case 'admin':
       return '#/admin'
+    case 'share':
+      return `#/share/${view.code}`
   }
 }
 
@@ -140,6 +156,8 @@ function viewKey(view: View): string {
       return `plan:${view.tripId}:${view.planId ?? `d${view.dayIndex ?? 1}`}`
     case 'tripEditor':
       return `trip-editor:${view.id ?? 'new'}`
+    case 'share':
+      return `share:${view.code}`
     default:
       return view.name
   }
@@ -397,12 +415,18 @@ export default function App() {
         return <ConsolePage tab="sync" showAdmin={devMode} mode={view.mode} />
       case 'about':
         return <AboutPage />
+      case 'download':
+        return <DownloadPage />
+      case 'changelog':
+        return <ChangelogPage />
       case 'admin':
         return devMode ? (
           <ConsolePage tab="admin" showAdmin />
         ) : (
           <DevModeRequired onOpenAbout={() => navigate({ name: 'about' })} />
         )
+      case 'share':
+        return <SharePage code={view.code} />
     }
   }
 
@@ -436,6 +460,7 @@ export default function App() {
               <ShortcutsSheet open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
               <Onboarding />
               <InstallBanner />
+              <UpdatePrompt />
               <AIJobHub />
               <AIPaywall />
 

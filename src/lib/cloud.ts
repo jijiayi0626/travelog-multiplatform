@@ -1,3 +1,5 @@
+import type { Currency, ExpenseCategory, PlanKind } from './types'
+
 export interface CloudConfig {
   /** 为空时走同源 /api（Pages 与 Worker 同域或用 _redirects 转发） */
   baseUrl: string
@@ -97,6 +99,17 @@ export function apiOrigin(): string {
     return `${window.location.origin}/api`
   }
   return 'http://127.0.0.1:8787/api'
+}
+
+/** 分享链接要指向网页版：原生包里的 location 是 capacitor://，别人打不开 */
+export function shareBaseUrl(): string {
+  const base = getCloudConfig().baseUrl.trim().replace(/\/$/, '')
+  if (base) return `${base}/`
+  if (typeof window !== 'undefined' && isNativeApp()) return `${DEFAULT_NATIVE_SERVER}/`
+  if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {
+    return `${window.location.origin}${window.location.pathname.replace(/[^/]*$/, '')}`
+  }
+  return `${DEFAULT_NATIVE_SERVER}/`
 }
 
 export class ApiError extends Error {
@@ -385,6 +398,23 @@ export async function aiComplete(
     method: 'POST',
     body: { prompt, system, temperature, endpointId },
     timeoutMs: 45000,
+  })
+}
+
+export interface ReceiptResult {
+  amount: number
+  currency: Currency
+  category: ExpenseCategory
+  note: string
+}
+
+/** 拍照识别小票，返回金额、币种、分类与说明 */
+export async function readReceipt(image: string): Promise<ReceiptResult> {
+  if (!isSignedIn()) throw new ApiError('请先在「云同步」里登录', 401)
+  return api<ReceiptResult>('/ai/receipt', {
+    method: 'POST',
+    body: { image },
+    timeoutMs: 60000,
   })
 }
 
@@ -852,6 +882,35 @@ export async function joinTripByCode(inviteCode: string): Promise<{
   owner: string
 }> {
   return api('/trips/join', { method: 'POST', body: { inviteCode } })
+}
+
+export interface SharedTripPlan {
+  dayIndex: number
+  time: string
+  title: string
+  place: string
+  kind: PlanKind
+  done: boolean
+  note: string
+  order: number
+}
+
+export interface SharedTrip {
+  trip: {
+    title: string
+    destination: string
+    startDate: number
+    endDate: number
+    note: string
+    cover: number
+    coverImage: string
+  }
+  plans: SharedTripPlan[]
+}
+
+/** 只读分享行程：公开接口，不需要登录 */
+export function fetchSharedTrip(code: string): Promise<SharedTrip> {
+  return api<SharedTrip>(`/share/${encodeURIComponent(code)}`, { auth: false, timeoutMs: 15000 })
 }
 
 /** 我加入的共享旅程 */

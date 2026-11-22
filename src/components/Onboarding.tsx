@@ -35,7 +35,9 @@ export function Onboarding() {
       setOpen(true)
     })
     let timer = 0
-    if (!hasOnboarded()) {
+    // 只读分享页是给未安装的朋友看的，不弹新手引导
+    const sharing = window.location.hash.startsWith('#/share/')
+    if (!hasOnboarded() && !sharing) {
       timer = window.setTimeout(() => setOpen(true), 900)
     }
     return () => {

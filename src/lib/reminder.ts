@@ -180,6 +180,54 @@ export async function schedulePlanReminder(
   return true
 }
 
+/**
+ * 出发前 1–3 天的提醒：每个行程每天最多推送一次。
+ * 已在首页显示提醒卡片，这里只负责系统通知；没有通知权限时静默跳过。
+ */
+export async function notifyTripCountdown(trip: Trip, pending: number): Promise<void> {
+  if (!trip.startDate) return
+  const start = new Date(trip.startDate)
+  start.setHours(0, 0, 0, 0)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const days = Math.round((start.getTime() - today.getTime()) / 864e5)
+  if (days < 0 || days > 3) return
+
+  const stamp = `${trip.id}:${today.toDateString()}:${pending}`
+  const key = 'travelog.tripCountdownNotice'
+  if (localStorage.getItem(key) === stamp) return
+
+  const title = days === 0 ? `${trip.title} · 今天出发` : `${trip.title} · 还有 ${days} 天出发`
+  const body =
+    pending > 0 ? `还有 ${pending} 项待办没完成，记得提前打包。` : '待办都完成了，检查一下证件和天气。'
+
+  if (native) {
+    try {
+      const status = await LocalNotifications.checkPermissions()
+      if (status.display !== 'granted') return
+      await ensureChannel()
+      await LocalNotifications.schedule({
+        notifications: [
+          {
+            id: numericId(`trip-countdown:${trip.id}`),
+            title,
+            body,
+            channelId: CHANNEL_ID,
+            schedule: { at: new Date(Date.now() + 1500) },
+          },
+        ],
+      })
+      localStorage.setItem(key, stamp)
+    } catch {
+      /* 通知失败不影响页面提醒 */
+    }
+    return
+  }
+
+  await showWebNotification(title, body, `trip-countdown:${trip.id}`)
+  localStorage.setItem(key, stamp)
+}
+
 export async function cancelPlanReminder(planId: string): Promise<void> {
   const timer = webTimers.get(planId)
   if (timer !== undefined) {

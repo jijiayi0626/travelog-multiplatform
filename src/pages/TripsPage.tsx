@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowRight,
   ArrowsDownUp,
@@ -10,12 +10,13 @@ import {
   UsersThree,
   X,
 } from '@phosphor-icons/react'
-import type { Moment, Plan, TripStatus, TripTemplate, TripView } from '../lib/types'
-import { listAllMoments, listAllPlans, listTrips, memoriesOf } from '../lib/repo'
+import type { ChecklistItem, Moment, Plan, TripStatus, TripTemplate, TripView } from '../lib/types'
+import { listAllChecklist, listAllMoments, listAllPlans, listTrips, memoriesOf } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
 import { useI18n, useNav, useSearch, useToast } from '../lib/app-context'
 import { joinTripByCode } from '../lib/cloud'
 import { runSync } from '../lib/sync-engine'
+import { notifyTripCountdown } from '../lib/reminder'
 import {
   daysUntil,
   dayIndexOfDate,
@@ -30,6 +31,7 @@ import { TripCard } from '../components/cards'
 import { TripsCalendar, type DayBucket } from '../components/TripsCalendar'
 import { EmptyState, IconButton, Sheet, SkeletonList } from '../components/ui'
 import { EmptyArt } from '../components/EmptyArt'
+import { WeatherCard } from '../components/WeatherCard'
 
 const TEMPLATES: Array<{ value: TripTemplate; label: string; hint: string; cover: number }> = [
   { value: 'blank', label: '空白旅程', hint: '从一张白纸开始', cover: 0 },
@@ -48,12 +50,22 @@ const STATUS_FILTERS: Array<{ value: 'all' | TripStatus; label: string }> = [
 
 export function TripsPage() {
   const loader = useCallback(async () => {
-    const [trips, moments, plans] = await Promise.all([listTrips(), listAllMoments(), listAllPlans()])
-    return { trips, moments, plans }
+    const [trips, moments, plans, checklist] = await Promise.all([
+      listTrips(),
+      listAllMoments(),
+      listAllPlans(),
+      listAllChecklist(),
+    ])
+    return { trips, moments, plans, checklist }
   }, [])
   const { data, loading } = useLoader(
     loader,
-    { trips: [] as TripView[], moments: [] as Moment[], plans: [] as Plan[] },
+    {
+      trips: [] as TripView[],
+      moments: [] as Moment[],
+      plans: [] as Plan[],
+      checklist: [] as ChecklistItem[],
+    },
     'trips',
   )
   const nav = useNav()
@@ -111,6 +123,31 @@ export function TripsPage() {
       .filter((plan) => plan.tripId === contextTrip.trip.id && plan.dayIndex === day)
       .slice(0, 3)
   }, [contextTrip, data.plans])
+
+  // 出发前 1–3 天：把天气和没完成的待办顶到首页
+  const prepTrip = useMemo(() => {
+    const list = trips
+      .filter((trip) => {
+        if (tripStatusOf(trip.startDate, trip.endDate) !== 'planned') return false
+        const left = daysUntil(trip.startDate)
+        return left >= 0 && left <= 3
+      })
+      .sort((a, b) => a.startDate - b.startDate)
+    return list[0] ?? null
+  }, [trips])
+
+  const prepPending = useMemo(
+    () =>
+      prepTrip
+        ? data.checklist.filter((item) => item.tripId === prepTrip.id && !item.done).length
+        : 0,
+    [prepTrip, data.checklist],
+  )
+
+  useEffect(() => {
+    if (!prepTrip) return
+    void notifyTripCountdown(prepTrip, prepPending)
+  }, [prepTrip, prepPending])
 
   return (
     <div className="space-y-5">
@@ -194,7 +231,37 @@ export function TripsPage() {
         </div>
       ) : null}
 
-      {!loading && contextTrip ? (
+      {!loading && prepTrip ? (
+        <section className="overflow-hidden rounded-[1.3rem] border border-accent/30 bg-accent-soft/40">
+          <div className="flex items-center gap-2 border-b border-accent/20 px-4 py-2.5">
+            <span className="shrink-0 rounded-full bg-accent px-2 py-0.5 text-caption font-medium text-white">
+              {daysUntil(prepTrip.startDate) === 0
+                ? tr('今天出发')
+                : tr('还有 {n} 天出发', { n: daysUntil(prepTrip.startDate) })}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-body-sm font-medium text-ink">
+              {prepTrip.title}
+            </span>
+            <button
+              type="button"
+              onClick={() => nav.navigate({ name: 'trip', id: prepTrip.id, tab: 'checklist' })}
+              className="press shrink-0 text-caption text-accent"
+            >
+              {tr('查看行程')}
+            </button>
+          </div>
+          <div className="space-y-2.5 px-4 py-3">
+            <p className="text-note leading-4 text-ink-2">
+              {prepPending > 0
+                ? tr('还有 {n} 项待办没完成，记得提前打包。', { n: prepPending })
+                : tr('待办都完成了，检查一下证件和天气。')}
+            </p>
+            <WeatherCard destination={prepTrip.destination} />
+          </div>
+        </section>
+      ) : null}
+
+      {!loading && contextTrip && !prepTrip ? (
         <button
           type="button"
           onClick={() =>

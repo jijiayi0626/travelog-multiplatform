@@ -42,6 +42,8 @@ function rootOf(view: View): RootKey {
     case 'cloud':
     case 'admin':
     case 'about':
+    case 'download':
+    case 'changelog':
       return 'profile'
     default:
       return 'trips'

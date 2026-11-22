@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { ImageSquare, Plus, Sparkle, Trash } from '@phosphor-icons/react'
+import { ImageSquare, Microphone, Plus, Sparkle, StopCircle, Trash } from '@phosphor-icons/react'
 import type { Moment, Photo, Trip } from '../lib/types'
 import { deleteMoment, getTrip, listMoments, saveMoment } from '../lib/repo'
 import { deleteCloudPhoto, isSignedIn } from '../lib/cloud'
 import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
-import { compressImage, dayIndexInTrip, uid } from '../lib/utils'
+import { compressImage, dayIndexInTrip, tripDayCount, uid } from '../lib/utils'
 import { polishMoment } from '../lib/ai'
-import { readFileGps } from '../lib/exif'
+import { readFileDate, readFileGps } from '../lib/exif'
 import { locateProvince } from '../lib/province'
 import { locateCity } from '../lib/chinaCities'
 import { cn } from '../lib/cn'
@@ -16,6 +16,37 @@ import { PhotoStrip } from '../components/cards'
 
 const MAX_PHOTOS = 9
 const TAG_PRESETS = ['美食', '散步', '风景', '住宿', '交通', '购物', '夜生活', '拍照']
+
+/** 浏览器语音识别的最小类型，避免引入额外的 DOM 类型依赖 */
+interface SpeechRecognitionResultLike {
+  transcript: string
+}
+
+interface SpeechRecognitionEventLike {
+  results: ArrayLike<ArrayLike<SpeechRecognitionResultLike>>
+}
+
+interface SpeechRecognitionLike {
+  lang: string
+  interimResults: boolean
+  continuous: boolean
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null
+  onerror: (() => void) | null
+  onend: (() => void) | null
+  start: () => void
+  stop: () => void
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
+
+function getSpeechRecognition(): SpeechRecognitionConstructor | null {
+  if (typeof window === 'undefined') return null
+  const scope = window as unknown as {
+    SpeechRecognition?: SpeechRecognitionConstructor
+    webkitSpeechRecognition?: SpeechRecognitionConstructor
+  }
+  return scope.SpeechRecognition ?? scope.webkitSpeechRecognition ?? null
+}
 
 export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: string }) {
   const nav = useNav()
@@ -41,6 +72,10 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
   const [tags, setTags] = useState<string[]>([])
   const [customTag, setCustomTag] = useState('')
   const [error, setError] = useState('')
+  // 浏览器不支持语音识别时不渲染按钮
+  const [speechSupported] = useState(() => Boolean(getSpeechRecognition()))
+  const [listening, setListening] = useState(false)
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   // 输入法下 state 可能滞后，保存时以 DOM 值为准
   const contentRef = useRef<HTMLTextAreaElement>(null)
   const locationRef = useRef<HTMLInputElement>(null)
@@ -82,22 +117,87 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
     }
   }, [tripId, momentId])
 
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.stop()
+      recognitionRef.current = null
+    }
+  }, [])
+
+  const toggleListening = () => {
+    if (listening) {
+      recognitionRef.current?.stop()
+      return
+    }
+    const Recognition = getSpeechRecognition()
+    if (!Recognition) return
+    const recognition = new Recognition()
+    recognition.lang = 'zh-CN'
+    recognition.interimResults = false
+    recognition.continuous = false
+    recognition.onresult = (event) => {
+      let text = ''
+      for (let i = 0; i < event.results.length; i += 1) {
+        text += event.results[i]?.[0]?.transcript ?? ''
+      }
+      const value = text.trim()
+      if (!value) return
+      setContent((previous) => {
+        const base = previous.trimEnd()
+        return base ? `${base}\n${value}` : value
+      })
+      if (error) setError('')
+    }
+    recognition.onerror = () => {
+      setListening(false)
+      toast(tr('没能听清，请再试一次'))
+    }
+    recognition.onend = () => {
+      setListening(false)
+      recognitionRef.current = null
+    }
+    recognitionRef.current = recognition
+    try {
+      recognition.start()
+      setListening(true)
+    } catch {
+      recognitionRef.current = null
+      setListening(false)
+    }
+  }
+
   const pickPhotos = async (files: FileList | null) => {
     if (!files || files.length === 0) return
     setUploading(true)
     try {
       const next = [...photos]
       let gpsHit: { lat: number; lng: number } | null = null
+      let dateHit: number | null = null
       for (const file of Array.from(files)) {
         if (next.length >= MAX_PHOTOS) break
         if (!coords && !gpsHit) {
           const gps = await readFileGps(file)
           if (gps) gpsHit = { lat: gps.latitude, lng: gps.longitude }
         }
+        if (!dateHit) {
+          const taken = await readFileDate(file)
+          if (taken) dateHit = taken
+        }
         const src = await compressImage(file)
         next.push({ id: uid(), src })
       }
       setPhotos(next)
+
+      let dayHit = 0
+      if (dateHit && !momentId && trip && trip.startDate > 0) {
+        const index = dayIndexInTrip(trip.startDate, dateHit)
+        const max = tripDayCount(trip.startDate, trip.endDate)
+        if (index >= 1 && (!max || index <= max)) dayHit = index
+      }
+      if (dayHit > 0) {
+        setDayIndex(dayHit)
+        toast(tr('已按照片拍摄日期归入第 {n} 天', { n: dayHit }))
+      }
 
       if (gpsHit) {
         setCoords(gpsHit)
@@ -226,6 +326,22 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
                   className="press text-caption text-ink-3 hover:text-ink"
                 >
 {tr('撤销')}
+                </button>
+              ) : null}
+              {speechSupported ? (
+                <button
+                  type="button"
+                  onClick={toggleListening}
+                  aria-label={listening ? tr('停止语音输入') : tr('语音输入')}
+                  className={cn(
+                    'press inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-caption',
+                    listening
+                      ? 'border-transparent bg-accent-soft text-accent'
+                      : 'border-line text-ink-2 hover:text-accent',
+                  )}
+                >
+                  {listening ? <StopCircle size={11} weight="fill" /> : <Microphone size={11} />}
+                  {listening ? tr('聆听中…') : tr('语音')}
                 </button>
               ) : null}
               <button

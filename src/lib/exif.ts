@@ -105,3 +105,106 @@ export async function readFileGps(file: File): Promise<ExifGps | null> {
     return null
   }
 }
+
+function readAscii(view: DataView, offset: number, length: number): string {
+  let text = ''
+  for (let i = 0; i < length && offset + i < view.byteLength; i++) {
+    const code = view.getUint8(offset + i)
+    if (code === 0) break
+    text += String.fromCharCode(code)
+  }
+  return text.trim()
+}
+
+/** EXIF 时间格式为「YYYY:MM:DD HH:MM:SS」，按本地时区解析 */
+function parseExifTime(text: string): number | null {
+  const match = text.match(/^(\d{4})[:/-](\d{2})[:/-](\d{2})[ T](\d{2}):(\d{2}):(\d{2})/)
+  if (!match) return null
+  const [, year, month, day, hour, minute, second] = match
+  const time = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second),
+  ).getTime()
+  return Number.isFinite(time) ? time : null
+}
+
+function findIfdValue(view: DataView, ifd: number, little: boolean, tag: number): number | null {
+  if (ifd + 2 > view.byteLength) return null
+  const count = view.getUint16(ifd, little)
+  for (let i = 0; i < count; i++) {
+    const entry = ifd + 2 + i * 12
+    if (entry + 12 > view.byteLength) return null
+    if (view.getUint16(entry, little) === tag) return entry
+  }
+  return null
+}
+
+/**
+ * 解析 JPEG EXIF 的拍摄时间，优先 DateTimeOriginal。
+ * 失败或没有拍摄时间时返回 null。
+ */
+export function parseExifDate(buffer: ArrayBuffer): number | null {
+  try {
+    const view = new DataView(buffer)
+    if (view.byteLength < 4 || view.getUint16(0, false) !== 0xffd8) return null
+
+    let offset = 2
+    while (offset + 4 <= view.byteLength) {
+      const marker = view.getUint16(offset, false)
+      if ((marker & 0xff00) !== 0xff00) break
+      const size = view.getUint16(offset + 2, false)
+      if (marker === 0xffe1) {
+        const exifStart = offset + 4
+        if (
+          view.getUint32(exifStart, false) === 0x45786966 &&
+          view.getUint16(exifStart + 4, false) === 0x0000
+        ) {
+          const tiff = exifStart + 6
+          const little = view.getUint16(tiff, false) === 0x4949
+          const ifd0 = tiff + view.getUint32(tiff + 4, little)
+
+          // Exif 子目录里的 DateTimeOriginal（0x9003）最准确
+          const exifEntry = findIfdValue(view, ifd0, little, 0x8769)
+          if (exifEntry !== null) {
+            const subIfd = tiff + view.getUint32(exifEntry + 8, little)
+            for (const tag of [0x9003, 0x9004]) {
+              const entry = findIfdValue(view, subIfd, little, tag)
+              if (entry !== null) {
+                const text = readAscii(view, tiff + view.getUint32(entry + 8, little), 20)
+                const time = parseExifTime(text)
+                if (time !== null) return time
+              }
+            }
+          }
+
+          const modified = findIfdValue(view, ifd0, little, 0x0132)
+          if (modified !== null) {
+            const text = readAscii(view, tiff + view.getUint32(modified + 8, little), 20)
+            const time = parseExifTime(text)
+            if (time !== null) return time
+          }
+          return null
+        }
+      }
+      if (marker === 0xffda) break
+      offset += 2 + size
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/** 从图片文件读取拍摄时间；只读前 256KB，够覆盖 EXIF */
+export async function readFileDate(file: File): Promise<number | null> {
+  try {
+    const head = await file.slice(0, 256 * 1024).arrayBuffer()
+    return parseExifDate(head)
+  } catch {
+    return null
+  }
+}

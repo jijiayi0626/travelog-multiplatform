@@ -11,6 +11,7 @@ import {
   MapPin,
   PencilSimple,
   Plus,
+  ShareNetwork,
   SignOut,
   Sparkle,
   Trash,
@@ -42,6 +43,7 @@ import {
   removeMember,
   saveChecklistItem,
   savePlan,
+  settleExpenses,
   sumExpenseCny,
   togglePlan,
   CHECKLIST_TEMPLATES,
@@ -49,7 +51,13 @@ import {
 } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
 import { answerTripQuestion, generatePlan, generatePackingList } from '../lib/ai'
-import { deleteCloudPhoto, isSignedIn, leaveTripShare, listTripShares } from '../lib/cloud'
+import {
+  deleteCloudPhoto,
+  isSignedIn,
+  leaveTripShare,
+  listTripShares,
+  shareBaseUrl,
+} from '../lib/cloud'
 import { runSync } from '../lib/sync-engine'
 import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import {
@@ -233,8 +241,21 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
     }
   }
 
+  const meName = useMemo(
+    () => members.find((member) => member.role === 'owner')?.name || tr('我'),
+    [members, tr],
+  )
+
   const toggleChecklist = async (item: ChecklistItem, done: boolean) => {
-    await saveChecklistItem({ ...item, done })
+    const next: ChecklistItem = { ...item, done }
+    if (done) {
+      next.doneBy = meName
+      next.doneAt = Date.now()
+    } else {
+      delete next.doneBy
+      delete next.doneAt
+    }
+    await saveChecklistItem(next)
     bump()
   }
 
@@ -264,6 +285,94 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
     if (!trip) return
     const ok = await copyText(trip.inviteCode)
     toast(ok ? tr('邀请码已复制') : tr('复制失败，请手动记录'))
+  }
+
+  const shareTrip = async () => {
+    if (!trip) return
+    const url = `${shareBaseUrl()}#/share/${trip.inviteCode}`
+    const ok = await copyText(url)
+    toast(ok ? tr('分享链接已复制') : tr('复制失败，请手动复制'))
+  }
+
+  const downloadOfflineTrip = () => {
+    if (!trip) return
+    const escapeHtml = (value: string) =>
+      value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+    const title = escapeHtml(trip.title || tr('未命名旅程'))
+    const destination = escapeHtml(trip.destination || tr('目的地待定'))
+    const range =
+      trip.startDate > 0 ? `${formatDate(trip.startDate)} — ${formatDate(trip.endDate)}` : ''
+    const note = trip.note ? `<p class="note">${escapeHtml(trip.note)}</p>` : ''
+    const planSections =
+      plans.length > 0
+        ? groupPlans(plans)
+            .map((group) => {
+              const rows = group.plans
+                .map(
+                  (plan) => `<li>
+          <span class="time">${escapeHtml(plan.time || '—')}</span>
+          <div class="body">
+            <p class="title">${escapeHtml(plan.title)}</p>
+            <p class="meta">${escapeHtml(PLAN_KIND_LABEL[plan.kind])}${plan.place ? ` · ${escapeHtml(plan.place)}` : ''}</p>
+            ${plan.note ? `<p class="detail">${escapeHtml(plan.note)}</p>` : ''}
+          </div>
+        </li>`,
+                )
+                .join('')
+              return `<section><h2>${escapeHtml(tr('第 {n} 天', { n: group.dayIndex }))}</h2><ul>${rows}</ul></section>`
+            })
+            .join('')
+        : `<p class="empty">${escapeHtml(tr('这个行程还没有公开日程'))}</p>`
+
+    const html = `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${title}</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 32px 18px 56px; background: #f6f4ef; color: #1f2422; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; line-height: 1.55; }
+  main { max-width: 680px; margin: 0 auto; }
+  header { padding: 24px; border-radius: 22px; background: #0f766e; color: #fff; }
+  h1 { margin: 0; font-size: 26px; line-height: 1.25; letter-spacing: -0.02em; }
+  .sub { margin: 8px 0 0; opacity: .78; font-size: 14px; }
+  .note { margin: 12px 0 0; opacity: .9; font-size: 14px; }
+  section { margin-top: 18px; padding: 16px 18px; border: 1px solid #e4e1d8; border-radius: 18px; background: #fff; }
+  h2 { margin: 0 0 10px; font-size: 15px; }
+  ul { margin: 0; padding: 0; list-style: none; }
+  li { display: flex; gap: 14px; padding: 9px 0; border-top: 1px solid #efede6; }
+  li:first-child { border-top: 0; padding-top: 0; }
+  .time { width: 46px; flex: 0 0 auto; color: #7a7f7b; font-size: 12px; font-variant-numeric: tabular-nums; padding-top: 2px; }
+  .body { min-width: 0; }
+  .title { margin: 0; font-size: 14px; font-weight: 600; }
+  .meta { margin: 2px 0 0; color: #7a7f7b; font-size: 12px; }
+  .detail { margin: 4px 0 0; color: #7a7f7b; font-size: 12px; }
+  .empty { margin: 18px 0 0; color: #7a7f7b; text-align: center; }
+  footer { margin-top: 26px; text-align: center; color: #9a9e9a; font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>${title}</h1>
+    <p class="sub">${destination}${range ? ` · ${escapeHtml(range)}` : ''}</p>
+    ${note}
+  </header>
+  ${planSections}
+  <footer>由旅记 Travelog 导出</footer>
+</main>
+</body>
+</html>`
+    const safeName = (trip.title || tr('未命名旅程')).replace(/[\\/:*?"<>|]/g, '-')
+    downloadText(`行程-${safeName}.html`, html, 'text/html;charset=utf-8')
+    toast(tr('离线行程已下载'))
   }
 
   const exportMarkdown = () => {
@@ -583,6 +692,7 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
                 expenses={expenses}
                 total={total}
                 stats={stats}
+                members={members}
                 onAdd={() => nav.navigate({ name: 'expenseEditor', tripId })}
                 onOpen={(expenseId) => nav.navigate({ name: 'expenseEditor', tripId, expenseId })}
               />
@@ -619,6 +729,8 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
                   bump()
                 }}
                 onCopy={copyInvite}
+                onShare={shareTrip}
+                onDownloadOffline={downloadOfflineTrip}
               />
             ) : null}
           </div>
@@ -1423,16 +1535,19 @@ function LedgerTab({
   expenses,
   total,
   stats,
+  members,
   onAdd,
   onOpen,
 }: {
   expenses: Expense[]
   total: number
   stats: ReturnType<typeof categoryStats>
+  members: Member[]
   onAdd: () => void
   onOpen: (expenseId: string) => void
 }) {
   const { tr } = useI18n()
+  const settlement = useMemo(() => settleExpenses(expenses, members), [expenses, members])
   return (
     <div className="space-y-4">
       <div className="flex items-end justify-between gap-3 border-b border-line pb-3">
@@ -1448,6 +1563,54 @@ function LedgerTab({
           {tr('记一笔')}
         </button>
       </div>
+
+      {settlement ? (
+        <section className="space-y-2.5 rounded-2xl border border-line bg-surface p-3.5">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-note font-semibold tracking-tight text-ink">{tr('同行分摊')}</h3>
+            <span className="text-caption text-ink-3">
+              {tr('人均 ¥{amount}', { amount: formatMoney(settlement.perPerson) })}
+            </span>
+          </div>
+          <div className="space-y-1">
+            {settlement.rows.map((row) => (
+              <div key={row.memberId} className="flex items-center justify-between gap-2 text-caption">
+                <span className="truncate text-ink-2">{row.name}</span>
+                <span
+                  className={cn(
+                    'shrink-0 tabular-nums',
+                    row.net > 0.005 ? 'text-accent' : row.net < -0.005 ? 'text-danger' : 'text-ink-3',
+                  )}
+                >
+                  {row.net > 0.005
+                    ? tr('垫付 {amount}', { amount: formatMoney(row.net) })
+                    : row.net < -0.005
+                      ? tr('应付 {amount}', { amount: formatMoney(-row.net) })
+                      : tr('已结清')}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="space-y-1 border-t border-line pt-2">
+            {settlement.transfers.length > 0 ? (
+              settlement.transfers.map((transfer, index) => (
+                <p key={index} className="flex items-center justify-between gap-2 text-caption text-ink-2">
+                  <span className="truncate">
+                    {transfer.fromName} → {transfer.toName}
+                  </span>
+                  <span className="shrink-0 tabular-nums text-ink">{formatMoney(transfer.amount)}</span>
+                </p>
+              ))
+            ) : (
+              <p className="text-caption text-ink-3">{tr('大家已经结清，不用转账。')}</p>
+            )}
+          </div>
+        </section>
+      ) : members.length > 0 ? (
+        <p className="text-caption text-ink-3">
+          {tr('记账时选择「谁付款」，这里会自动算出谁该给谁多少。')}
+        </p>
+      ) : null}
 
       {stats.length > 0 ? (
         <div className="space-y-2.5">
@@ -1597,6 +1760,8 @@ function MembersTab({
   onAdd,
   onRemove,
   onCopy,
+  onShare,
+  onDownloadOffline,
 }: {
   members: Member[]
   inviteCode: string
@@ -1609,6 +1774,8 @@ function MembersTab({
   onAdd: () => void
   onRemove: (member: Member) => void
   onCopy: () => void
+  onShare: () => void
+  onDownloadOffline: () => void
 }) {
   const { tr } = useI18n()
   return (
@@ -1624,6 +1791,17 @@ function MembersTab({
         </span>
         <Copy size={15} className="text-ink-3" />
       </button>
+
+      <div className="grid grid-cols-2 gap-2">
+        <button type="button" onClick={onShare} className="btn-ghost w-full">
+          <ShareNetwork size={14} />
+          {tr('分享行程')}
+        </button>
+        <button type="button" onClick={onDownloadOffline} className="btn-ghost w-full">
+          <DownloadSimple size={14} />
+          {tr('下载离线行程')}
+        </button>
+      </div>
 
       <form
         className="space-y-2"

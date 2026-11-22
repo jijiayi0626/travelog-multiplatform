@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { ArrowLeft, CaretLeft, CaretRight, Sparkle } from '@phosphor-icons/react'
+import { ArrowLeft, CaretLeft, CaretRight, DownloadSimple, Sparkle } from '@phosphor-icons/react'
 import type { Expense, Footprint, Moment, TripView } from '../lib/types'
 import { listAllMoments, listExpenses, listFootprints, listTrips } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
@@ -127,6 +127,124 @@ export function RecapPage() {
     return index >= 0 ? { label: MONTHS[index], amount: max } : null
   }, [months])
 
+  // 足迹热力图：把每天的记录与足迹汇总成一张年历
+  const heat = useMemo(() => {
+    const map = new Map<string, number>()
+    const add = (timestamp: number) => {
+      if (!timestamp) return
+      const date = new Date(timestamp)
+      date.setHours(0, 0, 0, 0)
+      const key = `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`
+      map.set(key, (map.get(key) ?? 0) + 1)
+    }
+    for (const moment of yearMoments) add(moment.createdAt)
+    for (const footprint of yearFootprints) add(footprint.visitedAt)
+    return map
+  }, [yearMoments, yearFootprints])
+
+  const heatCells = useMemo(() => {
+    const cells: Array<{ key: string; count: number }> = []
+    const first = new Date(activeYear, 0, 1)
+    const last = new Date(activeYear, 11, 31)
+    for (let i = 0; i < first.getDay(); i++) cells.push({ key: `lead-${i}`, count: -1 })
+    const cursor = new Date(first)
+    while (cursor <= last) {
+      const key = `${cursor.getFullYear()}-${cursor.getMonth() + 1}-${cursor.getDate()}`
+      cells.push({ key, count: heat.get(key) ?? 0 })
+      cursor.setDate(cursor.getDate() + 1)
+    }
+    return cells
+  }, [activeYear, heat])
+
+  const exportPoster = async () => {
+    const width = 1080
+    const height = 1440
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    const font = "'PingFang SC', 'Noto Sans SC', system-ui, sans-serif"
+
+    ctx.fillStyle = '#f5f6fa'
+    ctx.fillRect(0, 0, width, height)
+    ctx.fillStyle = '#2563eb'
+    ctx.fillRect(0, 0, width, 14)
+
+    ctx.fillStyle = '#666d78'
+    ctx.font = `500 30px ${font}`
+    ctx.fillText('TRAVELOG · YEAR IN REVIEW', 80, 150)
+
+    ctx.fillStyle = '#1a1d26'
+    ctx.font = `700 170px ${font}`
+    ctx.fillText(String(activeYear), 80, 330)
+
+    ctx.strokeStyle = '#d8dce4'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(80, 390)
+    ctx.lineTo(width - 80, 390)
+    ctx.stroke()
+
+    const tiles: Array<[string, string]> = [
+      ['旅行', `${yearTrips.length} 段`],
+      ['在路上', `${totalDays} 天`],
+      ['城市', `${cities} 座`],
+      ['照片', `${photos} 张`],
+    ]
+    tiles.forEach(([label, value], index) => {
+      const x = 80 + (index % 2) * 460
+      const y = 480 + Math.floor(index / 2) * 200
+      ctx.fillStyle = '#666d78'
+      ctx.font = `500 32px ${font}`
+      ctx.fillText(label, x, y)
+      ctx.fillStyle = '#1a1d26'
+      ctx.font = `700 78px ${font}`
+      ctx.fillText(value, x, y + 92)
+    })
+
+    ctx.fillStyle = '#666d78'
+    ctx.font = `500 32px ${font}`
+    ctx.fillText('全年花费', 80, 930)
+    ctx.fillStyle = '#1a1d26'
+    ctx.font = `700 92px ${font}`
+    ctx.fillText(formatCny(totalCny), 80, 1030)
+
+    ctx.fillStyle = '#4b5563'
+    ctx.font = `400 34px ${font}`
+    const top = stats[0]
+    ctx.fillText(
+      top
+        ? `花得最多：${CATEGORY_LABEL[top.category]} · ${formatCny(top.amount)}`
+        : '这一年还没有账目',
+      80,
+      1120,
+    )
+    ctx.fillText(`去过 ${provinces} 个省级行政区 · ${yearMoments.length} 条记录`, 80, 1180)
+    if (longest) {
+      ctx.fillText(`最长的一段「${longest.trip.title}」，${longest.days} 天`, 80, 1240)
+    }
+
+    ctx.fillStyle = '#9aa1ac'
+    ctx.font = `400 28px ${font}`
+    ctx.fillText('Travelog · 记录每一段旅程', 80, height - 80)
+    ctx.fillStyle = '#2563eb'
+    ctx.fillRect(width - 240, height - 110, 160, 4)
+
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
+    if (!blob) {
+      toast(tr('导出失败，请重试'))
+      return
+    }
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `travelog-${activeYear}.png`
+    link.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 2000)
+    toast(tr('年度海报已导出'))
+  }
+
   const hasData = yearTrips.length > 0 || yearExpenses.length > 0 || yearMoments.length > 0
 
   return (
@@ -148,6 +266,14 @@ export function RecapPage() {
           </h1>
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={() => void exportPoster()}
+            className="press mr-1 inline-flex h-8 items-center gap-1 rounded-full border border-line px-2.5 text-caption text-ink-2 hover:text-accent"
+          >
+            <DownloadSimple size={13} />
+            {tr('导出海报')}
+          </button>
           <button
             type="button"
             aria-label="上一年"
@@ -269,6 +395,47 @@ export function RecapPage() {
                 {busiestMonth.label} 月花得最多，{formatCny(busiestMonth.amount)}
               </p>
             ) : null}
+          </section>
+
+          <section className="card p-4">
+            <div className="flex items-baseline justify-between">
+              <h2 className="text-note font-semibold tracking-tight text-ink">{tr('足迹热力图')}</h2>
+              <span className="text-caption text-ink-3">
+                {tr('{n} 天有记录', { n: heat.size })}
+              </span>
+            </div>
+            <div className="mt-3 overflow-x-auto pb-1">
+              <div className="grid w-max grid-flow-col grid-rows-7 gap-[3px]">
+                {heatCells.map((cell) =>
+                  cell.count < 0 ? (
+                    <span key={cell.key} className="h-[10px] w-[10px] rounded-[3px]" />
+                  ) : (
+                    <span
+                      key={cell.key}
+                      title={`${cell.key} · ${cell.count}`}
+                      className={cn(
+                        'h-[10px] w-[10px] rounded-[3px]',
+                        cell.count === 0
+                          ? 'bg-paper-2'
+                          : cell.count === 1
+                            ? 'bg-accent/30'
+                            : cell.count <= 3
+                              ? 'bg-accent/60'
+                              : 'bg-accent',
+                      )}
+                    />
+                  ),
+                )}
+              </div>
+            </div>
+            <div className="mt-2 flex items-center justify-end gap-1.5 text-caption text-ink-3">
+              <span>{tr('少')}</span>
+              <span className="h-2.5 w-2.5 rounded-[2px] bg-paper-2" />
+              <span className="h-2.5 w-2.5 rounded-[2px] bg-accent/30" />
+              <span className="h-2.5 w-2.5 rounded-[2px] bg-accent/60" />
+              <span className="h-2.5 w-2.5 rounded-[2px] bg-accent" />
+              <span>{tr('多')}</span>
+            </div>
           </section>
 
           <div className="grid gap-3 lg:grid-cols-2">

@@ -380,6 +380,70 @@ export function monthlyStats(expenses: Expense[], months = 6): MonthStat[] {
   return keys.map((key) => ({ key, label: monthLabel(key), amount: totals.get(key) ?? 0 }))
 }
 
+/* ---------------- 同行分摊 ---------------- */
+
+export interface SettlementRow {
+  memberId: string
+  name: string
+  paid: number
+  share: number
+  net: number
+}
+
+export interface SettlementTransfer {
+  fromName: string
+  toName: string
+  amount: number
+}
+
+export interface Settlement {
+  total: number
+  perPerson: number
+  rows: SettlementRow[]
+  transfers: SettlementTransfer[]
+}
+
+/** 只统计标注了「付款人」的账目，按旅伴人数平均分摊后给出转账建议 */
+export function settleExpenses(expenses: Expense[], members: Member[]): Settlement | null {
+  if (members.length === 0) return null
+  const memberIds = new Set(members.map((member) => member.id))
+  const paid = new Map<string, number>()
+  let total = 0
+  for (const expense of expenses) {
+    if (!expense.payerId || !memberIds.has(expense.payerId)) continue
+    const amount = expense.amountCny ?? toCny(expense.amount, expense.currency)
+    total += amount
+    paid.set(expense.payerId, (paid.get(expense.payerId) ?? 0) + amount)
+  }
+  if (total <= 0) return null
+
+  const perPerson = total / members.length
+  const rows: SettlementRow[] = members.map((member) => {
+    const own = paid.get(member.id) ?? 0
+    return { memberId: member.id, name: member.name, paid: own, share: perPerson, net: own - perPerson }
+  })
+
+  const debtors = rows.filter((row) => row.net < -0.005).sort((a, b) => a.net - b.net)
+  const creditors = rows.filter((row) => row.net > 0.005).sort((a, b) => b.net - a.net)
+  const transfers: SettlementTransfer[] = []
+  const remaining = new Map([...debtors, ...creditors].map((row) => [row.memberId, row.net]))
+  let i = 0
+  let j = 0
+  while (i < debtors.length && j < creditors.length) {
+    const debt = -(remaining.get(debtors[i].memberId) ?? 0)
+    const credit = remaining.get(creditors[j].memberId) ?? 0
+    const amount = Math.min(debt, credit)
+    if (amount > 0.005) {
+      transfers.push({ fromName: debtors[i].name, toName: creditors[j].name, amount })
+    }
+    remaining.set(debtors[i].memberId, -debt + amount)
+    remaining.set(creditors[j].memberId, credit - amount)
+    if (-(remaining.get(debtors[i].memberId) ?? 0) < 0.005) i++
+    if ((remaining.get(creditors[j].memberId) ?? 0) < 0.005) j++
+  }
+  return { total, perPerson, rows, transfers }
+}
+
 /* ---------------- 行程计划 ---------------- */
 
 export async function listPlans(tripId: string): Promise<Plan[]> {
@@ -595,6 +659,12 @@ export function groupPlans(plans: Plan[]): PlanGroup[] {
 export async function listChecklist(tripId: string): Promise<ChecklistItem[]> {
   const all = await getAll<ChecklistItem>('checklist')
   return all.filter((item) => item.tripId === tripId).sort((a, b) => a.createdAt - b.createdAt)
+}
+
+/** 全部清单项（首页出发前提醒用） */
+export async function listAllChecklist(): Promise<ChecklistItem[]> {
+  const all = await getAll<ChecklistItem>('checklist')
+  return all.sort((a, b) => a.createdAt - b.createdAt)
 }
 
 export async function saveChecklistItem(item: ChecklistItem): Promise<ChecklistItem> {

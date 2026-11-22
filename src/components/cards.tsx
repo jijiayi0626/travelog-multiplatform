@@ -296,12 +296,21 @@ export function ChecklistRow({
       <button
         type="button"
         onClick={() => onToggle(!item.done)}
-        className={cn(
-          'min-w-0 flex-1 truncate text-left text-body',
-          item.done ? 'text-ink-3 line-through' : 'text-ink',
-        )}
+        className="min-w-0 flex-1 text-left"
       >
-        {item.title}
+        <span
+          className={cn(
+            'block truncate text-body',
+            item.done ? 'text-ink-3 line-through' : 'text-ink',
+          )}
+        >
+          {item.title}
+        </span>
+        {item.done && item.doneBy ? (
+          <span className="mt-0.5 block truncate text-caption text-ink-3">
+            {tr('由 {name} 完成', { name: item.doneBy })}
+          </span>
+        ) : null}
       </button>
       <button
         type="button"
