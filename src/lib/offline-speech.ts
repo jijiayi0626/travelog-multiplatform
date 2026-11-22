@@ -99,14 +99,90 @@ async function getCache(): Promise<Cache | null> {
   return caches.open(CACHE_NAME)
 }
 
+const IDB_NAME = 'travelog-vosk-idb'
+const IDB_STORE = 'blobs'
+
+function idbOpen(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 1)
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(IDB_STORE)) {
+        req.result.createObjectStore(IDB_STORE)
+      }
+    }
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+async function idbSet(blob: Blob): Promise<boolean> {
+  try {
+    const db = await idbOpen()
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite')
+      tx.objectStore(IDB_STORE).put(blob, CACHE_KEY)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+    db.close()
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function idbGet(): Promise<Blob | null> {
+  try {
+    const db = await idbOpen()
+    const blob = await new Promise<Blob | null>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readonly')
+      const req = tx.objectStore(IDB_STORE).get(CACHE_KEY)
+      req.onsuccess = () => resolve(req.result instanceof Blob ? req.result : null)
+      req.onerror = () => reject(req.error)
+    })
+    db.close()
+    return blob
+  } catch {
+    return null
+  }
+}
+
+async function idbDelete(): Promise<void> {
+  try {
+    const db = await idbOpen()
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite')
+      tx.objectStore(IDB_STORE).delete(CACHE_KEY)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => resolve()
+    })
+    db.close()
+  } catch {
+    /* 忽略 */
+  }
+}
+
+/** 优先 Cache Storage，不支持时退回 IndexedDB（部分 WebView / 非安全上下文） */
+async function getModelBlob(): Promise<Blob | null> {
+  try {
+    if (typeof caches !== 'undefined') {
+      const cache = await caches.open(CACHE_NAME)
+      const hit = await cache.match(CACHE_KEY)
+      if (hit) {
+        const blob = await hit.blob()
+        if (blob.size > 0) return blob
+      }
+    }
+  } catch {
+    /* 继续尝试 IndexedDB */
+  }
+  return idbGet()
+}
+
 export async function isVoskModelReady(): Promise<boolean> {
   try {
     if (localStorage.getItem(READY_KEY) !== '1') return false
-    if (typeof caches === 'undefined') return false
-    if (!(await caches.has(CACHE_NAME))) return false
-    const cache = await caches.open(CACHE_NAME)
-    const hit = await cache.match(CACHE_KEY)
-    return Boolean(hit)
+    return Boolean(await getModelBlob())
   } catch {
     return false
   }
@@ -195,12 +271,21 @@ export async function downloadVoskModel(
     lastError = `模型文件不完整（${blob.size}/${TOTAL_BYTES}）`
     return false
   }
-  const cache = await getCache()
-  if (!cache) {
-    lastError = '当前环境不支持离线缓存'
+  let stored = false
+  try {
+    const cache = await getCache()
+    if (cache) {
+      await cache.put(CACHE_KEY, new Response(blob))
+      stored = true
+    }
+  } catch {
+    /* 退回 IndexedDB */
+  }
+  if (!stored) stored = await idbSet(blob)
+  if (!stored) {
+    lastError = '当前环境无法保存离线模型'
     return false
   }
-  await cache.put(CACHE_KEY, new Response(blob))
   localStorage.setItem(READY_KEY, '1')
   onProgress?.(1)
   return true
@@ -218,6 +303,7 @@ export async function deleteVoskModel(): Promise<void> {
   } catch {
     /* 忽略 */
   }
+  await idbDelete()
   lastError = ''
 }
 
@@ -234,10 +320,8 @@ export async function startOfflineListening({
   onResult,
   onError,
 }: OfflineListenOptions): Promise<() => Promise<void>> {
-  const cache = await getCache()
-  const hit = cache ? await cache.match(CACHE_KEY) : undefined
-  if (!hit) throw new Error('离线语音模型尚未下载')
-  const blob = await hit.blob()
+  const blob = await getModelBlob()
+  if (!blob) throw new Error('离线语音模型尚未下载')
   if (blob.size === 0) throw new Error('离线语音模型文件为空，请重新下载')
 
   const Vosk = await loadVoskEngine()
