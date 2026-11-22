@@ -640,6 +640,15 @@ export const EN_TEXT: Record<string, string> = {
   足迹热力图: 'Footprint heatmap',
   少: 'Less',
   多: 'More',
+  点击停止: 'Tap to stop',
+  需要麦克风权限才能语音输入: 'Microphone permission is required for voice input',
+  当前设备不支持语音识别: 'Speech recognition is not supported on this device',
+  '已选最快线路 {label}（{ms} ms），完成后到系统「下载」目录查看':
+    'Fastest line {label} ({ms} ms) — check the system Downloads folder when done',
+  '已开始下载 {name}，完成后到系统「下载」目录或通知栏查看':
+    'Downloading {name} — check the system Downloads folder or notifications',
+  'APK 会保存到系统「文件管理 → Download」目录，也可以从通知栏点击；首次安装需允许「安装未知应用」。':
+    'The APK is saved to Files → Download and appears in notifications. Allow "install unknown apps" the first time.',
 
   /* ---------- 年度回顾 / 相册 / 我的 / 账本 ---------- */
   我的: 'Profile',

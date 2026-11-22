@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Android 11+ 需要声明才能发现系统语音识别服务 -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -45,6 +52,8 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <!-- 导出备份 / 选择照片 -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- 语音速记：点击后由系统申请录音权限 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- 本地通知：Android 13+ 需要运行时授权，未声明时系统会静默丢弃 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 日程提醒准时触发：Android 12+ 精确闹钟，Android 14 起需要在系统设置里授权 -->

@@ -9,6 +9,7 @@ import { polishMoment } from '../lib/ai'
 import { readFileDate, readFileGps } from '../lib/exif'
 import { locateProvince } from '../lib/province'
 import { locateCity } from '../lib/chinaCities'
+import { isNative } from '../lib/native'
 import { cn } from '../lib/cn'
 import { EditorScreen, FormBlock } from '../components/EditorScreen'
 import { ConfirmDialog, Field } from '../components/ui'
@@ -72,10 +73,11 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
   const [tags, setTags] = useState<string[]>([])
   const [customTag, setCustomTag] = useState('')
   const [error, setError] = useState('')
-  // 浏览器不支持语音识别时不渲染按钮
-  const [speechSupported] = useState(() => Boolean(getSpeechRecognition()))
+  // 原生包走系统语音识别；浏览器不支持时不渲染按钮
+  const [speechSupported] = useState(() => isNative() || Boolean(getSpeechRecognition()))
   const [listening, setListening] = useState(false)
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  const nativeListenersRef = useRef<Array<{ remove: () => Promise<void> }>>([])
   // 输入法下 state 可能滞后，保存时以 DOM 值为准
   const contentRef = useRef<HTMLTextAreaElement>(null)
   const locationRef = useRef<HTMLInputElement>(null)
@@ -117,24 +119,107 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
     }
   }, [tripId, momentId])
 
+  const stopNativeListening = () => {
+    void (async () => {
+      try {
+        const { SpeechRecognition: NativeSpeech } = await import(
+          '@capacitor-community/speech-recognition'
+        )
+        await NativeSpeech.stop()
+      } catch {
+        /* 已经停止 */
+      }
+      await Promise.all(nativeListenersRef.current.map((listener) => listener.remove().catch(() => undefined)))
+      nativeListenersRef.current = []
+      setListening(false)
+    })()
+  }
+
   useEffect(() => {
     return () => {
       recognitionRef.current?.stop()
       recognitionRef.current = null
+      if (nativeListenersRef.current.length > 0) {
+        void import('@capacitor-community/speech-recognition')
+          .then(({ SpeechRecognition: NativeSpeech }) => NativeSpeech.stop())
+          .catch(() => undefined)
+        for (const listener of nativeListenersRef.current) void listener.remove()
+        nativeListenersRef.current = []
+      }
     }
   }, [])
 
-  const toggleListening = () => {
+  /** 点一下开始，再点一下停；第一次会申请麦克风权限 */
+  const toggleListening = async () => {
     if (listening) {
+      if (isNative()) {
+        stopNativeListening()
+        return
+      }
       recognitionRef.current?.stop()
       return
     }
+
+    if (isNative()) {
+      try {
+        const { SpeechRecognition: NativeSpeech } = await import(
+          '@capacitor-community/speech-recognition'
+        )
+        const available = await NativeSpeech.available()
+        if (!available.available) {
+          toast(tr('当前设备不支持语音识别'))
+          return
+        }
+        let permission = (await NativeSpeech.checkPermissions()).speechRecognition
+        if (permission !== 'granted') {
+          permission = (await NativeSpeech.requestPermissions()).speechRecognition
+        }
+        if (permission !== 'granted') {
+          toast(tr('需要麦克风权限才能语音输入'))
+          return
+        }
+
+        const base = content
+        const partial = await NativeSpeech.addListener('partialResults', (data) => {
+          const text = (data.matches?.[0] || '').trim()
+          if (!text) return
+          setContent(base ? `${base.trimEnd()}\n${text}` : text)
+          if (error) setError('')
+        })
+        const state = await NativeSpeech.addListener('listeningState', (data) => {
+          if (data.status === 'stopped') stopNativeListening()
+        })
+        nativeListenersRef.current = [partial, state]
+        await NativeSpeech.start({
+          language: 'zh-CN',
+          partialResults: true,
+          popup: false,
+        })
+        setListening(true)
+      } catch {
+        stopNativeListening()
+        toast(tr('没能听清，请再试一次'))
+      }
+      return
+    }
+
     const Recognition = getSpeechRecognition()
     if (!Recognition) return
+    try {
+      if (navigator.mediaDevices?.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        stream.getTracks().forEach((track) => track.stop())
+      }
+    } catch {
+      toast(tr('需要麦克风权限才能语音输入'))
+      return
+    }
+
     const recognition = new Recognition()
+    const base = content
     recognition.lang = 'zh-CN'
     recognition.interimResults = false
-    recognition.continuous = false
+    recognition.continuous = true
     recognition.onresult = (event) => {
       let text = ''
       for (let i = 0; i < event.results.length; i += 1) {
@@ -142,10 +227,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
       }
       const value = text.trim()
       if (!value) return
-      setContent((previous) => {
-        const base = previous.trimEnd()
-        return base ? `${base}\n${value}` : value
-      })
+      setContent(base ? `${base.trimEnd()}\n${value}` : value)
       if (error) setError('')
     }
     recognition.onerror = () => {
@@ -341,7 +423,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
                   )}
                 >
                   {listening ? <StopCircle size={11} weight="fill" /> : <Microphone size={11} />}
-                  {listening ? tr('聆听中…') : tr('语音')}
+                  {listening ? tr('点击停止') : tr('语音')}
                 </button>
               ) : null}
               <button

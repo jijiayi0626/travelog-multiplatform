@@ -1909,6 +1909,67 @@ function parseJsonText(text) {
     .trim()
 }
 
+/** 校验并归一化小票识别结果 */
+function parseReceipt(text) {
+  let parsed
+  try {
+    parsed = JSON.parse(parseJsonText(text))
+  } catch {
+    return null
+  }
+  const amount = Number(parsed?.amount)
+  if (!Number.isFinite(amount) || amount <= 0) return null
+  const currency = String(parsed?.currency || '').toUpperCase()
+  if (!RECEIPT_CURRENCIES.includes(currency)) return null
+  const category = String(parsed?.category || '').toLowerCase()
+  if (!RECEIPT_CATEGORIES.includes(category)) return null
+  return {
+    amount: Math.round(amount * 100) / 100,
+    currency,
+    category,
+    note: String(parsed?.note || '').slice(0, 60),
+  }
+}
+
+/** 把 data URL / 图片地址转成 Workers AI 需要的字节数组 */
+async function imageBytes(image) {
+  if (image.startsWith('data:')) {
+    const base64 = image.slice(image.indexOf(',') + 1)
+    const binary = atob(base64)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+    return bytes
+  }
+  const response = await fetch(image)
+  if (!response.ok) throw new Error('图片下载失败')
+  return new Uint8Array(await response.arrayBuffer())
+}
+
+/**
+ * 文本模型看不了图时，用 Workers AI 的视觉模型兜底，
+ * 避免用户配置的 OpenAI 兼容接口只支持纯文本导致识别必失败。
+ */
+async function receiptFromWorkersAIVision(env, image) {
+  if (!env.AI) return null
+  const bytes = await imageBytes(image)
+  const result = await env.AI.run('@cf/meta/llama-3.2-11b-vision-instruct', {
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: `${RECEIPT_SYSTEM_PROMPT}\n请识别这张小票，严格按要求只返回 JSON。`,
+          },
+          { type: 'image', image: Array.from(bytes) },
+        ],
+      },
+    ],
+    max_tokens: 512,
+  })
+  return result?.response || ''
+}
+
 async function handleReceipt(request, env) {
   const user = await requireUser(request, env)
   await requireAIAccess(env, user)
@@ -1929,35 +1990,27 @@ async function handleReceipt(request, env) {
       ],
     },
   ]
-  const result = await runAI(env, messages, 0.1)
-
-  let parsed
+  // 先用 Workers AI 视觉模型（如果开通），再尝试用户配置的接口；
+  // 两条路都拿不到合法 JSON 才算识别失败。
+  let receipt = null
   try {
-    parsed = JSON.parse(parseJsonText(result.text))
+    receipt = parseReceipt(await receiptFromWorkersAIVision(env, image))
   } catch {
-    throw new HttpError(422, '没能识别小票内容，请换一张更清晰的照片')
+    receipt = null
+  }
+  if (!receipt) {
+    try {
+      const result = await runAI(env, messages, 0.1)
+      receipt = parseReceipt(result.text)
+    } catch {
+      receipt = null
+    }
+  }
+  if (!receipt) {
+    throw new HttpError(422, '没能识别小票内容，请换一张更清晰的照片或手动填写')
   }
 
-  const amount = Number(parsed?.amount)
-  if (!Number.isFinite(amount) || amount <= 0) {
-    throw new HttpError(422, '没有识别到有效金额，请重试或手动填写')
-  }
-  const currency = String(parsed?.currency || '').toUpperCase()
-  if (!RECEIPT_CURRENCIES.includes(currency)) {
-    throw new HttpError(422, '识别到的币种暂不支持，请手动选择')
-  }
-  const category = String(parsed?.category || '').toLowerCase()
-  if (!RECEIPT_CATEGORIES.includes(category)) {
-    throw new HttpError(422, '识别到的分类暂不支持，请手动选择')
-  }
-  const note = String(parsed?.note || '').slice(0, 60)
-
-  return json(
-    { amount: Math.round(amount * 100) / 100, currency, category, note },
-    200,
-    env,
-    request,
-  )
+  return json(receipt, 200, env, request)
 }
 
 /* ---------------- AI 异步任务 ---------------- */

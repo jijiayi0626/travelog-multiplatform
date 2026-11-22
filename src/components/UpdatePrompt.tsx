@@ -77,8 +77,13 @@ export function UpdatePrompt() {
       const picked = await downloadApk(apk.url, mode, readCustomBase())
       toast(
         mode === 'auto' && picked.ms >= 0
-          ? tr('已选最快线路 {label}（{ms} ms）', { label: tr(picked.label), ms: Math.round(picked.ms) })
-          : tr('已打开下载，系统下载器支持断点续传'),
+          ? tr('已选最快线路 {label}（{ms} ms），完成后到系统「下载」目录查看', {
+              label: tr(picked.label),
+              ms: Math.round(picked.ms),
+            })
+          : tr('已开始下载 {name}，完成后到系统「下载」目录或通知栏查看', {
+              name: apk.name,
+            }),
       )
       setOpen(false)
     } catch {

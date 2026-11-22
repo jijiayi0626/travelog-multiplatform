@@ -90,9 +90,18 @@ export function DownloadPage() {
     try {
       const picked = await downloadApk(apk.url, mode, customBase)
       if (mode === 'auto' && picked.ms >= 0) {
-        toast(tr('已选最快线路 {label}（{ms} ms）', { label: tr(picked.label), ms: Math.round(picked.ms) }))
+        toast(
+          tr('已选最快线路 {label}（{ms} ms），完成后到系统「下载」目录查看', {
+            label: tr(picked.label),
+            ms: Math.round(picked.ms),
+          }),
+        )
       } else {
-        toast(tr('已打开下载，系统下载器支持断点续传'))
+        toast(
+          tr('已开始下载 {name}，完成后到系统「下载」目录或通知栏查看', {
+            name: apk.name,
+          }),
+        )
       }
     } catch {
       toast(tr('打开下载失败，请复制链接后手动下载'))
@@ -254,6 +263,9 @@ export function DownloadPage() {
                 : tr('下载安装包')
               : tr('暂无安装包')}
         </button>
+        <p className="mt-2 text-caption leading-5 text-ink-3">
+          {tr('APK 会保存到系统「文件管理 → Download」目录，也可以从通知栏点击；首次安装需允许「安装未知应用」。')}
+        </p>
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-line bg-surface">
