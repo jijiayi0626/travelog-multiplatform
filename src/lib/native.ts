@@ -117,10 +117,26 @@ export async function clearNativeWatch(_id: string): Promise<void> {
 
 /* ---------------- 文件导出 ---------------- */
 
-/**
- * 写入缓存目录并唤起系统分享面板。
- * WebView 里 a[download] 不会落地，走分享面板后用户可选「保存到文件」。
- */
+/** 把 base64 文件写到缓存并打开系统分享面板（图片、PDF 等二进制文件） */
+export async function shareBinaryFile(filename: string, base64: string): Promise<boolean> {
+  if (!Capacitor.isNativePlatform()) return false
+  try {
+    const result = await Filesystem.writeFile({
+      path: filename,
+      data: base64,
+      directory: Directory.Cache,
+    })
+    await Share.share({
+      title: filename,
+      url: result.uri,
+      dialogTitle: '分享或保存文件',
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
 export async function shareTextFile(filename: string, content: string): Promise<boolean> {
   if (!Capacitor.isNativePlatform()) return false
   try {

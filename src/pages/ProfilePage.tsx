@@ -88,7 +88,7 @@ import {
   stopAutoCheckin,
 } from '../lib/autocheckin'
 import { cn } from '../lib/cn'
-import { Avatar, Field, Sheet, StatTile } from '../components/ui'
+import { Avatar, ConfirmDialog, Field, Sheet, StatTile } from '../components/ui'
 
 const EMPTY_STATS: AppStats = {
   tripCount: 0,
@@ -132,6 +132,7 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
   const [devicesOpen, setDevicesOpen] = useState(false)
   const [devices, setDevices] = useState<AccountDevice[]>([])
   const [devicesBusy, setDevicesBusy] = useState(false)
+  const [confirmRevokeAll, setConfirmRevokeAll] = useState(false)
   // 中文输入法下 React state 可能滞后，保存时以输入框实际值为准
   const nicknameRef = useRef<HTMLInputElement>(null)
   const [autoCheckin, setAutoCheckin] = useState(() => getAutoCheckinSettings())
@@ -212,6 +213,26 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
       toast(`操作失败：${error instanceof Error ? error.message : '请稍后重试'}`)
     } finally {
       setDevicesBusy(false)
+    }
+  }
+
+  const revokeOtherDevices = async () => {
+    const others = devices.filter((device) => !device.current)
+    if (others.length === 0) {
+      setConfirmRevokeAll(false)
+      return
+    }
+    setDevicesBusy(true)
+    try {
+      await Promise.all(others.map((device) => revokeAccountDevice(device.id)))
+      setDevices((list) => list.filter((device) => device.current))
+      setAccount((prev) => (prev ? { ...prev, deviceCount: 1 } : prev))
+      toast(tr('已退出其他设备'))
+    } catch (error) {
+      toast(`操作失败：${error instanceof Error ? error.message : '请稍后重试'}`)
+    } finally {
+      setDevicesBusy(false)
+      setConfirmRevokeAll(false)
     }
   }
 
@@ -1286,9 +1307,21 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
         title="登录设备"
         onClose={() => setDevicesOpen(false)}
         footer={
-          <button type="button" className="btn-ghost w-full" onClick={() => setDevicesOpen(false)}>
-            关闭
-          </button>
+          <div className="flex gap-2">
+            {devices.some((device) => !device.current) ? (
+              <button
+                type="button"
+                className="btn-ghost flex-1 text-danger"
+                disabled={devicesBusy}
+                onClick={() => setConfirmRevokeAll(true)}
+              >
+                退出其他设备
+              </button>
+            ) : null}
+            <button type="button" className="btn-ghost flex-1" onClick={() => setDevicesOpen(false)}>
+              关闭
+            </button>
+          </div>
         }
       >
         <div className="space-y-2">
@@ -1336,6 +1369,15 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
           )}
         </div>
       </Sheet>
+
+      <ConfirmDialog
+        open={confirmRevokeAll}
+        title="退出其他设备"
+        message="除当前设备外的所有设备都会退出登录，需要重新输入账号密码。"
+        confirmText="全部退出"
+        onConfirm={() => void revokeOtherDevices()}
+        onClose={() => setConfirmRevokeAll(false)}
+      />
     </div>
   )
 }

@@ -636,6 +636,8 @@ export const EN_TEXT: Record<string, string> = {
   '已按照片拍摄日期归入第 {n} 天': 'Filed under day {n} by photo date',
   导出海报: 'Export poster',
   年度海报已导出: 'Poster exported',
+  '年度海报已生成，可分享或保存': 'Poster ready — share or save it',
+  已退出其他设备: 'Signed out other devices',
   '导出失败，请重试': 'Export failed, please retry',
   足迹热力图: 'Footprint heatmap',
   少: 'Less',

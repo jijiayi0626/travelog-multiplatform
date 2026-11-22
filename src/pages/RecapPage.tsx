@@ -4,6 +4,7 @@ import type { Expense, Footprint, Moment, TripView } from '../lib/types'
 import { listAllMoments, listExpenses, listFootprints, listTrips } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
 import { useI18n, useNav, useToast } from '../lib/app-context'
+import { isNative, shareBinaryFile } from '../lib/native'
 import { summarizeYear } from '../lib/ai'
 import { summarizeVisits } from '../lib/province'
 import {
@@ -236,10 +237,24 @@ export function RecapPage() {
       toast(tr('导出失败，请重试'))
       return
     }
+    const filename = `travelog-${activeYear}.png`
+    if (isNative()) {
+      const bytes = new Uint8Array(await blob.arrayBuffer())
+      let binary = ''
+      const chunk = 0x8000
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+      }
+      if (await shareBinaryFile(filename, btoa(binary))) {
+        toast(tr('年度海报已生成，可分享或保存'))
+        return
+      }
+    }
+
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `travelog-${activeYear}.png`
+    link.download = filename
     link.click()
     window.setTimeout(() => URL.revokeObjectURL(url), 2000)
     toast(tr('年度海报已导出'))
