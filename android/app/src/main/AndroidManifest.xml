@@ -52,6 +52,16 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <!-- 导出备份 / 选择照片 -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- Android 12 及以下的旧系统读取相册 -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <!-- Android 9 及以下的旧系统写入存储 -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <!-- 拍照识别小票 / 记录配图 -->
+    <uses-permission android:name="android.permission.CAMERA" />
     <!-- 语音速记：点击后由系统申请录音权限 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- 本地通知：Android 13+ 需要运行时授权，未声明时系统会静默丢弃 -->

@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Capacitor } from '@capacitor/core'
+import { Camera } from '@capacitor/camera'
 import { createPortal } from 'react-dom'
 import {
   ArrowRight,
   BellSimple,
+  Camera as CameraIcon,
   Check,
   CloudArrowUp,
   Images,
@@ -47,6 +49,15 @@ async function checkLocationGranted(): Promise<boolean> {
   }
 }
 
+async function checkCameraPermission(): Promise<PermissionState> {
+  try {
+    const status = await Camera.checkPermissions()
+    return status.camera === 'granted' ? 'granted' : status.camera === 'denied' ? 'denied' : 'idle'
+  } catch {
+    return 'unsupported'
+  }
+}
+
 async function checkSpeechPermission(): Promise<PermissionState> {
   if (!isNative()) return 'unsupported'
   try {
@@ -68,17 +79,19 @@ export function Onboarding() {
   const [permissions, setPermissions] = useState<{
     location: PermissionState
     notification: PermissionState
+    camera: PermissionState
     speech: PermissionState
-  }>({ location: 'idle', notification: 'idle', speech: 'idle' })
+  }>({ location: 'idle', notification: 'idle', camera: 'idle', speech: 'idle' })
 
   // 进入权限步骤时回显系统里已有的授权状态，已授权的直接显示「已开启」
   useEffect(() => {
     if (!open || STEPS[step].key !== 'permissions') return
     let alive = true
     void (async () => {
-      const [location, notification, speech] = await Promise.all([
+      const [location, notification, camera, speech] = await Promise.all([
         checkLocationGranted(),
         hasNotificationPermission(),
+        checkCameraPermission(),
         checkSpeechPermission(),
       ])
       if (!alive) return
@@ -89,6 +102,7 @@ export function Onboarding() {
       setPermissions({
         location: location ? 'granted' : 'idle',
         notification: notification ? 'granted' : notificationDenied ? 'denied' : 'idle',
+        camera,
         speech,
       })
     })()
@@ -167,6 +181,19 @@ export function Onboarding() {
     if (granted && Capacitor.getPlatform() === 'android') void ensureExactAlarmPermission()
   }
 
+  const requestCamera = async () => {
+    setPermissions((prev) => ({ ...prev, camera: 'busy' }))
+    try {
+      const result = await Camera.requestPermissions({ permissions: ['camera'] })
+      setPermissions((prev) => ({
+        ...prev,
+        camera: result.camera === 'granted' ? 'granted' : 'denied',
+      }))
+    } catch {
+      setPermissions((prev) => ({ ...prev, camera: 'unsupported' }))
+    }
+  }
+
   const requestSpeech = async () => {
     if (!isNative()) {
       setPermissions((prev) => ({ ...prev, speech: 'unsupported' }))
@@ -208,10 +235,18 @@ export function Onboarding() {
       onRequest: requestNotification,
     },
     {
+      key: 'camera',
+      Icon: CameraIcon,
+      title: tr('相机权限'),
+      description: tr('拍摄小票自动识别，也能给记录配图。'),
+      state: permissions.camera,
+      onRequest: requestCamera,
+    },
+    {
       key: 'speech',
       Icon: Microphone,
       title: tr('录音权限（可选）'),
-      description: tr('语音速记需要，部分设备不支持，可跳过。'),
+      description: tr('语音速记需要，部分设备不支持，可跳过。系统语音不可用时可下载离线语音模型。'),
       state: permissions.speech,
       onRequest: requestSpeech,
     },
@@ -374,7 +409,7 @@ function stepCopy(
     case 'permissions':
       return {
         title: tr('先给旅记几项权限'),
-        body: tr('位置用于足迹与照片归类，通知用于出发倒计时和日程提醒；录音可跳过，之后都能在系统设置里修改。'),
+        body: tr('位置用于足迹与照片归类，通知用于出发倒计时和日程提醒，相机用于拍摄小票和记录配图；录音可跳过，之后都能在系统设置里修改。'),
       }
     case 'sections':
       return {

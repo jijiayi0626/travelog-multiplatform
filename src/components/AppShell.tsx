@@ -126,6 +126,11 @@ export function AppShell({
       if (disposed || clipboardBusy.current) return
       if (document.visibilityState !== 'visible') return
       if (!isSignedIn()) return
+      try {
+        if (localStorage.getItem('travelog.clipboardInvite') === '0') return
+      } catch {
+        /* 隐私模式读不到时保持默认开启 */
+      }
       clipboardBusy.current = true
       try {
         let text = ''

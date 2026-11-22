@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { Receipt, Trash } from '@phosphor-icons/react'
 import type { Currency, Expense, ExpenseCategory, Member, Trip } from '../lib/types'
 import {
@@ -29,6 +30,7 @@ import { cn } from '../lib/cn'
 import { parseReceiptText, recognizeReceiptText } from '../lib/receipt-ocr'
 import { isOcrModelReady, OCR_MODEL_SIZE_MB } from '../lib/ocr-model'
 import { guessCategory } from '../lib/ai'
+import { isNative } from '../lib/native'
 import { EditorScreen, FormBlock } from '../components/EditorScreen'
 import { ConfirmDialog, Field } from '../components/ui'
 import { CategoryGlyph } from '../components/Icons'
@@ -154,11 +156,11 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
     }
   }
 
-  const recognizeReceipt = async (file: File | undefined) => {
-    if (!file) return
+  const recognizeReceipt = async (source: File | string | undefined) => {
+    if (!source) return
     setReceiptBusy(true)
     try {
-      const image = await compressImage(file)
+      const image = typeof source === 'string' ? source : await compressImage(source)
       const result = parseReceiptText(await recognizeReceiptText(image))
       if (!result) {
         toast(tr('没识别到金额，请手动填写'))
@@ -182,6 +184,40 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
     } finally {
       setReceiptBusy(false)
       if (receiptRef.current) receiptRef.current.value = ''
+    }
+  }
+
+  const startReceiptScan = async () => {
+    if (!isOcrModelReady()) {
+      setModelPrompt(true)
+      return
+    }
+    if (!isNative()) {
+      receiptRef.current?.click()
+      return
+    }
+    setReceiptBusy(true)
+    try {
+      const permission = await Camera.requestPermissions({ permissions: ['camera'] })
+      if (permission.camera !== 'granted') {
+        toast(tr('未获得相机权限'))
+        return
+      }
+      const photo = await Camera.getPhoto({
+        source: CameraSource.Camera,
+        resultType: CameraResultType.Base64,
+        quality: 80,
+        correctOrientation: true,
+      })
+      if (!photo.base64String) return
+      const mime = photo.format ? `image/${photo.format}` : 'image/jpeg'
+      await recognizeReceipt(`data:${mime};base64,${photo.base64String}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      // 用户取消拍摄时不打扰
+      if (!/cancel/i.test(message)) toast(tr('未获得相机权限'))
+    } finally {
+      setReceiptBusy(false)
     }
   }
 
@@ -225,13 +261,7 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
           <button
             type="button"
             disabled={receiptBusy}
-            onClick={() => {
-              if (!isOcrModelReady()) {
-                setModelPrompt(true)
-                return
-              }
-              receiptRef.current?.click()
-            }}
+            onClick={() => void startReceiptScan()}
             className="press inline-flex shrink-0 items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-note text-ink-2 disabled:opacity-50 hover:text-accent"
           >
             {receiptBusy ? (

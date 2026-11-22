@@ -1,7 +1,7 @@
 {
   "name": "travelog-web",
   "private": true,
-  "version": "2.6.5",
+  "version": "2.7.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -20,6 +20,7 @@
     "@capacitor/android": "^7.4.4",
     "@capacitor/app": "^7.1.2",
     "@capacitor/browser": "^7.0.5",
+    "@capacitor/camera": "^7.0.5",
     "@capacitor/clipboard": "^7.0.4",
     "@capacitor/core": "^7.4.4",
     "@capacitor/filesystem": "^7.1.9",
@@ -30,7 +31,8 @@
     "@phosphor-icons/react": "^2.1.10",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "tesseract.js": "^7.0.0"
+    "tesseract.js": "^7.0.0",
+    "vosk-browser": "^0.0.8"
   },
   "devDependencies": {
     "@capacitor/cli": "^7.4.4",

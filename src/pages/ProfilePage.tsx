@@ -1,12 +1,14 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { Camera } from '@capacitor/camera'
 import {
   ArrowLeft,
   BellSimple,
   BookOpen,
   CaretDown,
   CaretRight,
+  Check,
   CloudCheck,
   CloudSlash,
   Devices,
@@ -14,6 +16,7 @@ import {
   Crown,
   Images,
   Info,
+  Lock,
   Translate,
   ClockCounterClockwise,
   MapPinLine,
@@ -47,11 +50,12 @@ import {
   type ThemeMode,
 } from '../lib/theme'
 import { compressImage, downloadText, readTextFile, relativeTime } from '../lib/utils'
-import { getBestFix, isNative, shareTextFile } from '../lib/native'
+import { getBestFix, isNative, requestLocationPermission, shareTextFile } from '../lib/native'
 import {
   ensureExactAlarmPermission,
   ensureNotificationPermission,
   getDailyReminderEnabled,
+  hasNotificationPermission,
   sendTestNotification,
   setDailyReminderEnabled,
 } from '../lib/reminder'
@@ -111,6 +115,47 @@ const EMPTY_STATS: AppStats = {
   planDoneCount: 0,
 }
 
+type PermissionKey = 'location' | 'notification' | 'camera' | 'microphone'
+type PermissionStatus = 'idle' | 'granted' | 'denied' | 'unsupported' | 'busy'
+
+async function checkLocationStatus(): Promise<PermissionStatus> {
+  // 原生定位没有查询接口，保持未申请状态，由按钮触发系统弹窗
+  if (isNative()) return 'idle'
+  try {
+    if (!navigator.permissions) return 'idle'
+    const status = await navigator.permissions.query({ name: 'geolocation' })
+    return status.state === 'granted' ? 'granted' : status.state === 'denied' ? 'denied' : 'idle'
+  } catch {
+    return 'idle'
+  }
+}
+
+async function checkCameraStatus(): Promise<PermissionStatus> {
+  try {
+    const status = await Camera.checkPermissions()
+    return status.camera === 'granted'
+      ? 'granted'
+      : status.camera === 'denied'
+        ? 'denied'
+        : 'idle'
+  } catch {
+    return 'unsupported'
+  }
+}
+
+async function checkMicrophoneStatus(): Promise<PermissionStatus> {
+  if (!isNative()) return 'unsupported'
+  try {
+    const { SpeechRecognition } = await import('@capacitor-community/speech-recognition')
+    const available = await SpeechRecognition.available()
+    if (!available.available) return 'unsupported'
+    const permission = (await SpeechRecognition.checkPermissions()).speechRecognition
+    return permission === 'granted' ? 'granted' : 'idle'
+  } catch {
+    return 'unsupported'
+  }
+}
+
 export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
   const nav = useNav()
   const toast = useToast()
@@ -159,6 +204,20 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
   const [lastBackupAt, setLastBackupAt] = useState(() =>
     Number(localStorage.getItem('travelog.lastBackupAt') || 0),
   )
+  const [permissionStatus, setPermissionStatus] = useState<Record<PermissionKey, PermissionStatus>>({
+    location: 'idle',
+    notification: 'idle',
+    camera: 'idle',
+    microphone: 'idle',
+  })
+  const [grantAllBusy, setGrantAllBusy] = useState(false)
+  const [clipboardInvite, setClipboardInvite] = useState(() => {
+    try {
+      return localStorage.getItem('travelog.clipboardInvite') !== '0'
+    } catch {
+      return true
+    }
+  })
 
   useEffect(() => {
     if (data.profile) setNickname(data.profile.nickname)
@@ -197,6 +256,130 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
       active = false
     }
   }, [signedIn])
+
+  // 进入设置页时回显已有的权限状态
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      const [location, notification, camera, microphone] = await Promise.all([
+        checkLocationStatus(),
+        hasNotificationPermission(),
+        checkCameraStatus(),
+        checkMicrophoneStatus(),
+      ])
+      if (!alive) return
+      setPermissionStatus({
+        location,
+        notification: notification ? 'granted' : 'idle',
+        camera,
+        microphone,
+      })
+    })()
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const markPermission = (key: PermissionKey, status: PermissionStatus) => {
+    setPermissionStatus((previous) => ({ ...previous, [key]: status }))
+  }
+
+  const requestLocationAccess = async (): Promise<PermissionStatus> => {
+    markPermission('location', 'busy')
+    let status: PermissionStatus = 'denied'
+    try {
+      status = (await requestLocationPermission()) ? 'granted' : 'denied'
+    } catch {
+      status = 'denied'
+    }
+    markPermission('location', status)
+    return status
+  }
+
+  const requestNotificationAccess = async (): Promise<PermissionStatus> => {
+    markPermission('notification', 'busy')
+    let status: PermissionStatus = 'denied'
+    try {
+      const granted = await ensureNotificationPermission()
+      status = granted ? 'granted' : 'denied'
+      if (granted && isNative()) void ensureExactAlarmPermission()
+    } catch {
+      status = 'denied'
+    }
+    markPermission('notification', status)
+    return status
+  }
+
+  const requestCameraAccess = async (): Promise<PermissionStatus> => {
+    markPermission('camera', 'busy')
+    let status: PermissionStatus = 'unsupported'
+    try {
+      const result = await Camera.requestPermissions({ permissions: ['camera'] })
+      status = result.camera === 'granted' ? 'granted' : 'denied'
+    } catch {
+      status = 'unsupported'
+    }
+    markPermission('camera', status)
+    return status
+  }
+
+  const requestMicrophoneAccess = async (): Promise<PermissionStatus> => {
+    if (!isNative()) {
+      markPermission('microphone', 'unsupported')
+      return 'unsupported'
+    }
+    markPermission('microphone', 'busy')
+    let status: PermissionStatus = 'unsupported'
+    try {
+      const { SpeechRecognition } = await import('@capacitor-community/speech-recognition')
+      const available = await SpeechRecognition.available()
+      if (available.available) {
+        const result = await SpeechRecognition.requestPermissions()
+        status = result.speechRecognition === 'granted' ? 'granted' : 'denied'
+      }
+    } catch {
+      status = 'unsupported'
+    }
+    markPermission('microphone', status)
+    return status
+  }
+
+  // 依次申请定位、通知、相机、麦克风；单项失败不阻塞后续
+  const grantAllPermissions = async () => {
+    if (grantAllBusy) return
+    setGrantAllBusy(true)
+    let granted = 0
+    let needSettings = 0
+    const tally = (status: PermissionStatus) => {
+      if (status === 'granted') granted += 1
+      else if (status !== 'unsupported') needSettings += 1
+    }
+    try {
+      tally(await requestLocationAccess())
+      tally(await requestNotificationAccess())
+      tally(await requestCameraAccess())
+      tally(await requestMicrophoneAccess())
+      toast(
+        tr('已开启 {n} 项，{m} 项需在系统设置开启', {
+          n: granted,
+          m: needSettings,
+        }),
+      )
+    } finally {
+      setGrantAllBusy(false)
+    }
+  }
+
+  const toggleClipboardInvite = () => {
+    const next = !clipboardInvite
+    setClipboardInvite(next)
+    try {
+      localStorage.setItem('travelog.clipboardInvite', next ? '1' : '0')
+    } catch {
+      /* 隐私模式忽略 */
+    }
+    toast(next ? tr('已开启启动时检查邀请码') : tr('已关闭启动时检查邀请码'))
+  }
 
   const openDevices = async () => {
     setDevicesOpen(true)
@@ -905,6 +1088,123 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
     </SettingsGroup>
   )
 
+  const permissionItems: Array<{
+    key: PermissionKey
+    title: string
+    description: string
+    onRequest: () => Promise<PermissionStatus>
+  }> = [
+    {
+      key: 'location',
+      title: tr('定位'),
+      description: tr('用于记录足迹、自动打卡与照片归类。'),
+      onRequest: requestLocationAccess,
+    },
+    {
+      key: 'notification',
+      title: tr('通知'),
+      description: tr('用于出发倒计时、日程提醒与测试通知。'),
+      onRequest: requestNotificationAccess,
+    },
+    {
+      key: 'camera',
+      title: tr('相机'),
+      description: tr('拍摄小票自动识别，也能给记录配图。'),
+      onRequest: requestCameraAccess,
+    },
+    {
+      key: 'microphone',
+      title: tr('麦克风'),
+      description: tr('语音速记与语音输入需要，部分设备不支持。系统语音不可用时可下载离线语音模型。'),
+      onRequest: requestMicrophoneAccess,
+    },
+  ]
+  const permissionGrantedCount = Object.values(permissionStatus).filter(
+    (status) => status === 'granted',
+  ).length
+
+  const permissionsGroup = (
+    <SettingsGroup
+      icon={<Lock size={17} />}
+      title={tr('权限')}
+      summary={tr('已开启 {n} / 4 项', { n: permissionGrantedCount })}
+    >
+      <div className="space-y-3">
+        <button
+          type="button"
+          className="btn-primary w-full"
+          disabled={grantAllBusy}
+          onClick={() => void grantAllPermissions()}
+        >
+          {grantAllBusy ? tr('正在申请…') : tr('一键开启所有权限')}
+        </button>
+
+        {permissionItems.map((item) => {
+          const status = permissionStatus[item.key]
+          return (
+            <div key={item.key} className="flex items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-body-sm text-ink">{item.title}</p>
+                <p className="mt-0.5 text-caption leading-4 text-ink-3">{item.description}</p>
+                {status === 'unsupported' ? (
+                  <p className="mt-1 text-caption text-ink-3">{tr('设备不支持')}</p>
+                ) : status === 'denied' ? (
+                  <p className="mt-1 text-caption text-ink-3">
+                    {tr('未开启，可在系统设置里修改')}
+                  </p>
+                ) : null}
+              </div>
+              {status === 'granted' ? (
+                <span className="flex shrink-0 items-center gap-1 rounded-full bg-accent-soft px-2 py-1 text-caption text-accent">
+                  <Check size={12} />
+                  {tr('已开启')}
+                </span>
+              ) : status === 'unsupported' ? null : (
+                <button
+                  type="button"
+                  className="chip shrink-0 px-2.5 py-1 text-caption"
+                  disabled={status === 'busy'}
+                  onClick={() => void item.onRequest()}
+                >
+                  {status === 'busy' ? tr('请求中…') : tr('开启')}
+                </button>
+              )}
+            </div>
+          )
+        })}
+
+        <p className="rounded-xl bg-paper-2/60 p-3 text-caption leading-4 text-ink-3">
+          {tr('文件保存：Android 10+ 通过系统分享或文件选择器保存，无需存储权限；旧系统的存储权限已在清单声明。')}
+        </p>
+
+        <div className="flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-body-sm text-ink">{tr('启动时检查邀请码')}</p>
+            <p className="mt-0.5 text-caption leading-4 text-ink-3">
+              {tr('打开 App 时读取剪贴板，发现行程邀请码会询问是否加入。')}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={toggleClipboardInvite}
+            aria-pressed={clipboardInvite}
+            className={cn(
+              'press relative h-6 w-11 shrink-0 rounded-full transition-colors',
+              clipboardInvite ? 'bg-accent' : 'bg-paper-2',
+            )}
+          >
+            <span
+              className={cn(
+                'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all',
+                clipboardInvite ? 'left-[22px]' : 'left-0.5',
+              )}
+            />
+          </button>
+        </div>
+      </div>
+    </SettingsGroup>
+  )
+
   const appearanceGroup = (
     <SettingsGroup
       icon={<PaintBrush size={17} />}
@@ -1122,6 +1422,7 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
     { key: 'security', title: tr('账号与安全'), keywords: '账号 密码 邮箱 设备 登录 头像 资料', node: securityGroup },
     { key: 'auto', title: tr('自动打卡'), keywords: '打卡 签到 自动 定位', node: autoCheckinGroup },
     { key: 'notify', title: tr('通知'), keywords: '通知 提醒 每日 测试 推送', node: notificationGroup },
+    { key: 'permissions', title: tr('权限'), keywords: '权限 定位 通知 相机 麦克风 剪贴板 邀请码 存储', node: permissionsGroup },
     { key: 'appearance', title: tr('外观与语言'), keywords: '外观 主题 颜色 深色 浅色 定时 语言 字体', node: appearanceGroup },
     { key: 'data', title: tr('数据与备份'), keywords: '数据 备份 导出 导入 回收站 恢复 删除 清理 重置', node: dataGroup },
     { key: 'about', title: tr('关于与帮助'), keywords: '关于 帮助 版本 更新 开发者 github 仓库 隐私', node: aboutGroup },

@@ -9,6 +9,9 @@ import {
   Copy,
   DotsThree,
   DownloadSimple,
+  FileHtml,
+  FileImage,
+  FileMd,
   MapPin,
   PencilSimple,
   Plus,
@@ -60,7 +63,8 @@ import {
   shareBaseUrl,
 } from '../lib/cloud'
 import { runSync } from '../lib/sync-engine'
-import { isNative, shareTextFile } from '../lib/native'
+import { isNative, shareBinaryFile, shareTextFile } from '../lib/native'
+import { renderTripPoster } from '../lib/export-image'
 import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import {
   CATEGORY_COLOR,
@@ -135,6 +139,8 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
   const [newMemberNote, setNewMemberNote] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
+  const [imageExportBusy, setImageExportBusy] = useState(false)
   const [aiPackingBusy, setAiPackingBusy] = useState(false)
   const [qaOpen, setQaOpen] = useState(false)
   const [qaText, setQaText] = useState('')
@@ -392,33 +398,38 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
 </html>`
     const safeName = (trip.title || tr('未命名旅程')).replace(/[\\/:*?"<>|]/g, '-')
     const filename = `行程-${safeName}.html`
-    if (isNative()) {
-      const ok = await shareTextFile(filename, html)
-      if (ok) toast(tr('离线行程已生成，可分享或保存'))
-      return
+    try {
+      if (isNative()) {
+        const ok = await shareTextFile(filename, html)
+        toast(ok ? tr('离线行程已生成，可分享或保存') : tr('导出失败，请重试'))
+        return
+      }
+      downloadText(filename, html, 'text/html;charset=utf-8')
+      toast(tr('离线行程已下载'))
+    } finally {
+      setExportOpen(false)
     }
-    downloadText(filename, html, 'text/html;charset=utf-8')
-    toast(tr('离线行程已下载'))
   }
 
-  const exportMarkdown = () => {
+  const exportMarkdown = async () => {
+    if (!trip) return
     const md: string[] = []
-    md.push(`# ${trip?.title || '未命名旅程'}`, '')
+    md.push(`# ${trip.title || tr('未命名旅程')}`, '')
     md.push(
-      `> ${trip?.destination || '目的地待定'} · ${formatDate(trip?.startDate ?? 0)} — ${formatDate(trip?.endDate ?? 0)}`,
+      `> ${trip.destination || tr('目的地待定')} · ${formatDate(trip.startDate)} — ${formatDate(trip.endDate)}`,
     )
-    if (trip?.note) md.push('', trip.note)
+    if (trip.note) md.push('', trip.note)
     md.push('')
-    md.push(`- 行程天数：${days} 天`)
-    md.push(`- 日程完成：${planProgress.done}/${planProgress.total}`)
-    md.push(`- 花费合计：¥${formatMoney(total)}`)
-    if (trip?.budget) md.push(`- 预算：¥${formatMoney(trip.budget)}`)
-    if (trip?.inviteCode) md.push(`- 邀请码：${trip.inviteCode}`)
+    md.push(`- ${tr('行程天数')}：${tr('{n} 天', { n: days })}`)
+    md.push(`- ${tr('日程完成')}：${planProgress.done}/${planProgress.total}`)
+    md.push(`- ${tr('花费合计')}：¥${formatMoney(total)}`)
+    if (trip.budget) md.push(`- ${tr('预算')}：¥${formatMoney(trip.budget)}`)
+    if (trip.inviteCode) md.push(`- ${tr('邀请码')}：${trip.inviteCode}`)
 
     if (plans.length > 0) {
-      md.push('', '## 日程')
+      md.push('', `## ${tr('日程')}`)
       for (const group of groupPlans(plans)) {
-        md.push('', `### 第 ${group.dayIndex} 天`)
+        md.push('', `### ${tr('第 {n} 天', { n: group.dayIndex })}`)
         for (const plan of group.plans) {
           const time = plan.time ? `${plan.time} ` : ''
           const place = plan.place ? `（${plan.place}）` : ''
@@ -428,19 +439,24 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
     }
 
     if (moments.length > 0) {
-      md.push('', '## 记录')
+      md.push('', `## ${tr('记录')}`)
       for (const group of groups) {
         for (const moment of group.moments) {
-          md.push('', `### 第 ${group.dayIndex} 天 · ${moment.locationName || '未标注地点'}`, '', moment.content)
+          md.push(
+            '',
+            `### ${tr('第 {n} 天', { n: group.dayIndex })} · ${moment.locationName || tr('未标注地点')}`,
+            '',
+            moment.content,
+          )
           if (moment.photos.length > 0) {
-            md.push('', `> ${moment.photos.length} 张照片已存于应用内`)
+            md.push('', `> ${tr('{n} 张照片已存于应用内', { n: moment.photos.length })}`)
           }
         }
       }
     }
 
     if (expenses.length > 0) {
-      md.push('', '## 账本')
+      md.push('', `## ${tr('账本')}`)
       for (const expense of expenses) {
         md.push(
           `- ${expense.note || CATEGORY_LABEL[expense.category]} — ¥${formatMoney(expense.amount)}`,
@@ -449,14 +465,63 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
     }
 
     if (checklist.length > 0) {
-      md.push('', '## 清单')
+      md.push('', `## ${tr('清单')}`)
       for (const item of checklist) {
         md.push(`- ${item.done ? '[x]' : '[ ]'} ${item.title}`)
       }
     }
 
-    downloadText(`${trip?.title || 'trip'}.md`, md.join('\n'), 'text/markdown;charset=utf-8')
-    toast(tr('Markdown 已导出'))
+    const safeName = (trip.title || tr('未命名旅程')).replace(/[\\/:*?"<>|]/g, '-')
+    const filename = `行程-${safeName}.md`
+    try {
+      if (isNative()) {
+        const ok = await shareTextFile(filename, md.join('\n'))
+        toast(ok ? tr('Markdown 已导出') : tr('导出失败，请重试'))
+        return
+      }
+      downloadText(filename, md.join('\n'), 'text/markdown;charset=utf-8')
+      toast(tr('Markdown 已导出'))
+    } finally {
+      setExportOpen(false)
+    }
+  }
+
+  const exportImage = async () => {
+    if (!trip || imageExportBusy) return
+    setImageExportBusy(true)
+    try {
+      const blob = await renderTripPoster(trip, {
+        days,
+        plans: plans.length,
+        moments: moments.length,
+        total,
+      })
+      const safeName = (trip.title || tr('未命名旅程')).replace(/[\\/:*?"<>|]/g, '-')
+      const filename = `行程-${safeName}.png`
+      if (isNative()) {
+        const bytes = new Uint8Array(await blob.arrayBuffer())
+        let binary = ''
+        const chunk = 0x8000
+        for (let i = 0; i < bytes.length; i += chunk) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+        }
+        const ok = await shareBinaryFile(filename, btoa(binary))
+        toast(ok ? tr('行程图片已生成，可分享或保存') : tr('导出失败，请重试'))
+        return
+      }
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      link.click()
+      window.setTimeout(() => URL.revokeObjectURL(url), 2000)
+      toast(tr('行程图片已导出'))
+    } catch {
+      toast(tr('图片生成失败，请重试'))
+    } finally {
+      setImageExportBusy(false)
+      setExportOpen(false)
+    }
   }
 
   const copyTrip = async () => {
@@ -547,9 +612,9 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
         </span>
         <button
           type="button"
-          onClick={exportMarkdown}
-          aria-label={tr('导出为 Markdown')}
-          className="press ml-auto hidden h-8 shrink-0 items-center gap-1.5 rounded-full border border-line px-2.5 text-caption text-ink-2 hover:text-ink sm:flex"
+          onClick={() => setExportOpen(true)}
+          aria-label={tr('导出与分享')}
+          className="press ml-auto flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-line px-2.5 text-caption text-ink-2 hover:text-ink"
         >
           <DownloadSimple size={13} />
           {tr('导出')}
@@ -558,7 +623,7 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
           type="button"
           onClick={() => setMenuOpen(true)}
           aria-label={tr('更多操作')}
-          className="press ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-line text-ink-2 hover:text-ink sm:ml-1"
+          className="press flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-line text-ink-2 hover:text-ink sm:ml-1"
         >
           <DotsThree size={18} weight="bold" />
         </button>
@@ -756,7 +821,6 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
                 }}
                 onCopy={copyInvite}
                 onShare={shareTrip}
-                onDownloadOffline={downloadOfflineTrip}
               />
             ) : null}
           </div>
@@ -860,17 +924,6 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
             type="button"
             onClick={() => {
               setMenuOpen(false)
-              exportMarkdown()
-            }}
-            className="press flex w-full items-center gap-2.5 rounded-xl px-3 py-3 text-left text-body text-ink hover:bg-paper-2"
-          >
-            <DownloadSimple size={16} className="text-ink-3" />
-            {tr('导出 Markdown')}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setMenuOpen(false)
               copyTrip()
             }}
             className="press flex w-full items-center gap-2.5 rounded-xl px-3 py-3 text-left text-body text-ink hover:bg-paper-2"
@@ -918,6 +971,51 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
           >
             <Trash size={16} />
             {tr('删除这段旅程')}
+          </button>
+        </div>
+      </Sheet>
+
+      <Sheet open={exportOpen} title={tr('导出与分享')} onClose={() => setExportOpen(false)}>
+        <div className="space-y-1.5">
+          <button
+            type="button"
+            onClick={() => void exportMarkdown()}
+            className="press flex w-full items-center gap-2.5 rounded-xl px-3 py-3 text-left text-body text-ink hover:bg-paper-2"
+          >
+            <FileMd size={16} className="shrink-0 text-ink-3" />
+            <span className="min-w-0 flex-1">
+              <span className="block">{tr('导出 Markdown')}</span>
+              <span className="mt-0.5 block text-caption text-ink-3">
+                {tr('纯文本，适合粘贴到笔记应用')}
+              </span>
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void downloadOfflineTrip()}
+            className="press flex w-full items-center gap-2.5 rounded-xl px-3 py-3 text-left text-body text-ink hover:bg-paper-2"
+          >
+            <FileHtml size={16} className="shrink-0 text-ink-3" />
+            <span className="min-w-0 flex-1">
+              <span className="block">{tr('导出 HTML（离线行程）')}</span>
+              <span className="mt-0.5 block text-caption text-ink-3">
+                {tr('单文件网页，离线也能打开')}
+              </span>
+            </span>
+          </button>
+          <button
+            type="button"
+            disabled={imageExportBusy}
+            onClick={() => void exportImage()}
+            className="press flex w-full items-center gap-2.5 rounded-xl px-3 py-3 text-left text-body text-ink hover:bg-paper-2 disabled:opacity-60"
+          >
+            <FileImage size={16} className="shrink-0 text-ink-3" />
+            <span className="min-w-0 flex-1">
+              <span className="block">{imageExportBusy ? tr('生成中…') : tr('导出图片')}</span>
+              <span className="mt-0.5 block text-caption text-ink-3">
+                {tr('1080 × 1440 竖版海报，可分享到社交平台')}
+              </span>
+            </span>
           </button>
         </div>
       </Sheet>
@@ -1787,7 +1885,6 @@ function MembersTab({
   onRemove,
   onCopy,
   onShare,
-  onDownloadOffline,
 }: {
   members: Member[]
   inviteCode: string
@@ -1801,7 +1898,6 @@ function MembersTab({
   onRemove: (member: Member) => void
   onCopy: () => void
   onShare: () => void
-  onDownloadOffline: () => void
 }) {
   const { tr } = useI18n()
   return (
@@ -1818,16 +1914,10 @@ function MembersTab({
         <Copy size={15} className="text-ink-3" />
       </button>
 
-      <div className="grid grid-cols-2 gap-2">
-        <button type="button" onClick={onShare} className="btn-ghost w-full">
-          <ShareNetwork size={14} />
-          {tr('分享行程')}
-        </button>
-        <button type="button" onClick={onDownloadOffline} className="btn-ghost w-full">
-          <DownloadSimple size={14} />
-          {tr('下载离线行程')}
-        </button>
-      </div>
+      <button type="button" onClick={onShare} className="btn-ghost w-full">
+        <ShareNetwork size={14} />
+        {tr('分享行程')}
+      </button>
 
       <form
         className="space-y-2"

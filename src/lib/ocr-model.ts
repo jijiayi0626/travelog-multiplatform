@@ -11,11 +11,12 @@ const MODEL_LANG = 'chi_sim'
 /** 中文模型解压前约 1.7MB，用于页面提示 */
 export const OCR_MODEL_SIZE_MB = 1.7
 
-/** 依次尝试：GitHub raw → jsDelivr → gh-proxy */
+/** 依次尝试：GitHub raw → jsDelivr → 加速节点一 → 加速节点二 */
 export const OCR_MODEL_MIRRORS = [
   'https://raw.githubusercontent.com/jijiayi0626/travelog-multiplatform/main/models',
   'https://cdn.jsdelivr.net/gh/jijiayi0626/travelog-multiplatform@main/models',
-  'https://gh-proxy.com/https://raw.githubusercontent.com/jijiayi0626/travelog-multiplatform/main/models',
+  'https://v6.gh-proxy.org/https://raw.githubusercontent.com/jijiayi0626/travelog-multiplatform/main/models',
+  'https://cdn.gh-proxy.com/https://raw.githubusercontent.com/jijiayi0626/travelog-multiplatform/main/models',
 ] as const
 
 let lastError = ''

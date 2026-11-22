@@ -1,15 +1,25 @@
 import { useEffect, useRef, useState } from 'react'
-import { ImageSquare, Microphone, Plus, Sparkle, StopCircle, Trash } from '@phosphor-icons/react'
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
+import {
+  Camera as CameraIcon,
+  ImageSquare,
+  Microphone,
+  Plus,
+  Sparkle,
+  StopCircle,
+  Trash,
+} from '@phosphor-icons/react'
 import type { Moment, Photo, Trip } from '../lib/types'
 import { deleteMoment, getTrip, listMoments, saveMoment } from '../lib/repo'
 import { deleteCloudPhoto, isSignedIn } from '../lib/cloud'
 import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
-import { compressImage, dayIndexInTrip, tripDayCount, uid } from '../lib/utils'
+import { compressDataUrl, compressImage, dayIndexInTrip, tripDayCount, uid } from '../lib/utils'
 import { polishMoment } from '../lib/ai'
 import { readFileDate, readFileGps } from '../lib/exif'
 import { locateProvince } from '../lib/province'
 import { locateCity } from '../lib/chinaCities'
 import { isNative } from '../lib/native'
+import { isVoskModelReady, startOfflineListening } from '../lib/offline-speech'
 import { cn } from '../lib/cn'
 import { EditorScreen, FormBlock } from '../components/EditorScreen'
 import { ConfirmDialog, Field } from '../components/ui'
@@ -65,6 +75,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
   const { bump } = useRefresh()
   const { tr } = useI18n()
   const fileRef = useRef<HTMLInputElement>(null)
+  const cameraRef = useRef<HTMLInputElement>(null)
 
   const [loading, setLoading] = useState(Boolean(momentId))
   const [saving, setSaving] = useState(false)
@@ -83,15 +94,31 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
   const [tags, setTags] = useState<string[]>([])
   const [customTag, setCustomTag] = useState('')
   const [error, setError] = useState('')
-  // 原生包走系统语音识别；浏览器不支持时不渲染按钮
-  const [speechSupported] = useState(() => isNative() || Boolean(getSpeechRecognition()))
+  // 原生包走系统语音识别；浏览器不支持时，若已下载离线模型仍可回退
+  const [offlineReady, setOfflineReady] = useState(false)
+  const [offlinePrompt, setOfflinePrompt] = useState(false)
   const [listening, setListening] = useState(false)
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const nativeListenersRef = useRef<Array<{ remove: () => Promise<void> }>>([])
   const nativeStoppingRef = useRef(false)
+  const offlineStopRef = useRef<(() => Promise<void>) | null>(null)
+  const offlineStartingRef = useRef(false)
+  const offlineCancelledRef = useRef(false)
+  // Vosk 的 partial 会在每个停顿后重置，需要单独累积已确定的分段
+  const offlineFinalTextRef = useRef('')
   // 输入法下 state 可能滞后，保存时以 DOM 值为准
   const contentRef = useRef<HTMLTextAreaElement>(null)
   const locationRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    let alive = true
+    void isVoskModelReady().then((value) => {
+      if (alive) setOfflineReady(value)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -157,6 +184,10 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
     return () => {
       recognitionRef.current?.stop()
       recognitionRef.current = null
+      if (offlineStopRef.current) {
+        void offlineStopRef.current()
+        offlineStopRef.current = null
+      }
       if (nativeListenersRef.current.length > 0) {
         void import('@capacitor-community/speech-recognition')
           .then(({ SpeechRecognition: NativeSpeech }) => NativeSpeech.stop())
@@ -167,9 +198,76 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
     }
   }, [])
 
+  const stopOfflineListening = () => {
+    const stop = offlineStopRef.current
+    offlineStopRef.current = null
+    setListening(false)
+    if (stop) void stop()
+  }
+
+  /** 用本地 Vosk 模型识别；partial 实时覆盖，最终结果替换 partial */
+  const beginOfflineListening = async () => {
+    offlineStartingRef.current = true
+    offlineCancelledRef.current = false
+    offlineFinalTextRef.current = ''
+    const base = content
+    setListening(true)
+    try {
+      const stop = await startOfflineListening({
+        onResult: (text, isFinal) => {
+          const value = text.trim()
+          if (!value) return
+          if (isFinal) offlineFinalTextRef.current += value
+          const merged = `${offlineFinalTextRef.current}${isFinal ? '' : value}`
+          if (!merged) return
+          setContent(base ? `${base.trimEnd()}\n${merged}` : merged)
+          if (error) setError('')
+        },
+        onError: (message) => {
+          logVoiceError(`offline: ${message}`)
+          toast(tr('离线语音识别失败：{msg}', { msg: message }))
+          setListening(false)
+        },
+      })
+      if (offlineCancelledRef.current) {
+        offlineCancelledRef.current = false
+        await stop()
+        return
+      }
+      offlineStopRef.current = stop
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      logVoiceError(`offline: ${message}`)
+      toast(message)
+      setListening(false)
+    } finally {
+      offlineStartingRef.current = false
+    }
+  }
+
+  /** 系统语音不可用时：已下载模型就直接回退，否则引导去下载 */
+  const fallbackToOffline = async () => {
+    const ready = offlineReady || (await isVoskModelReady())
+    if (!ready) {
+      setOfflinePrompt(true)
+      return
+    }
+    if (!offlineReady) setOfflineReady(true)
+    await beginOfflineListening()
+  }
+
   /** 点一下开始，再点一下停；第一次会申请麦克风权限 */
   const toggleListening = async () => {
     if (listening) {
+      if (offlineStopRef.current) {
+        stopOfflineListening()
+        return
+      }
+      if (offlineStartingRef.current) {
+        offlineCancelledRef.current = true
+        setListening(false)
+        return
+      }
       if (isNative()) {
         stopNativeListening()
         return
@@ -186,7 +284,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
         const available = await NativeSpeech.available()
         if (!available.available) {
           logVoiceError('native: 系统没有可用的语音识别服务')
-          toast(tr('当前设备不支持语音识别，请先安装系统语音服务'))
+          await fallbackToOffline()
           return
         }
         let permission = (await NativeSpeech.checkPermissions()).speechRecognition
@@ -256,7 +354,10 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
     }
 
     const Recognition = getSpeechRecognition()
-    if (!Recognition) return
+    if (!Recognition) {
+      await fallbackToOffline()
+      return
+    }
     try {
       if (navigator.mediaDevices?.getUserMedia) {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -286,6 +387,17 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
       const message = event?.error || 'unknown'
       logVoiceError(`web: ${message}`)
       setListening(false)
+      recognitionRef.current = null
+      if (
+        message === 'not-allowed' ||
+        message === 'service-not-allowed' ||
+        message === 'audio-capture'
+      ) {
+        // 避免随后的 onend 把离线识别的 listening 状态重置掉
+        recognition.onend = null
+        void fallbackToOffline()
+        return
+      }
       if (message === 'no-speech' || message === 'aborted') {
         toast(tr('没能听清，请再试一次'))
       } else {
@@ -353,6 +465,41 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
     } finally {
       setUploading(false)
       if (fileRef.current) fileRef.current.value = ''
+      if (cameraRef.current) cameraRef.current.value = ''
+    }
+  }
+
+  /** 原生拍照：压缩后按与相册选择相同的 Photo 结构追加 */
+  const capturePhoto = async () => {
+    if (photos.length >= MAX_PHOTOS || uploading) return
+    if (!isNative()) {
+      cameraRef.current?.click()
+      return
+    }
+    setUploading(true)
+    try {
+      const permission = await Camera.requestPermissions({ permissions: ['camera'] })
+      if (permission.camera !== 'granted') {
+        toast(tr('未获得相机权限'))
+        return
+      }
+      const photo = await Camera.getPhoto({
+        source: CameraSource.Camera,
+        resultType: CameraResultType.Base64,
+        quality: 80,
+        correctOrientation: true,
+      })
+      if (!photo.base64String) return
+      const mime = photo.format ? `image/${photo.format}` : 'image/jpeg'
+      const src = await compressDataUrl(`data:${mime};base64,${photo.base64String}`)
+      setPhotos((previous) =>
+        previous.length >= MAX_PHOTOS ? previous : [...previous, { id: uid(), src }],
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (!/cancel/i.test(message)) toast(tr('未获得相机权限'))
+    } finally {
+      setUploading(false)
     }
   }
 
@@ -468,22 +615,20 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
 {tr('撤销')}
                 </button>
               ) : null}
-              {speechSupported ? (
-                <button
-                  type="button"
-                  onClick={toggleListening}
-                  aria-label={listening ? tr('停止语音输入') : tr('语音输入')}
-                  className={cn(
-                    'press inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-caption',
-                    listening
-                      ? 'border-transparent bg-accent-soft text-accent'
-                      : 'border-line text-ink-2 hover:text-accent',
-                  )}
-                >
-                  {listening ? <StopCircle size={11} weight="fill" /> : <Microphone size={11} />}
-                  {listening ? tr('点击停止') : tr('语音')}
-                </button>
-              ) : null}
+              <button
+                type="button"
+                onClick={toggleListening}
+                aria-label={listening ? tr('停止语音输入') : tr('语音输入')}
+                className={cn(
+                  'press inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-caption',
+                  listening
+                    ? 'border-transparent bg-accent-soft text-accent'
+                    : 'border-line text-ink-2 hover:text-accent',
+                )}
+              >
+                {listening ? <StopCircle size={11} weight="fill" /> : <Microphone size={11} />}
+                {listening ? tr('点击停止') : tr('语音')}
+              </button>
               <button
                 type="button"
                 onClick={polish}
@@ -589,30 +734,49 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
           className="hidden"
           onChange={(event) => pickPhotos(event.target.files)}
         />
+        <input
+          ref={cameraRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={(event) => pickPhotos(event.target.files)}
+        />
         {photos.length > 0 ? (
           <PhotoStrip
             photos={photos}
             onRemove={(photoId) => setPhotos((previous) => previous.filter((item) => item.id !== photoId))}
           />
         ) : null}
-        <button
-          type="button"
-          disabled={photos.length >= MAX_PHOTOS || uploading}
-          onClick={() => fileRef.current?.click()}
-          className="press flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line bg-paper-2/40 py-3 text-body-sm text-ink-2 disabled:opacity-50"
-        >
-          {uploading ? (
-            <>
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink-3 border-t-transparent" />
-              {tr('处理中…')}
-            </>
-          ) : (
-            <>
-              {photos.length >= MAX_PHOTOS ? <ImageSquare size={16} /> : <Plus size={16} weight="bold" />}
-              {photos.length >= MAX_PHOTOS ? tr('已达到 9 张上限') : tr('从相册选择照片')}
-            </>
-          )}
-        </button>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            disabled={photos.length >= MAX_PHOTOS || uploading}
+            onClick={() => fileRef.current?.click()}
+            className="press flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line bg-paper-2/40 py-3 text-body-sm text-ink-2 disabled:opacity-50"
+          >
+            {photos.length >= MAX_PHOTOS ? <ImageSquare size={16} /> : <Plus size={16} weight="bold" />}
+            {photos.length >= MAX_PHOTOS ? tr('已达到 9 张上限') : tr('从相册选择')}
+          </button>
+          <button
+            type="button"
+            disabled={photos.length >= MAX_PHOTOS || uploading}
+            onClick={() => void capturePhoto()}
+            className="press flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line bg-paper-2/40 py-3 text-body-sm text-ink-2 disabled:opacity-50"
+          >
+            {uploading ? (
+              <>
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink-3 border-t-transparent" />
+                {tr('处理中…')}
+              </>
+            ) : (
+              <>
+                <CameraIcon size={16} />
+                {tr('拍照')}
+              </>
+            )}
+          </button>
+        </div>
         <p className="text-caption leading-4 text-ink-3">
           {tr('照片会压缩后保存在本地，登录云同步后自动上传到云端。')}
         </p>
@@ -635,6 +799,16 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
         message={tr('记录里的文字和照片都会一并删除。')}
         onClose={() => setConfirmDelete(false)}
         onConfirm={doDelete}
+      />
+
+      <ConfirmDialog
+        open={offlinePrompt}
+        title={tr('语音服务不可用')}
+        message={tr('当前设备语音服务不可用，可下载离线语音模型')}
+        confirmText={tr('去下载')}
+        tone="accent"
+        onClose={() => setOfflinePrompt(false)}
+        onConfirm={() => nav.navigate({ name: 'ocrModel' })}
       />
     </EditorScreen>
   )
