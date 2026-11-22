@@ -17,7 +17,7 @@ import type {
   TripView,
 } from './types'
 import { clearStore, deleteOne, getAll, getOne, putOne, type StoreName } from './db'
-import { isRemotePhoto, mergeMomentPhotos } from './photo-utils'
+import { LOCAL_PHOTO_PREFIX, isRemotePhoto, mergeMomentPhotos } from './photo-utils'
 import {
   CATEGORY_ORDER,
   clockToMinutes,
@@ -979,11 +979,30 @@ export interface SyncEntity {
 }
 
 /** 云端只同步 R2 地址；本地 data URL 照片上传完成前不写入 D1（避免撑爆单行 2MB 限制） */
+function isLocalSrc(value: unknown): boolean {
+  return typeof value === 'string' && LOCAL_PHOTO_PREFIX.test(value)
+}
+
+/**
+ * 推送前剔除只属于本机的 data URL：
+ * - 记录里还没上传的照片
+ * - 旅行封面 / 头像（体积大，D1 单行上限 2MB，上传失败会拖垮整次同步）
+ * 上传成功后这些字段会被替换成 R2 地址，下次同步自然带上。
+ */
 function stripLocalOnly(kind: SyncKind, data: unknown): unknown {
-  if (kind !== 'moments' || !data || typeof data !== 'object') return data
-  const moment = data as Record<string, unknown>
-  if (!Array.isArray(moment.photos)) return data
-  return { ...moment, photos: moment.photos.filter(isRemotePhoto) }
+  if (!data || typeof data !== 'object') return data
+  const row = data as Record<string, unknown>
+  if (kind === 'moments') {
+    if (!Array.isArray(row.photos)) return data
+    return { ...row, photos: row.photos.filter(isRemotePhoto) }
+  }
+  if (kind === 'trips' && isLocalSrc(row.coverImage)) {
+    return { ...row, coverImage: '' }
+  }
+  if (kind === 'profile' && isLocalSrc(row.avatar)) {
+    return { ...row, avatar: '' }
+  }
+  return data
 }
 
 /**
@@ -1072,4 +1091,13 @@ export async function applyRemoteEntities(
 
 export async function clearTombstones(): Promise<void> {
   await clearStore('tombstones')
+}
+
+/** 只清理在指定时间点之前产生的墓碑，避免误删推送期间新产生的删除记录 */
+export async function clearTombstonesBefore(ts: number): Promise<void> {
+  const tombs = await getAll<{ id: string; deletedAt: number }>('tombstones')
+  for (const tomb of tombs) {
+    // 严格小于：推送开始后（含同一毫秒）新产生的删除记录必须保留
+    if (tomb.deletedAt < ts) await deleteOne('tombstones', tomb.id)
+  }
 }

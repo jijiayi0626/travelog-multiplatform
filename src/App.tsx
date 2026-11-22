@@ -24,18 +24,15 @@ import { TripsPage } from './pages/TripsPage'
 import { TripDetailPage } from './pages/TripDetailPage'
 import { FootprintsPage } from './pages/FootprintsPage'
 import { AlbumPage } from './pages/AlbumPage'
-import { CloudGalleryPage } from './pages/CloudGalleryPage'
+import { ConsolePage } from './pages/ConsolePage'
 import { RecapPage } from './pages/RecapPage'
 import { ExpensesPage } from './pages/ExpensesPage'
-import { ProfilePage } from './pages/ProfilePage'
 import { TripEditor } from './pages/TripEditor'
 import { MomentEditor } from './pages/MomentEditor'
 import { ExpenseEditor } from './pages/ExpenseEditor'
 import { FootprintEditor } from './pages/FootprintEditor'
 import { PlanEditor } from './pages/PlanEditor'
-import { SyncPage } from './pages/SyncPage'
 import { AboutPage } from './pages/AboutPage'
-import { AdminPage } from './pages/AdminPage'
 import { isDevMode, subscribeDevMode } from './lib/dev-mode'
 
 const TABS: TabKey[] = ['plan', 'timeline', 'ledger', 'checklist', 'members']
@@ -227,7 +224,10 @@ export default function App() {
       const now = Date.now()
       if (!opts.force && now - lastRun < (opts.minGapMs ?? 60_000)) return
       lastRun = now
-      void runSync({ pullOnly: !hasPendingLocalChanges() }).catch(() => {})
+      void runSync({ pullOnly: !hasPendingLocalChanges() }).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error)
+        window.dispatchEvent(new CustomEvent('travelog:sync-error', { detail: { message } }))
+      })
     }
 
     // 0 表示实时：约 20 秒检查一次，配合修改后的 1.5 秒延迟同步
@@ -339,6 +339,31 @@ export default function App() {
     return () => window.removeEventListener('travelog:ai-queued', onQueued)
   }, [lang, toast])
 
+  // 同步结果反馈：有远端变更才刷新界面；失败提示做 60 秒去重，避免自动同步刷屏
+  useEffect(() => {
+    let lastErrorAt = 0
+    const onDone = (event: Event) => {
+      const detail = (event as CustomEvent<{ pulled?: number; removed?: number }>).detail
+      if ((detail?.pulled ?? 0) > 0 || (detail?.removed ?? 0) > 0) {
+        setTick((value) => value + 1)
+      }
+    }
+    const onError = (event: Event) => {
+      const now = Date.now()
+      if (now - lastErrorAt < 60_000) return
+      const message = (event as CustomEvent<{ message?: string }>).detail?.message
+      if (!message) return
+      lastErrorAt = now
+      toast(message.includes('离线') ? '当前离线，恢复网络后会自动继续同步' : `同步失败：${message}`)
+    }
+    window.addEventListener('travelog:sync-done', onDone)
+    window.addEventListener('travelog:sync-error', onError)
+    return () => {
+      window.removeEventListener('travelog:sync-done', onDone)
+      window.removeEventListener('travelog:sync-error', onError)
+    }
+  }, [toast])
+
   const renderView = () => {
     if (!ready) return <StartupPlaceholder />
     switch (view.name) {
@@ -351,13 +376,13 @@ export default function App() {
       case 'album':
         return <AlbumPage />
       case 'cloud':
-        return <CloudGalleryPage />
+        return <ConsolePage tab="cloud" showAdmin={devMode} />
       case 'recap':
         return <RecapPage />
       case 'expenses':
         return <ExpensesPage />
       case 'profile':
-        return <ProfilePage />
+        return <ConsolePage tab="user" showAdmin={devMode} />
       case 'tripEditor':
         return <TripEditor id={view.id} template={view.template} />
       case 'momentEditor':
@@ -369,11 +394,15 @@ export default function App() {
       case 'footprintEditor':
         return <FootprintEditor />
       case 'sync':
-        return <SyncPage mode={view.mode} />
+        return <ConsolePage tab="sync" showAdmin={devMode} mode={view.mode} />
       case 'about':
         return <AboutPage />
       case 'admin':
-        return devMode ? <AdminPage /> : <DevModeRequired onOpenAbout={() => navigate({ name: 'about' })} />
+        return devMode ? (
+          <ConsolePage tab="admin" showAdmin />
+        ) : (
+          <DevModeRequired onOpenAbout={() => navigate({ name: 'about' })} />
+        )
     }
   }
 

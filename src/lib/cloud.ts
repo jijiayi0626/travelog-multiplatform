@@ -126,12 +126,25 @@ export async function api<T>(
       signal: controller.signal,
     })
     const text = await response.text()
-    const data = text ? (JSON.parse(text) as T & { error?: string; code?: string }) : ({} as T)
+    let payload: (T & { error?: string; code?: string }) | null = null
+    if (text) {
+      try {
+        payload = JSON.parse(text) as T & { error?: string; code?: string }
+      } catch {
+        throw new ApiError(
+          response.ok
+            ? '服务器返回了无法识别的数据，请检查 API 地址'
+            : `服务器错误（${response.status}），请稍后重试`,
+          response.status,
+        )
+      }
+    }
+    const data = (payload ?? {}) as T & { error?: string; code?: string }
     if (!response.ok) {
       throw new ApiError(
-        (data as { error?: string }).error || `请求失败（${response.status}）`,
+        data.error || `请求失败（${response.status}）`,
         response.status,
-        (data as { code?: string }).code,
+        data.code,
       )
     }
     return data as T

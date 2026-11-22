@@ -49,7 +49,7 @@ import {
 } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
 import { answerTripQuestion, generatePlan, generatePackingList } from '../lib/ai'
-import { isSignedIn, leaveTripShare, listTripShares } from '../lib/cloud'
+import { deleteCloudPhoto, isSignedIn, leaveTripShare, listTripShares } from '../lib/cloud'
 import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import {
   CATEGORY_COLOR,
@@ -315,7 +315,17 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
   }
 
   const doDeleteTrip = async () => {
+    // 删除前先收集云端文件，避免 R2 里留下孤儿图片
+    const moments = await listMoments(tripId)
+    const photoIds = moments
+      .flatMap((moment) => moment.photos.map((photo) => photo.cloudId))
+      .filter((id): id is string => Boolean(id))
+    const coverId = trip?.coverCloudId
     await deleteTrip(tripId)
+    if (isSignedIn()) {
+      if (coverId) void deleteCloudPhoto(coverId).catch(() => undefined)
+      for (const id of photoIds) void deleteCloudPhoto(id).catch(() => undefined)
+    }
     bump()
     toast(tr('旅程已删除'))
     nav.navigate({ name: 'trips' })

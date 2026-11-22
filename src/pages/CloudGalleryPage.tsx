@@ -15,7 +15,7 @@ import { EmptyArt } from '../components/EmptyArt'
 
 const PAGE_SIZE = 60
 
-export function CloudGalleryPage() {
+export function CloudGalleryPage({ embedded = false }: { embedded?: boolean }) {
   const nav = useNav()
   const toast = useToast()
   const { tr } = useI18n()
@@ -104,15 +104,17 @@ export function CloudGalleryPage() {
   }
 
   return (
-    <div className="pt-3">
-      <div className="flex items-center gap-2.5">
-        <IconButton label={tr('返回')} onClick={() => nav.back()}>
-          <ArrowLeft size={18} />
-        </IconButton>
-        <span className="text-note text-ink-3">{tr('我的 / 云相册')}</span>
-      </div>
+    <div className={embedded ? '' : 'pt-3'}>
+      {!embedded && (
+        <div className="flex items-center gap-2.5">
+          <IconButton label={tr('返回')} onClick={() => nav.back()}>
+            <ArrowLeft size={18} />
+          </IconButton>
+          <span className="text-note text-ink-3">{tr('我的 / 云相册')}</span>
+        </div>
+      )}
 
-      <div className="mx-auto mt-4 w-full max-w-[820px] space-y-5 pb-8">
+      <div className={embedded ? 'mx-auto w-full max-w-[820px] space-y-5 pb-8' : 'mx-auto mt-4 w-full max-w-[820px] space-y-5 pb-8'}>
         <header className="flex items-end justify-between gap-3">
           <div className="min-w-0">
             <p className="text-caption uppercase tracking-[0.22em] text-ink-3">Cloud Album</p>

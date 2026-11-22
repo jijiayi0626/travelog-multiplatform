@@ -39,6 +39,8 @@ function rootOf(view: View): RootKey {
       return 'expenses'
     case 'profile':
     case 'sync':
+    case 'cloud':
+    case 'admin':
     case 'about':
       return 'profile'
     default:
@@ -52,7 +54,10 @@ function isRoot(view: View): boolean {
     view.name === 'album' ||
     view.name === 'footprints' ||
     view.name === 'expenses' ||
-    view.name === 'profile'
+    view.name === 'profile' ||
+    view.name === 'sync' ||
+    view.name === 'cloud' ||
+    view.name === 'admin'
   )
 }
 

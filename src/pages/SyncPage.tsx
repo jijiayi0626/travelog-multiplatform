@@ -32,7 +32,7 @@ import {
   type AuthConfig,
   type HealthInfo,
 } from '../lib/cloud'
-import { pullOverwrite, runSync } from '../lib/sync-engine'
+import { bootstrapAfterAuth, pullOverwrite, runSync } from '../lib/sync-engine'
 import { getProfile, saveProfile } from '../lib/repo'
 import { copyText, relativeTime } from '../lib/utils'
 import { cn } from '../lib/cn'
@@ -53,7 +53,7 @@ function formatDate(ts: number): string {
   return new Date(ts).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
 }
 
-export function SyncPage({ mode }: { mode?: 'login' | 'register' }) {
+export function SyncPage({ mode, embedded = false }: { mode?: 'login' | 'register'; embedded?: boolean }) {
   const nav = useNav()
   const toast = useToast()
   const { bump } = useRefresh()
@@ -167,6 +167,31 @@ export function SyncPage({ mode }: { mode?: 'login' | 'register' }) {
     }, 400)
   }
 
+  /**
+   * 登录/注册成功后的收尾：必须先拉云端覆盖本地，再应用昵称。
+   * 否则新设备上的本地种子数据（updatedAt 最新）会把云端资料顶掉。
+   */
+  const finishAuth = async (nickname: string, successMessage: string) => {
+    let empty = true
+    try {
+      const boot = await bootstrapAfterAuth()
+      empty = boot.empty
+    } catch (error) {
+      console.warn('[sync] 首次拉取失败：', error instanceof Error ? error.message : error)
+    }
+    await applyNickname(nickname)
+    setConfig(getCloudConfig())
+    if (empty) {
+      toast(successMessage)
+      requestImmediateSync()
+    } else {
+      // 不调用 bump()：bump 会把本地重新标记为脏并触发全量推送，刚恢复完没必要
+      window.dispatchEvent(new CustomEvent('travelog:sync-done', { detail: { at: Date.now() } }))
+      toast(tr('已从云端恢复，正在校验本地数据…'))
+      requestImmediateSync()
+    }
+  }
+
   const doRegister = async () => {
     const name = (nicknameRef.current?.value ?? '').trim()
     if (!name) {
@@ -181,11 +206,8 @@ export function SyncPage({ mode }: { mode?: 'login' | 'register' }) {
     try {
       saveCloudConfig({ baseUrl: baseUrl.trim() })
       const auth = await registerCloud(name, regUsername.trim(), regPassword, regInvite.trim())
-      await applyNickname(auth.nickname)
-      setConfig(getCloudConfig())
       setResult(tr('账号已创建，同步码：{code}', { code: auth.syncCode }))
-      toast(tr('注册成功，正在同步数据…'))
-      requestImmediateSync()
+      await finishAuth(auth.nickname, tr('注册成功，正在同步数据…'))
     } catch (error) {
       toast(error instanceof Error ? error.message : tr('注册失败'))
     } finally {
@@ -203,10 +225,7 @@ export function SyncPage({ mode }: { mode?: 'login' | 'register' }) {
       try {
         saveCloudConfig({ baseUrl: baseUrl.trim() })
         const auth = await loginWithPassword(loginUsername.trim(), loginPassword)
-        await applyNickname(auth.nickname)
-        setConfig(getCloudConfig())
-        toast(tr('登录成功，正在同步数据…'))
-        requestImmediateSync()
+        await finishAuth(auth.nickname, tr('登录成功，正在同步数据…'))
       } catch (error) {
         toast(error instanceof Error ? error.message : tr('登录失败'))
       } finally {
@@ -223,10 +242,10 @@ export function SyncPage({ mode }: { mode?: 'login' | 'register' }) {
     try {
       saveCloudConfig({ baseUrl: baseUrl.trim() })
       const auth = await loginCloud(code.trim())
-      await applyNickname(auth.nickname)
-      setConfig(getCloudConfig())
-      toast(auth.needsCredentials ? tr('已用同步码登录，建议设置账号密码') : tr('登录成功，正在同步数据…'))
-      requestImmediateSync()
+      await finishAuth(
+        auth.nickname,
+        auth.needsCredentials ? tr('已用同步码登录，建议设置账号密码') : tr('登录成功，正在同步数据…'),
+      )
     } catch (error) {
       toast(error instanceof Error ? error.message : tr('登录失败'))
     } finally {
@@ -333,7 +352,7 @@ export function SyncPage({ mode }: { mode?: 'login' | 'register' }) {
     try {
       const { pulled } = await pullOverwrite()
       setConfig(getCloudConfig())
-      bump()
+      window.dispatchEvent(new CustomEvent('travelog:sync-done', { detail: { at: Date.now(), pulled } }))
       setResult(tr('已从云端恢复 {n} 条数据', { n: pulled }))
       toast(pulled > 0 ? tr('已用云端数据覆盖本机') : tr('云端暂无数据，本机未改动'))
     } catch (error) {
@@ -357,15 +376,17 @@ export function SyncPage({ mode }: { mode?: 'login' | 'register' }) {
   }
 
   return (
-    <div className="pt-3">
-      <div className="flex items-center gap-2.5">
-        <IconButton label={tr('返回')} onClick={() => nav.back()}>
-          <ArrowLeft size={18} />
-        </IconButton>
-        <span className="text-note text-ink-3">{tr('我的 / 云同步')}</span>
-      </div>
+    <div className={embedded ? '' : 'pt-3'}>
+      {!embedded && (
+        <div className="flex items-center gap-2.5">
+          <IconButton label={tr('返回')} onClick={() => nav.back()}>
+            <ArrowLeft size={18} />
+          </IconButton>
+          <span className="text-note text-ink-3">{tr('我的 / 云同步')}</span>
+        </div>
+      )}
 
-      <div className="mx-auto mt-4 w-full max-w-[640px] space-y-4 pb-6">
+      <div className={embedded ? 'mx-auto w-full max-w-[640px] space-y-4 pb-6' : 'mx-auto mt-4 w-full max-w-[640px] space-y-4 pb-6'}>
         {!signedIn ? (
           <section className="card overflow-hidden">
             <div className="flex items-start gap-3 p-5 pb-4">

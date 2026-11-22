@@ -26,6 +26,7 @@ import {
 import type { AppStats, Profile } from '../lib/types'
 import { exportAll, getProfile, importAll, saveProfile, stats } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
+import { hasPendingLocalChanges, runSync } from '../lib/sync-engine'
 import { useI18n, useNav, useRefresh, useToast } from '../lib/app-context'
 import { ACCENTS, type AccentName, currentTheme, getAccent, setAccent, setThemeMode } from '../lib/theme'
 import { compressImage, downloadText, readTextFile, relativeTime } from '../lib/utils'
@@ -81,7 +82,7 @@ const EMPTY_STATS: AppStats = {
   planDoneCount: 0,
 }
 
-export function ProfilePage() {
+export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
   const nav = useNav()
   const toast = useToast()
   const { bump } = useRefresh()
@@ -116,6 +117,7 @@ export function ProfilePage() {
   const [aiJobs, setAIJobs] = useState<AIJob[]>(() => getAIJobs())
   const [guestTools, setGuestTools] = useState(false)
   const [avatarBusy, setAvatarBusy] = useState(false)
+  const [syncBusy, setSyncBusy] = useState(false)
   const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null)
   const [lastBackupAt, setLastBackupAt] = useState(() =>
     Number(localStorage.getItem('travelog.lastBackupAt') || 0),
@@ -560,13 +562,30 @@ export function ProfilePage() {
           </button>
           <button
             type="button"
-            className="chip px-2.5 py-1 text-caption"
-            onClick={() => {
-              window.dispatchEvent(new Event('travelog:sync-now'))
-              toast('已开始同步')
+            disabled={syncBusy}
+            className="chip px-2.5 py-1 text-caption disabled:opacity-60"
+            onClick={async () => {
+              if (syncBusy) return
+              setSyncBusy(true)
+              try {
+                const result = await runSync({ pullOnly: !hasPendingLocalChanges() })
+                const uploaded = result.photos.uploaded
+                if (result.pullOnly && result.pulled === 0) {
+                  toast('已是最新，无需同步')
+                } else {
+                  toast(
+                    `同步完成：上传 ${result.pushed}，拉取 ${result.pulled}` +
+                      (uploaded > 0 ? `，图片 ${uploaded} 张` : ''),
+                  )
+                }
+              } catch (error) {
+                toast(error instanceof Error ? error.message : '同步失败')
+              } finally {
+                setSyncBusy(false)
+              }
             }}
           >
-            立即同步
+            {syncBusy ? '同步中…' : '立即同步'}
           </button>
         </div>
       </div>
@@ -858,12 +877,14 @@ export function ProfilePage() {
 
   return (
     <div className="mx-auto w-full max-w-[820px] space-y-5">
-      <header className="pt-4">
-        <p className="text-caption uppercase tracking-[0.22em] text-ink-3">Account</p>
-        <h1 className="mt-1.5 text-heading font-semibold leading-none tracking-tight text-ink sm:text-display">
-          {t('profile.title')}
-        </h1>
-      </header>
+      {!embedded && (
+        <header className="pt-4">
+          <p className="text-caption uppercase tracking-[0.22em] text-ink-3">Account</p>
+          <h1 className="mt-1.5 text-heading font-semibold leading-none tracking-tight text-ink sm:text-display">
+            {t('profile.title')}
+          </h1>
+        </header>
+      )}
 
       <section className="flex items-center gap-3.5 border-y border-line py-4">
         <Avatar name={profile?.nickname ?? tr('旅人')} src={profile?.avatar || undefined} size={56} />

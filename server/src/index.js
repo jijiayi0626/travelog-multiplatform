@@ -1448,6 +1448,9 @@ async function handlePush(request, env) {
   let invalid = 0
   const statements = []
   const now = Date.now()
+  // 单行 JSON 超过这个体积（常见于未上传的 data URL 图片）直接跳过，
+  // 否则会把整个 batch 打挂，导致用户一直同步失败
+  const MAX_ENTITY_BYTES = 1_500_000
 
   for (const item of incoming) {
     const kind = String(item.kind || '')
@@ -1460,9 +1463,17 @@ async function handlePush(request, env) {
     const tripId = kind === 'trips' ? id : String(item.data?.tripId || '')
     const ownerId = tripId && shareMap.has(tripId) ? shareMap.get(tripId) : user.id
 
-    const updatedAt = Number(item.updatedAt) || now
+    // 客户端时钟可能不准：限制在 now+5 分钟内，避免未来时间戳永久压住后续更新
+    const rawUpdatedAt = Number(item.updatedAt)
+    const updatedAt = Number.isFinite(rawUpdatedAt) && rawUpdatedAt > 0
+      ? Math.min(rawUpdatedAt, now + 5 * 60 * 1000)
+      : now
     const deleted = item.deleted ? 1 : 0
     const data = item.deleted ? '{}' : JSON.stringify(item.data ?? {})
+    if (data.length > MAX_ENTITY_BYTES) {
+      invalid++
+      continue
+    }
 
     statements.push(
       env.DB.prepare(

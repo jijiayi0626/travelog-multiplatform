@@ -64,7 +64,7 @@ import {
 
 type Tab = 'users' | 'codes' | 'photos' | 'ai' | 'site'
 
-export function AdminPage() {
+export function AdminPage({ embedded = false }: { embedded?: boolean }) {
   const nav = useNav()
   const toast = useToast()
   const { tr } = useI18n()
@@ -229,11 +229,13 @@ export function AdminPage() {
 
   if (!signedIn) {
     return (
-      <div className="pt-3">
+      <div className={embedded ? '' : 'pt-3'}>
         <div className="flex items-center gap-2.5">
-          <IconButton label={tr('返回')} onClick={() => nav.back()}>
-            <ArrowLeft size={18} />
-          </IconButton>
+          {!embedded && (
+            <IconButton label={tr('返回')} onClick={() => nav.back()}>
+              <ArrowLeft size={18} />
+            </IconButton>
+          )}
           <span className="text-note text-ink-3">{tr('我的 / 管理面板')}</span>
         </div>
 
@@ -282,11 +284,13 @@ export function AdminPage() {
   /* ---------------- 已登录 ---------------- */
 
   return (
-    <div className="pt-3">
+    <div className={embedded ? '' : 'pt-3'}>
       <div className="flex items-center gap-2.5">
-        <IconButton label={tr('返回')} onClick={() => nav.back()}>
-          <ArrowLeft size={18} />
-        </IconButton>
+        {!embedded && (
+          <IconButton label={tr('返回')} onClick={() => nav.back()}>
+            <ArrowLeft size={18} />
+          </IconButton>
+        )}
         <span className="min-w-0 truncate text-note text-ink-3">
           {tr('我的 / 管理面板')}
           <span className="text-ink-2"> · {session?.username}</span>

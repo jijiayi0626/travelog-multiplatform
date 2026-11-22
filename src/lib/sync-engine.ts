@@ -4,7 +4,13 @@ import {
   saveCloudConfig,
   type CloudConfig,
 } from './cloud'
-import { applyRemoteEntities, exportAllEntities, replaceAllWithRemote, type SyncEntity } from './repo'
+import {
+  applyRemoteEntities,
+  clearTombstonesBefore,
+  exportAllEntities,
+  replaceAllWithRemote,
+  type SyncEntity,
+} from './repo'
 import { uploadPendingImages, type PhotoUploadResult } from './photo-sync'
 
 export interface SyncResult {
@@ -57,6 +63,12 @@ export function markLocalChanges(): void {
 
 export function hasPendingLocalChanges(): boolean {
   return localVersion !== syncedVersion || readDirty()
+}
+
+/** 本地已经和云端一致：清掉脏标记，避免下一轮继续全量推送 */
+export function markSynced(): void {
+  syncedVersion = localVersion
+  writeDirty(false)
 }
 
 const PUSH_BATCH = 150
@@ -112,7 +124,14 @@ async function doRunSync(pullOnly: boolean): Promise<SyncResult> {
 
   if (!navigator.onLine) throw new Error('当前离线，联网后再同步')
 
+  // 已经有手动/定时同步在跑时，取消排队中的自动同步，避免重复推送
+  if (timer !== null) {
+    window.clearTimeout(timer)
+    timer = null
+  }
+
   let photos = EMPTY_PHOTO_RESULT
+  let photosClean = false
   let versionAfterUpload = localVersion
   let pushed = 0
   let skipped = 0
@@ -121,6 +140,8 @@ async function doRunSync(pullOnly: boolean): Promise<SyncResult> {
     // 0. 先把本机 data URL 图片（记录照片 / 封面 / 头像）传到 R2
     try {
       photos = await uploadPendingImages()
+      // 上传流程整体异常时 failed>0、remaining 可能是 0，绝不能当成已经干净
+      photosClean = photos.remaining === 0 && photos.failed === 0
       if (photos.uploaded > 0) {
         markLocalChanges()
         versionAfterUpload = localVersion
@@ -128,9 +149,11 @@ async function doRunSync(pullOnly: boolean): Promise<SyncResult> {
     } catch (error) {
       console.warn('[sync] 图片上传失败：', error instanceof Error ? error.message : error)
       photos = { ...EMPTY_PHOTO_RESULT, failed: 1 }
+      photosClean = false
     }
 
-    // 1. 推送
+    // 1. 推送（先记时间点，推送成功后只清理这之前的墓碑）
+    const pushStartedAt = Date.now()
     const local = await exportAllEntities()
     for (let index = 0; index < local.length; index += PUSH_BATCH) {
       const batch = local.slice(index, index + PUSH_BATCH)
@@ -138,6 +161,7 @@ async function doRunSync(pullOnly: boolean): Promise<SyncResult> {
       pushed += result.applied
       skipped += result.skipped ?? 0
     }
+    await clearTombstonesBefore(pushStartedAt)
   }
 
   // 2. 拉取
@@ -168,10 +192,12 @@ async function doRunSync(pullOnly: boolean): Promise<SyncResult> {
   const at = Date.now()
   saveCloudConfig({ cursor, lastSyncAt: at })
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('travelog:sync-done', { detail: { at } }))
+    window.dispatchEvent(
+      new CustomEvent('travelog:sync-done', { detail: { at, pushed, pulled, removed } }),
+    )
   }
   // 推送期间没有新的本地改动，且图片全部传完，才算这一版已经同步干净
-  if (!pullOnly && localVersion === versionAfterUpload && photos.remaining === 0) {
+  if (!pullOnly && localVersion === versionAfterUpload && photosClean) {
     syncedVersion = versionAfterUpload
     writeDirty(false)
   }
@@ -209,17 +235,61 @@ export async function pullOverwrite(): Promise<{ pulled: number }> {
   const live = all.filter((entity) => !entity.deleted)
   const at = Date.now()
   if (live.length === 0) {
+    // 云端为空（新账号）：保留本地数据，并标记为待推送，避免本地资料一直传不上去
     saveCloudConfig({ cursor, lastSyncAt: at })
+    markLocalChanges()
     return { pulled: 0 }
   }
   const applied = await replaceAllWithRemote(live)
   saveCloudConfig({ cursor, lastSyncAt: at })
+  // 覆盖后本地与云端一致，必须清脏标记，否则会立刻把全量数据再推一遍
+  markSynced()
   return { pulled: applied }
 }
 
-let timer: number | null = null
+/**
+ * 登录 / 注册成功后的初始化：先以云端为准拉一次，云端为空则保留本地。
+ * 必须在推送之前调用，否则新设备上的本地种子数据会覆盖云端。
+ */
+export async function bootstrapAfterAuth(): Promise<{ pulled: number; empty: boolean }> {
+  const { pulled } = await pullOverwrite()
+  return { pulled, empty: pulled === 0 }
+}
 
-/** 写操作后短延迟触发一次双向同步，接近实时 */
+let timer: number | null = null
+let retryTimer: number | null = null
+let retryCount = 0
+const RETRY_DELAYS = [10_000, 30_000, 60_000]
+
+function emitSyncError(error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error)
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('travelog:sync-error', { detail: { message } }))
+  }
+}
+
+function autoSyncOnce(): void {
+  runSync()
+    .then(() => {
+      retryCount = 0
+    })
+    .catch((error) => {
+      console.warn('[sync] 自动同步失败：', error?.message ?? error)
+      emitSyncError(error)
+      const config = getCloudConfig()
+      if (!config.autoSync || !config.token || !navigator.onLine) return
+      const delay = RETRY_DELAYS[retryCount]
+      if (delay === undefined) return
+      retryCount += 1
+      if (retryTimer !== null) window.clearTimeout(retryTimer)
+      retryTimer = window.setTimeout(() => {
+        retryTimer = null
+        autoSyncOnce()
+      }, delay)
+    })
+}
+
+/** 写操作后短延迟触发一次双向同步，接近实时；失败会退避重试（10s/30s/60s） */
 export function scheduleAutoSync(delay = 2000): void {
   // 先记下本地改动；即使自动同步关闭，下次手动同步也能识别
   markLocalChanges()
@@ -227,10 +297,10 @@ export function scheduleAutoSync(delay = 2000): void {
   if (!config.autoSync || !config.token) return
   if (!navigator.onLine) return
   if (timer !== null) window.clearTimeout(timer)
+  // 新一次写操作视为新一轮同步，若不在重试退避中则重置重试计数
+  if (retryTimer === null) retryCount = 0
   timer = window.setTimeout(() => {
     timer = null
-    runSync().catch((error) => {
-      console.warn('[sync] 自动同步失败：', error?.message)
-    })
+    autoSyncOnce()
   }, delay)
 }
