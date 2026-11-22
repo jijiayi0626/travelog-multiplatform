@@ -118,21 +118,23 @@ function triggerAt(plan: Plan, trip: Trip, leadMinutes: number): number | null {
 }
 
 /** 页面关闭后 Web 通知不可用；优先走 Service Worker，安卓 Chrome 不支持 new Notification */
-async function showWebNotification(title: string, body: string, tag: string): Promise<void> {
-  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
+async function showWebNotification(title: string, body: string, tag: string): Promise<boolean> {
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false
   try {
     const registration = await navigator.serviceWorker?.getRegistration()
     if (registration) {
       await registration.showNotification(title, { body, tag })
-      return
+      return true
     }
   } catch {
     /* 继续尝试构造函数 */
   }
   try {
     new Notification(title, { body, tag })
+    return true
   } catch {
     /* 部分浏览器禁止页面直接构造通知 */
+    return false
   }
 }
 
@@ -226,6 +228,88 @@ export async function notifyTripCountdown(trip: Trip, pending: number): Promise<
 
   await showWebNotification(title, body, `trip-countdown:${trip.id}`)
   localStorage.setItem(key, stamp)
+}
+
+/** 只查询通知权限，不弹授权框；用于新手引导等需要回显已有状态的场景 */
+export async function hasNotificationPermission(): Promise<boolean> {
+  if (native) {
+    try {
+      return (await LocalNotifications.checkPermissions()).display === 'granted'
+    } catch {
+      return false
+    }
+  }
+  return typeof Notification !== 'undefined' && Notification.permission === 'granted'
+}
+
+/** 设置页测试通知：立刻发一条，确认权限、频道与系统通知都正常 */
+export async function sendTestNotification(): Promise<boolean> {
+  const title = '旅记 · 通知已开启'
+  const body = '出发倒计时和日程提醒会在这里出现'
+  if (native) {
+    try {
+      const status = await LocalNotifications.checkPermissions()
+      if (status.display !== 'granted') return false
+      await ensureChannel()
+      await LocalNotifications.schedule({
+        notifications: [
+          {
+            id: 991002,
+            title,
+            body,
+            channelId: CHANNEL_ID,
+            schedule: { at: new Date(Date.now() + 1200), allowWhileIdle: true },
+          },
+        ],
+      })
+      return true
+    } catch {
+      return false
+    }
+  }
+  return showWebNotification(title, body, 'travelog-test')
+}
+
+/** 每日行程提醒：固定 id，避免重复注册；偏好写入 localStorage */
+export const DAILY_REMINDER_ID = 991001
+const DAILY_KEY = 'travelog.dailyReminder'
+
+export function getDailyReminderEnabled(): boolean {
+  try {
+    return localStorage.getItem(DAILY_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+export async function setDailyReminderEnabled(enabled: boolean): Promise<boolean> {
+  if (!native) return false
+  try {
+    // 无论开还是关都先取消同 id，确保不会残留或重复注册
+    await LocalNotifications.cancel({ notifications: [{ id: DAILY_REMINDER_ID }] })
+    if (!enabled) {
+      localStorage.setItem(DAILY_KEY, '0')
+      return true
+    }
+    const status = await LocalNotifications.checkPermissions()
+    if (status.display !== 'granted') return false
+    await ensureChannel()
+    await LocalNotifications.schedule({
+      notifications: [
+        {
+          id: DAILY_REMINDER_ID,
+          title: '旅记 · 今日行程',
+          body: '打开看看今天的安排，别忘了待办和天气',
+          channelId: CHANNEL_ID,
+          schedule: { on: { hour: 8, minute: 0 }, repeats: true, allowWhileIdle: true },
+        },
+      ],
+    })
+    localStorage.setItem(DAILY_KEY, '1')
+    return true
+  } catch {
+    return false
+  }
 }
 
 export async function cancelPlanReminder(planId: string): Promise<void> {

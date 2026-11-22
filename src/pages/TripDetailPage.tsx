@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Share } from '@capacitor/share'
 import {
   ArrowLeft,
   CalendarBlank,
@@ -59,6 +60,7 @@ import {
   shareBaseUrl,
 } from '../lib/cloud'
 import { runSync } from '../lib/sync-engine'
+import { isNative, shareTextFile } from '../lib/native'
 import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import {
   CATEGORY_COLOR,
@@ -290,11 +292,29 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
   const shareTrip = async () => {
     if (!trip) return
     const url = `${shareBaseUrl()}#/share/${trip.inviteCode}`
+    const title = trip.title || tr('未命名旅程')
+    const text = tr('{title} · 旅记行程', { title })
+    if (isNative()) {
+      try {
+        await Share.share({ title, text, url, dialogTitle: tr('分享行程') })
+      } catch {
+        /* 用户取消或系统失败，不打扰 */
+      }
+      return
+    }
+    if (typeof navigator.share === 'function') {
+      try {
+        await navigator.share({ title, text, url })
+      } catch {
+        /* 用户取消或分享失败，不打扰 */
+      }
+      return
+    }
     const ok = await copyText(url)
     toast(ok ? tr('分享链接已复制') : tr('复制失败，请手动复制'))
   }
 
-  const downloadOfflineTrip = () => {
+  const downloadOfflineTrip = async () => {
     if (!trip) return
     const escapeHtml = (value: string) =>
       value
@@ -371,7 +391,13 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
 </body>
 </html>`
     const safeName = (trip.title || tr('未命名旅程')).replace(/[\\/:*?"<>|]/g, '-')
-    downloadText(`行程-${safeName}.html`, html, 'text/html;charset=utf-8')
+    const filename = `行程-${safeName}.html`
+    if (isNative()) {
+      const ok = await shareTextFile(filename, html)
+      if (ok) toast(tr('离线行程已生成，可分享或保存'))
+      return
+    }
+    downloadText(filename, html, 'text/html;charset=utf-8')
     toast(tr('离线行程已下载'))
   }
 

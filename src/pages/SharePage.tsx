@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CalendarBlank, MapPin, ShareNetwork } from '@phosphor-icons/react'
+import { CalendarBlank, Copy, MapPin, ShareNetwork } from '@phosphor-icons/react'
 import type { SharedTrip, SharedTripPlan } from '../lib/cloud'
 import { fetchSharedTrip } from '../lib/cloud'
-import { useI18n } from '../lib/app-context'
+import { useI18n, useToast } from '../lib/app-context'
 import { cn } from '../lib/cn'
-import { PLAN_KIND_COLOR, PLAN_KIND_LABEL, coverClass, formatDate } from '../lib/utils'
+import { PLAN_KIND_COLOR, PLAN_KIND_LABEL, copyText, coverClass, formatDate } from '../lib/utils'
 
 export function SharePage({ code }: { code: string }) {
   const { tr } = useI18n()
+  const toast = useToast()
   const [data, setData] = useState<SharedTrip | null>(null)
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
@@ -38,6 +39,11 @@ export function SharePage({ code }: { code: string }) {
     }
     return [...map.entries()].sort((a, b) => a[0] - b[0])
   }, [data])
+
+  const copyInvite = async () => {
+    const ok = await copyText(code)
+    toast(ok ? tr('邀请码已复制，打开旅记 App 会自动提示加入') : tr('复制失败，请手动记录邀请码'))
+  }
 
   if (loading) {
     return (
@@ -159,6 +165,20 @@ export function SharePage({ code }: { code: string }) {
           </section>
         ))
       )}
+
+      <section className="card space-y-3 p-5 text-center">
+        <p className="text-title font-semibold tracking-tight text-ink">{tr('一起编辑这趟旅程')}</p>
+        <p className="mx-auto max-w-[34ch] text-note leading-5 text-ink-3">
+          {tr('复制邀请码，在旅记 App 里打开就会自动提示加入；也可以手动在「旅伴」页输入。')}
+        </p>
+        <button type="button" className="btn-primary w-full" onClick={copyInvite}>
+          <Copy size={16} />
+          {tr('加入这个行程')}
+        </button>
+        <p className="text-caption leading-4 text-ink-3">
+          {tr('需要先安装旅记 App 并登录。邀请码 {code} 仅用于加入当前行程。', { code })}
+        </p>
+      </section>
     </div>
   )
 }

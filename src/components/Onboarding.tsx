@@ -1,33 +1,101 @@
 import { useEffect, useState } from 'react'
+import { Capacitor } from '@capacitor/core'
 import { createPortal } from 'react-dom'
 import {
   ArrowRight,
+  BellSimple,
   Check,
   CloudArrowUp,
   Images,
   MapPinLine,
   MapTrifold,
+  Microphone,
+  ShieldCheck,
   Sparkle,
   Wallet,
   X,
 } from '@phosphor-icons/react'
 import { cn } from '../lib/cn'
 import { useI18n, useNav } from '../lib/app-context'
+import { isNative, requestLocationPermission } from '../lib/native'
+import {
+  ensureExactAlarmPermission,
+  ensureNotificationPermission,
+  hasNotificationPermission,
+} from '../lib/reminder'
 import { hasOnboarded, markOnboarded, subscribeOnboardingOpen } from '../lib/onboarding'
 
 const STEPS = [
   { key: 'welcome', Icon: MapTrifold },
+  { key: 'permissions', Icon: ShieldCheck },
   { key: 'sections', Icon: Images },
   { key: 'record', Icon: MapPinLine },
   { key: 'sync', Icon: CloudArrowUp },
   { key: 'member', Icon: Sparkle },
 ] as const
 
+type PermissionState = 'idle' | 'granted' | 'denied' | 'unsupported' | 'busy'
+
+/** 定位权限没有原生 check 接口，网页端 / WebView 支持时用 Permissions API 回显 */
+async function checkLocationGranted(): Promise<boolean> {
+  try {
+    if (!navigator.permissions) return false
+    const status = await navigator.permissions.query({ name: 'geolocation' })
+    return status.state === 'granted'
+  } catch {
+    return false
+  }
+}
+
+async function checkSpeechPermission(): Promise<PermissionState> {
+  if (!isNative()) return 'unsupported'
+  try {
+    const { SpeechRecognition } = await import('@capacitor-community/speech-recognition')
+    const available = await SpeechRecognition.available()
+    if (!available.available) return 'unsupported'
+    const permission = (await SpeechRecognition.checkPermissions()).speechRecognition
+    return permission === 'granted' ? 'granted' : 'idle'
+  } catch {
+    return 'unsupported'
+  }
+}
+
 export function Onboarding() {
   const { tr } = useI18n()
   const nav = useNav()
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState(0)
+  const [permissions, setPermissions] = useState<{
+    location: PermissionState
+    notification: PermissionState
+    speech: PermissionState
+  }>({ location: 'idle', notification: 'idle', speech: 'idle' })
+
+  // 进入权限步骤时回显系统里已有的授权状态，已授权的直接显示「已开启」
+  useEffect(() => {
+    if (!open || STEPS[step].key !== 'permissions') return
+    let alive = true
+    void (async () => {
+      const [location, notification, speech] = await Promise.all([
+        checkLocationGranted(),
+        hasNotificationPermission(),
+        checkSpeechPermission(),
+      ])
+      if (!alive) return
+      const notificationDenied =
+        !notification &&
+        typeof Notification !== 'undefined' &&
+        Notification.permission === 'denied'
+      setPermissions({
+        location: location ? 'granted' : 'idle',
+        notification: notification ? 'granted' : notificationDenied ? 'denied' : 'idle',
+        speech,
+      })
+    })()
+    return () => {
+      alive = false
+    }
+  }, [open, step])
 
   useEffect(() => {
     const unsubscribe = subscribeOnboardingOpen(() => {
@@ -84,6 +152,70 @@ export function Onboarding() {
     if (last) finish()
     else setStep((value) => Math.min(STEPS.length - 1, value + 1))
   }
+
+  const requestLocation = async () => {
+    setPermissions((prev) => ({ ...prev, location: 'busy' }))
+    const granted = await requestLocationPermission()
+    setPermissions((prev) => ({ ...prev, location: granted ? 'granted' : 'denied' }))
+  }
+
+  const requestNotification = async () => {
+    setPermissions((prev) => ({ ...prev, notification: 'busy' }))
+    const granted = await ensureNotificationPermission()
+    setPermissions((prev) => ({ ...prev, notification: granted ? 'granted' : 'denied' }))
+    // 精确闹钟只影响送达时间，仅 Android 需要，失败不阻塞通知授权
+    if (granted && Capacitor.getPlatform() === 'android') void ensureExactAlarmPermission()
+  }
+
+  const requestSpeech = async () => {
+    if (!isNative()) {
+      setPermissions((prev) => ({ ...prev, speech: 'unsupported' }))
+      return
+    }
+    setPermissions((prev) => ({ ...prev, speech: 'busy' }))
+    try {
+      const { SpeechRecognition } = await import('@capacitor-community/speech-recognition')
+      const available = await SpeechRecognition.available()
+      if (!available.available) {
+        setPermissions((prev) => ({ ...prev, speech: 'unsupported' }))
+        return
+      }
+      const result = await SpeechRecognition.requestPermissions()
+      setPermissions((prev) => ({
+        ...prev,
+        speech: result.speechRecognition === 'granted' ? 'granted' : 'denied',
+      }))
+    } catch {
+      setPermissions((prev) => ({ ...prev, speech: 'unsupported' }))
+    }
+  }
+
+  const permissionRows = [
+    {
+      key: 'location',
+      Icon: MapPinLine,
+      title: tr('位置权限'),
+      description: tr('用于记录足迹、给照片归类。'),
+      state: permissions.location,
+      onRequest: requestLocation,
+    },
+    {
+      key: 'notification',
+      Icon: BellSimple,
+      title: tr('通知权限'),
+      description: tr('用于出发倒计时和日程提醒。'),
+      state: permissions.notification,
+      onRequest: requestNotification,
+    },
+    {
+      key: 'speech',
+      Icon: Microphone,
+      title: tr('录音权限（可选）'),
+      description: tr('语音速记需要，部分设备不支持，可跳过。'),
+      state: permissions.speech,
+      onRequest: requestSpeech,
+    },
+  ]
 
   const copy = stepCopy(current.key, tr)
 
@@ -146,6 +278,51 @@ export function Onboarding() {
             </div>
           ) : null}
 
+          {current.key === 'permissions' ? (
+            <div className="mt-5 space-y-2">
+              {permissionRows.map(({ key, Icon, title, description, state, onRequest }) => {
+                const granted = state === 'granted'
+                return (
+                  <div
+                    key={key}
+                    className="flex items-start gap-3 rounded-xl border border-line bg-surface px-3 py-2.5"
+                  >
+                    <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-ink-2">
+                      <Icon size={15} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-body-sm text-ink">{title}</p>
+                      <p className="mt-0.5 text-caption leading-4 text-ink-3">{description}</p>
+                      {state === 'unsupported' ? (
+                        <p className="mt-1 text-caption text-ink-3">{tr('当前设备不支持，可跳过')}</p>
+                      ) : state === 'denied' ? (
+                        <p className="mt-1 text-caption text-ink-3">{tr('未开启，可稍后在系统设置里修改')}</p>
+                      ) : null}
+                    </div>
+                    {granted ? (
+                      <span className="flex shrink-0 items-center gap-1 rounded-full bg-accent-soft px-2 py-1 text-caption text-accent">
+                        <Check size={12} />
+                        {tr('已开启')}
+                      </span>
+                    ) : state === 'unsupported' ? null : (
+                      <button
+                        type="button"
+                        className="chip shrink-0 px-2.5 py-1 text-caption"
+                        disabled={state === 'busy'}
+                        onClick={onRequest}
+                      >
+                        {state === 'busy' ? tr('请求中…') : tr('开启')}
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+              <p className="pt-0.5 text-caption leading-4 text-ink-3">
+                {tr('都可以跳过，之后在系统设置里随时修改。')}
+              </p>
+            </div>
+          ) : null}
+
           <div className="mt-5 flex gap-1.5">
             {STEPS.map((item, index) => (
               <button
@@ -194,6 +371,11 @@ function stepCopy(
   tr: (zh: string, vars?: Record<string, string | number>) => string,
 ): { title: string; body: string } {
   switch (key) {
+    case 'permissions':
+      return {
+        title: tr('先给旅记几项权限'),
+        body: tr('位置用于足迹与照片归类，通知用于出发倒计时和日程提醒；录音可跳过，之后都能在系统设置里修改。'),
+      }
     case 'sections':
       return {
         title: tr('五个入口，各管一件事'),

@@ -190,6 +190,7 @@ export type View =
   | { name: 'sync'; mode?: 'login' | 'register' }
   | { name: 'about' }
   | { name: 'download' }
+  | { name: 'ocrModel' }
   | { name: 'changelog' }
   | { name: 'admin' }
   | { name: 'share'; code: string }

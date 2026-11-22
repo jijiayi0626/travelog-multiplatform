@@ -1,21 +1,6 @@
-import { Capacitor, registerPlugin } from '@capacitor/core'
 import type { Currency, ExpenseCategory } from './types'
 
-interface ReceiptTextRecognitionPlugin {
-  recognize(options: { image: string }): Promise<{ text: string }>
-}
-
-const ReceiptTextRecognition = registerPlugin<ReceiptTextRecognitionPlugin>('ReceiptTextRecognition')
-
-/** Android 包内用 ML Kit 本地识别，网页端仍走服务端模型 */
-export function hasOnDeviceOcr(): boolean {
-  return Capacitor.getPlatform() === 'android'
-}
-
-export async function recognizeReceiptText(image: string): Promise<string> {
-  const { text } = await ReceiptTextRecognition.recognize({ image })
-  return text || ''
-}
+export { recognizeReceiptText } from './ocr-model'
 
 export interface ParsedReceipt {
   amount: number
@@ -48,7 +33,7 @@ function detectCategory(text: string): ExpenseCategory {
   return 'other'
 }
 
-/** 从 ML Kit 识别出的文本里尽量猜出总金额，猜不到返回 null */
+/** 从识别出的文本里尽量猜出总金额，猜不到返回 null */
 export function parseReceiptText(raw: string): ParsedReceipt | null {
   const text = raw.replace(/，/g, ',').replace(/：/g, ':')
   const lines = text

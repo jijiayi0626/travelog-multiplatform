@@ -13,6 +13,7 @@ import {
   Info,
   MapTrifold,
   Microphone,
+  Scan,
   ShieldCheck,
   Wrench,
 } from '@phosphor-icons/react'
@@ -22,6 +23,7 @@ import { apiOrigin, getCloudConfig } from '../lib/cloud'
 import { isDevMode, setDevMode, subscribeDevMode } from '../lib/dev-mode'
 import { openOnboarding } from '../lib/onboarding'
 import { isNative } from '../lib/native'
+import { isOcrModelReady } from '../lib/ocr-model'
 import { ConfirmDialog } from '../components/ui'
 
 const REPO_URL = 'https://github.com/jijiayi0626/travelog-multiplatform'
@@ -167,6 +169,12 @@ export function AboutPage() {
           title={tr('更新日志')}
           value={tr('历史版本')}
           onClick={() => nav.navigate({ name: 'changelog' })}
+        />
+        <SettingRow
+          icon={<Scan size={17} />}
+          title={tr('离线识别模型')}
+          value={isOcrModelReady() ? tr('已下载') : tr('未下载')}
+          onClick={() => nav.navigate({ name: 'ocrModel' })}
         />
         <SettingRow
           icon={<BookOpen size={17} />}

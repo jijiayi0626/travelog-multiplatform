@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CloudSun, Drop, Wind } from '@phosphor-icons/react'
 import { fetchWeather, geocode, type WeatherNow } from '../lib/cloud'
 import { useI18n } from '../lib/app-context'
@@ -54,6 +54,62 @@ const COUNTRY_HINT: Record<string, string> = {
   中国: 'China',
 }
 
+interface WeatherCacheEntry {
+  place: string
+  weather: WeatherNow
+  at: number
+}
+
+const CACHE_TTL = 30 * 60 * 1000
+
+/** 目的地原文 → 结果缓存；多个页面同时展示时共用，避免重复请求 */
+const weatherCache = new Map<string, WeatherCacheEntry>()
+/** 目的地原文 → 进行中的请求；并发挂载时复用同一个 Promise */
+const weatherRequests = new Map<string, Promise<WeatherCacheEntry | null>>()
+
+function cachedWeather(key: string): WeatherCacheEntry | null {
+  const entry = weatherCache.get(key)
+  if (entry && Date.now() - entry.at < CACHE_TTL) return entry
+  return null
+}
+
+function requestWeather(
+  key: string,
+  candidates: Array<{ query: string; label: string }>,
+  countryKey: string,
+  country: string,
+): Promise<WeatherCacheEntry | null> {
+  const fresh = cachedWeather(key)
+  if (fresh) return Promise.resolve(fresh)
+
+  const pending = weatherRequests.get(key)
+  if (pending) return pending
+
+  const task = (async (): Promise<WeatherCacheEntry | null> => {
+    for (const candidate of candidates) {
+      const geo = await geocode(candidate.query)
+      if (!geo.found || geo.latitude == null || geo.longitude == null) continue
+      if (countryKey) {
+        // 后端用 language=zh，country 可能返回「日本」而不是「Japan」
+        const got = (geo.country || '').toLowerCase()
+        const ok = got.includes(countryKey) || got.includes(country.toLowerCase())
+        if (got && !ok) continue
+      }
+      const weather = await fetchWeather(geo.latitude, geo.longitude, 5)
+      const entry = { place: geo.name || candidate.label, weather, at: Date.now() }
+      weatherCache.set(key, entry)
+      return entry
+    }
+    return null
+  })()
+
+  weatherRequests.set(key, task)
+  void task.finally(() => {
+    if (weatherRequests.get(key) === task) weatherRequests.delete(key)
+  }).catch(() => undefined)
+  return task
+}
+
 /**
  * 行程天气：用目的地做地理编码，再拉未来几天预报。
  * 目的地常写成「日本 · 高松 / 直岛」，逐个候选查询，并用国家名校验；
@@ -63,14 +119,16 @@ export function WeatherCard({ destination, className }: { destination: string; c
   const { tr } = useI18n()
   const [weather, setWeather] = useState<WeatherNow | null>(null)
   const [place, setPlace] = useState('')
-  const [loading, setLoading] = useState(false)
+  const lastKey = useRef('')
 
   useEffect(() => {
     const raw = destination.trim()
-    if (!raw) {
+    if (raw !== lastKey.current) {
+      lastKey.current = raw
       setWeather(null)
-      return
+      setPlace('')
     }
+    if (!raw) return
 
     // 「日本 · 高松 / 直岛」→ 先试具体地名，再试整串
     const parts = raw
@@ -109,34 +167,31 @@ export function WeatherCard({ destination, className }: { destination: string; c
       (item, index, list) => list.findIndex((other) => other.query === item.query) === index,
     )
 
+    const fresh = cachedWeather(raw)
+    if (fresh) {
+      setPlace(fresh.place)
+      setWeather(fresh.weather)
+      return
+    }
+
+    // 已有旧结果时先展示，刷新过程中不清空，避免卡片闪烁消失
+    const stale = weatherCache.get(raw)
+    if (stale) {
+      setPlace(stale.place)
+      setWeather(stale.weather)
+    }
+
     let alive = true
-    setLoading(true)
     const timer = window.setTimeout(() => {
-      void (async () => {
-        try {
-          for (const candidate of candidates) {
-            if (!alive) return
-            const geo = await geocode(candidate.query)
-            if (!geo.found || geo.latitude == null || geo.longitude == null) continue
-            if (countryKey) {
-              // 后端用 language=zh，country 可能返回「日本」而不是「Japan」
-              const got = (geo.country || '').toLowerCase()
-              const ok = got.includes(countryKey) || got.includes(country.toLowerCase())
-              if (got && !ok) continue
-            }
-            const next = await fetchWeather(geo.latitude, geo.longitude, 5)
-            if (!alive) return
-            setPlace(geo.name || candidate.label)
-            setWeather(next)
-            return
-          }
-          setWeather(null)
-        } catch {
-          if (alive) setWeather(null)
-        } finally {
-          if (alive) setLoading(false)
-        }
-      })()
+      void requestWeather(raw, candidates, countryKey ?? '', country)
+        .then((entry) => {
+          if (!alive || !entry) return
+          setPlace(entry.place)
+          setWeather(entry.weather)
+        })
+        .catch(() => {
+          /* 请求失败时保留已有结果，静默处理 */
+        })
     }, 400)
     return () => {
       alive = false
@@ -144,7 +199,7 @@ export function WeatherCard({ destination, className }: { destination: string; c
     }
   }, [destination])
 
-  if (!weather || loading) return null
+  if (!weather) return null
 
   return (
     <section className={cn('card p-4', className)}>

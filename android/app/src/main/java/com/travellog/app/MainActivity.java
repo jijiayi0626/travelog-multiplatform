@@ -9,8 +9,6 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         // 注册不依赖 Google Play 服务的系统定位插件
         registerPlugin(SystemLocationPlugin.class);
-        // 注册本地小票文字识别插件
-        registerPlugin(ReceiptTextRecognitionPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

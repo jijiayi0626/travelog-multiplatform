@@ -26,8 +26,8 @@ import {
   toDateInputValue,
 } from '../lib/utils'
 import { cn } from '../lib/cn'
-import { readReceipt } from '../lib/cloud'
-import { hasOnDeviceOcr, parseReceiptText, recognizeReceiptText } from '../lib/receipt-ocr'
+import { parseReceiptText, recognizeReceiptText } from '../lib/receipt-ocr'
+import { isOcrModelReady, OCR_MODEL_SIZE_MB } from '../lib/ocr-model'
 import { guessCategory } from '../lib/ai'
 import { EditorScreen, FormBlock } from '../components/EditorScreen'
 import { ConfirmDialog, Field } from '../components/ui'
@@ -57,6 +57,7 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
   const [members, setMembers] = useState<Member[]>([])
   const [payerId, setPayerId] = useState('')
   const [receiptBusy, setReceiptBusy] = useState(false)
+  const [modelPrompt, setModelPrompt] = useState(false)
   const receiptRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -158,9 +159,7 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
     setReceiptBusy(true)
     try {
       const image = await compressImage(file)
-      const result = hasOnDeviceOcr()
-        ? parseReceiptText(await recognizeReceiptText(image))
-        : await readReceipt(image)
+      const result = parseReceiptText(await recognizeReceiptText(image))
       if (!result) {
         toast(tr('没识别到金额，请手动填写'))
         return
@@ -226,7 +225,13 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
           <button
             type="button"
             disabled={receiptBusy}
-            onClick={() => receiptRef.current?.click()}
+            onClick={() => {
+              if (!isOcrModelReady()) {
+                setModelPrompt(true)
+                return
+              }
+              receiptRef.current?.click()
+            }}
             className="press inline-flex shrink-0 items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-note text-ink-2 disabled:opacity-50 hover:text-accent"
           >
             {receiptBusy ? (
@@ -395,6 +400,18 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
 {tr('删除这笔账目')}
         </button>
       ) : null}
+
+      <ConfirmDialog
+        open={modelPrompt}
+        title={tr('需要先下载识别模型')}
+        message={tr('中文识别模型约 {size}MB，只需下载一次，之后拍小票全程离线识别。', {
+          size: OCR_MODEL_SIZE_MB,
+        })}
+        confirmText={tr('去下载模型')}
+        tone="accent"
+        onClose={() => setModelPrompt(false)}
+        onConfirm={() => nav.navigate({ name: 'ocrModel' })}
+      />
 
       <ConfirmDialog
         open={confirmDelete}

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ArrowLeft,
+  BellSimple,
   BookOpen,
   CaretDown,
   CaretRight,
@@ -47,7 +48,13 @@ import {
 } from '../lib/theme'
 import { compressImage, downloadText, readTextFile, relativeTime } from '../lib/utils'
 import { getBestFix, isNative, shareTextFile } from '../lib/native'
-import { ensureExactAlarmPermission, ensureNotificationPermission } from '../lib/reminder'
+import {
+  ensureExactAlarmPermission,
+  ensureNotificationPermission,
+  getDailyReminderEnabled,
+  sendTestNotification,
+  setDailyReminderEnabled,
+} from '../lib/reminder'
 import {
   deleteAvatar,
   getAccountMe,
@@ -144,6 +151,8 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
   const [importing, setImporting] = useState(false)
   const [aiJobs, setAIJobs] = useState<AIJob[]>(() => getAIJobs())
   const [guestTools, setGuestTools] = useState(false)
+  const [dailyReminder, setDailyReminder] = useState(() => getDailyReminderEnabled())
+  const [notifyBusy, setNotifyBusy] = useState(false)
   const [avatarBusy, setAvatarBusy] = useState(false)
   const [syncBusy, setSyncBusy] = useState(false)
   const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null)
@@ -498,6 +507,50 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
     )
   }
 
+  const sendTestNotify = async () => {
+    if (notifyBusy) return
+    setNotifyBusy(true)
+    try {
+      const granted = await ensureNotificationPermission()
+      if (!granted) {
+        toast(tr('未获得通知权限，请在系统设置里开启'))
+        return
+      }
+      const sent = await sendTestNotification()
+      toast(sent ? tr('测试通知已发出') : tr('发送失败，请检查通知权限'))
+    } finally {
+      setNotifyBusy(false)
+    }
+  }
+
+  const toggleDailyReminder = async () => {
+    if (!isNative()) {
+      toast(tr('仅手机端可用'))
+      return
+    }
+    if (notifyBusy) return
+    const next = !dailyReminder
+    setNotifyBusy(true)
+    try {
+      if (next) {
+        const granted = await ensureNotificationPermission()
+        if (!granted) {
+          toast(tr('未获得通知权限，请在系统设置里开启'))
+          return
+        }
+      }
+      const ok = await setDailyReminderEnabled(next)
+      if (!ok) {
+        toast(tr('设置失败，请检查通知权限'))
+        return
+      }
+      setDailyReminder(next)
+      toast(next ? tr('已开启每日 08:00 行程提醒') : tr('已关闭每日行程提醒'))
+    } finally {
+      setNotifyBusy(false)
+    }
+  }
+
   const profile = data.profile
   const ThemeGlyph = theme === 'dark' ? Moon : Sun
 
@@ -793,6 +846,65 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
     </SettingsGroup>
   )
 
+  const notificationGroup = (
+    <SettingsGroup
+      icon={<BellSimple size={17} />}
+      title={tr('通知')}
+      summary={dailyReminder ? tr('每日 08:00 行程提醒') : tr('测试通知与每日提醒')}
+    >
+      <div className="space-y-3">
+        <div className="flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-body-sm text-ink">{tr('发送测试通知')}</p>
+            <p className="mt-0.5 text-caption leading-4 text-ink-3">
+              {tr('立刻发一条，确认系统通知能正常弹出。')}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="chip shrink-0 px-2.5 py-1 text-caption"
+            disabled={notifyBusy}
+            onClick={() => void sendTestNotify()}
+          >
+            {notifyBusy ? tr('发送中…') : tr('发送')}
+          </button>
+        </div>
+
+        {isNative() ? (
+          <div className="flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-body-sm text-ink">{tr('每日行程提醒')}</p>
+              <p className="mt-0.5 text-caption leading-4 text-ink-3">
+                {tr('每天 08:00 提醒当天安排、待办与天气。')}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void toggleDailyReminder()}
+              aria-pressed={dailyReminder}
+              disabled={notifyBusy}
+              className={cn(
+                'press relative h-6 w-11 shrink-0 rounded-full transition-colors',
+                dailyReminder ? 'bg-accent' : 'bg-paper-2',
+              )}
+            >
+              <span
+                className={cn(
+                  'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all',
+                  dailyReminder ? 'left-[22px]' : 'left-0.5',
+                )}
+              />
+            </button>
+          </div>
+        ) : (
+          <p className="rounded-xl bg-paper-2/60 p-3 text-caption leading-4 text-ink-3">
+            {tr('每日行程提醒仅手机端可用。')}
+          </p>
+        )}
+      </div>
+    </SettingsGroup>
+  )
+
   const appearanceGroup = (
     <SettingsGroup
       icon={<PaintBrush size={17} />}
@@ -1009,6 +1121,7 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
     { key: 'sync', title: tr('云同步与备份'), keywords: '同步 云备份 云相册 实时 wifi 备份', node: syncGroup },
     { key: 'security', title: tr('账号与安全'), keywords: '账号 密码 邮箱 设备 登录 头像 资料', node: securityGroup },
     { key: 'auto', title: tr('自动打卡'), keywords: '打卡 签到 自动 定位', node: autoCheckinGroup },
+    { key: 'notify', title: tr('通知'), keywords: '通知 提醒 每日 测试 推送', node: notificationGroup },
     { key: 'appearance', title: tr('外观与语言'), keywords: '外观 主题 颜色 深色 浅色 定时 语言 字体', node: appearanceGroup },
     { key: 'data', title: tr('数据与备份'), keywords: '数据 备份 导出 导入 回收站 恢复 删除 清理 重置', node: dataGroup },
     { key: 'about', title: tr('关于与帮助'), keywords: '关于 帮助 版本 更新 开发者 github 仓库 隐私', node: aboutGroup },

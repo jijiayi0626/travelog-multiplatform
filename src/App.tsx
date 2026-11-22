@@ -34,6 +34,7 @@ import { FootprintEditor } from './pages/FootprintEditor'
 import { PlanEditor } from './pages/PlanEditor'
 import { AboutPage } from './pages/AboutPage'
 import { DownloadPage } from './pages/DownloadPage'
+import { OcrModelPage } from './pages/OcrModelPage'
 import { ChangelogPage } from './pages/ChangelogPage'
 import { SharePage } from './pages/SharePage'
 import { UpdatePrompt } from './components/UpdatePrompt'
@@ -87,6 +88,8 @@ function parseHash(): View {
       return { name: 'about' }
     case 'download':
       return { name: 'download' }
+    case 'ocr-model':
+      return { name: 'ocrModel' }
     case 'changelog':
       return { name: 'changelog' }
     case 'admin':
@@ -134,6 +137,8 @@ function toHash(view: View): string {
       return '#/about'
     case 'download':
       return '#/download'
+    case 'ocrModel':
+      return '#/ocr-model'
     case 'changelog':
       return '#/changelog'
     case 'admin':
@@ -417,6 +422,8 @@ export default function App() {
         return <AboutPage />
       case 'download':
         return <DownloadPage />
+      case 'ocrModel':
+        return <OcrModelPage />
       case 'changelog':
         return <ChangelogPage />
       case 'admin':

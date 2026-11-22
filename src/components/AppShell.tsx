@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { App as CapacitorApp } from '@capacitor/app'
+import { Clipboard } from '@capacitor/clipboard'
 import {
   Images,
   Keyboard,
@@ -15,7 +17,19 @@ import type { View } from '../lib/types'
 import { cn } from '../lib/cn'
 import { useIsDesktop } from '../lib/hooks'
 import { currentTheme, setThemeMode, subscribeSystemTheme } from '../lib/theme'
-import { useI18n, useSearch, useShortcuts } from '../lib/app-context'
+import {
+  useI18n,
+  useNav,
+  useRefresh,
+  useSearch,
+  useShortcuts,
+  useToast,
+} from '../lib/app-context'
+import { isSignedIn, joinTripByCode } from '../lib/cloud'
+import { getTrip } from '../lib/repo'
+import { runSync } from '../lib/sync-engine'
+import { isNative } from '../lib/native'
+import { ConfirmDialog } from './ui'
 
 const TABS = [
   { key: 'trips', labelKey: 'nav.trips', Icon: MapTrifold },
@@ -63,6 +77,18 @@ function isRoot(view: View): boolean {
   )
 }
 
+const LAST_CLIPBOARD_INVITE = 'travelog.lastClipboardInvite'
+
+/** 剪贴板里可能是 6 位邀请码，也可能是带 #/share/CODE 的分享链接 */
+function inviteCodeFromClipboard(text: string): string | null {
+  const value = text.trim()
+  if (!value) return null
+  const link = value.match(/#\/share\/([A-Za-z0-9]{6})(?:[/?#]|$)/)
+  if (link) return link[1].toUpperCase()
+  if (/^[A-Za-z0-9]{6}$/.test(value)) return value.toUpperCase()
+  return null
+}
+
 export function AppShell({
   view,
   onRootChange,
@@ -75,11 +101,111 @@ export function AppShell({
   const isDesktop = useIsDesktop()
   const openSearch = useSearch()
   const openShortcuts = useShortcuts()
+  const nav = useNav()
+  const { bump } = useRefresh()
+  const toast = useToast()
   const { t, tr, lang, setLang } = useI18n()
   const active = rootOf(view)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => currentTheme())
+  const [inviteCode, setInviteCode] = useState<string | null>(null)
+  const viewRef = useRef(view)
+  const clipboardBusy = useRef(false)
 
   useEffect(() => subscribeSystemTheme(() => setTheme(currentTheme())), [])
+
+  useEffect(() => {
+    viewRef.current = view
+  }, [view])
+
+  // 启动与回到前台时读一次剪贴板：识别到邀请码就让用户确认加入。
+  // 读取失败（网页无权限等）静默忽略，不打扰正常使用。
+  useEffect(() => {
+    let disposed = false
+
+    const checkClipboard = async () => {
+      if (disposed || clipboardBusy.current) return
+      if (document.visibilityState !== 'visible') return
+      if (!isSignedIn()) return
+      clipboardBusy.current = true
+      try {
+        let text = ''
+        if (isNative()) {
+          const result = await Clipboard.read()
+          text = result.value ?? ''
+        } else {
+          if (!navigator.clipboard?.readText) return
+          text = await navigator.clipboard.readText()
+        }
+        const code = inviteCodeFromClipboard(text)
+        if (!code || disposed) return
+
+        let last: string | null = null
+        try {
+          last = localStorage.getItem(LAST_CLIPBOARD_INVITE)
+        } catch {
+          /* 隐私模式忽略 */
+        }
+        if (last === code) return
+
+        const current = viewRef.current
+        if (current.name === 'trip') {
+          const currentTrip = await getTrip(current.id)
+          if (disposed) return
+          if ((currentTrip?.inviteCode ?? '').toUpperCase() === code) return
+        }
+        setInviteCode(code)
+      } catch {
+        /* 读不到剪贴板就跳过 */
+      } finally {
+        clipboardBusy.current = false
+      }
+    }
+
+    void checkClipboard()
+
+    if (isNative()) {
+      let remove: (() => void) | null = null
+      void CapacitorApp.addListener('appStateChange', (state) => {
+        if (state.isActive) void checkClipboard()
+      }).then((listener) => {
+        if (disposed) void listener.remove()
+        else remove = () => void listener.remove()
+      })
+      return () => {
+        disposed = true
+        remove?.()
+      }
+    }
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void checkClipboard()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      disposed = true
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [])
+
+  const rememberInvite = (code: string) => {
+    try {
+      localStorage.setItem(LAST_CLIPBOARD_INVITE, code)
+    } catch {
+      /* 隐私模式忽略 */
+    }
+  }
+
+  const joinDetectedTrip = async (code: string) => {
+    try {
+      const result = await joinTripByCode(code)
+      await runSync().catch(() => null)
+      bump()
+      nav.navigate({ name: 'trip', id: result.tripId, tab: 'plan' })
+      toast(tr('已加入「{title}」', { title: result.title || result.owner }))
+    } catch (error) {
+      toast(error instanceof Error ? error.message : tr('加入失败'))
+    }
+  }
 
   const toggleTheme = () => {
     const next = theme === 'dark' ? 'light' : 'dark'
@@ -216,6 +342,25 @@ export function AppShell({
           </nav>
         ) : null}
       </div>
+
+      <ConfirmDialog
+        open={inviteCode !== null}
+        title={tr('加入行程')}
+        message={
+          inviteCode
+            ? tr('检测到邀请码 {code}，要加入这个行程吗？', { code: inviteCode })
+            : ''
+        }
+        confirmText={tr('加入')}
+        tone="accent"
+        onConfirm={() => {
+          if (inviteCode) void joinDetectedTrip(inviteCode)
+        }}
+        onClose={() => {
+          if (inviteCode) rememberInvite(inviteCode)
+          setInviteCode(null)
+        }}
+      />
     </div>
   )
 }
