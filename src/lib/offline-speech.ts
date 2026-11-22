@@ -111,22 +111,24 @@ export async function isVoskModelReady(): Promise<boolean> {
   }
 }
 
-async function readResponse(
+const PART_COUNT = 5
+const TOTAL_BYTES = 43_900_310
+
+async function readPart(
   response: Response,
-  onProgress: ((progress: number) => void) | undefined,
+  baseBytes: number,
   controller: AbortController,
+  onProgress?: (progress: number) => void,
 ): Promise<Blob> {
-  const length = Number(response.headers.get('content-length') ?? 0)
-  const estimate = VOSK_MODEL_SIZE_MB * 1024 * 1024
   if (!response.body) {
     const blob = await response.blob()
-    onProgress?.(1)
+    onProgress?.(Math.min(0.99, (baseBytes + blob.size) / TOTAL_BYTES))
     return blob
   }
   const reader = response.body.getReader()
   const chunks: Uint8Array[] = []
   let received = 0
-  // 代理返回 200 后可能不再吐数据，60 秒没有新字节就放弃这个镜像
+  // 代理返回 200 后可能不再吐数据，60 秒没有新字节就放弃
   let watchdog = window.setTimeout(() => controller.abort(), 60_000)
   try {
     for (;;) {
@@ -137,48 +139,63 @@ async function readResponse(
       watchdog = window.setTimeout(() => controller.abort(), 60_000)
       chunks.push(value)
       received += value.byteLength
-      const ratio = length > 0 ? received / length : received / estimate
-      onProgress?.(Math.max(0, Math.min(0.99, ratio)))
+      onProgress?.(Math.min(0.99, (baseBytes + received) / TOTAL_BYTES))
     }
   } finally {
     window.clearTimeout(watchdog)
   }
-  onProgress?.(1)
   return new Blob(chunks as unknown as BlobPart[], { type: 'application/gzip' })
 }
 
-/** 依次尝试三个镜像下载模型，成功后写入 Cache Storage 并记录标记 */
+/** 模型按 9MB 分片，避免单次大文件请求被代理截断；逐片尝试三个镜像 */
 export async function downloadVoskModel(
   onProgress?: (progress: number) => void,
 ): Promise<boolean> {
   lastError = ''
-  for (const mirror of VOSK_MODEL_MIRRORS) {
-    const controller = new AbortController()
-    const overall = window.setTimeout(() => controller.abort(), 600_000)
-    try {
-      onProgress?.(0)
-      const response = await fetch(`${mirror}/${CACHE_KEY}`, { signal: controller.signal })
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const blob = await readResponse(response, onProgress, controller)
-      if (blob.size === 0) throw new Error('模型文件为空')
-      const cache = await getCache()
-      if (!cache) throw new Error('当前环境不支持离线缓存')
-      await cache.put(CACHE_KEY, new Response(blob))
-      localStorage.setItem(READY_KEY, '1')
-      onProgress?.(1)
-      return true
-    } catch (error) {
-      lastError =
-        error instanceof Error && error.name === 'AbortError'
-          ? '下载超时'
-          : error instanceof Error
-            ? error.message
-            : String(error)
-    } finally {
-      window.clearTimeout(overall)
+  onProgress?.(0)
+  const parts: Blob[] = []
+  let doneBytes = 0
+  for (let index = 0; index < PART_COUNT; index += 1) {
+    let part: Blob | null = null
+    for (const mirror of VOSK_MODEL_MIRRORS) {
+      const controller = new AbortController()
+      const overall = window.setTimeout(() => controller.abort(), 180_000)
+      try {
+        const response = await fetch(`${mirror}/${CACHE_KEY}.part${index}`, {
+          signal: controller.signal,
+        })
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        part = await readPart(response, doneBytes, controller, onProgress)
+        break
+      } catch (error) {
+        lastError =
+          error instanceof Error && error.name === 'AbortError'
+            ? '下载超时'
+            : error instanceof Error
+              ? error.message
+              : String(error)
+      } finally {
+        window.clearTimeout(overall)
+      }
     }
+    if (!part) return false
+    parts.push(part)
+    doneBytes += part.size
   }
-  return false
+  const blob = new Blob(parts, { type: 'application/gzip' })
+  if (blob.size !== TOTAL_BYTES) {
+    lastError = `模型文件不完整（${blob.size}/${TOTAL_BYTES}）`
+    return false
+  }
+  const cache = await getCache()
+  if (!cache) {
+    lastError = '当前环境不支持离线缓存'
+    return false
+  }
+  await cache.put(CACHE_KEY, new Response(blob))
+  localStorage.setItem(READY_KEY, '1')
+  onProgress?.(1)
+  return true
 }
 
 /** 删除下载标记与模型缓存 */
