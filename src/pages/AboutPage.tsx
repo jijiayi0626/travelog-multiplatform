@@ -12,6 +12,7 @@ import {
   GithubLogo,
   Info,
   MapTrifold,
+  Microphone,
   ShieldCheck,
   Wrench,
 } from '@phosphor-icons/react'
@@ -34,11 +35,51 @@ export function AboutPage() {
   const [devMode, setDevModeState] = useState(() => isDevMode())
   const [confirmReset, setConfirmReset] = useState(false)
   const [applying, setApplying] = useState(false)
+  const [speechDiag, setSpeechDiag] = useState('')
   const taps = useRef(0)
   const tapTimer = useRef(0)
 
   useEffect(() => subscribeDevMode(() => setDevModeState(isDevMode())), [])
   useEffect(() => () => window.clearTimeout(tapTimer.current), [])
+
+  /** 仅开发者模式可见：一次性看清语音服务、权限、监听状态与最近错误 */
+  const checkSpeech = async () => {
+    if (!isNative()) {
+      setSpeechDiag(tr('网页端使用浏览器自带的语音识别'))
+      return
+    }
+    try {
+      const { SpeechRecognition } = await import('@capacitor-community/speech-recognition')
+      const available = await SpeechRecognition.available()
+      let permission = 'unknown'
+      try {
+        permission = (await SpeechRecognition.checkPermissions()).speechRecognition
+      } catch {
+        /* 旧版本插件可能不支持 */
+      }
+      let active = false
+      try {
+        active = (await SpeechRecognition.isListening()).listening
+      } catch {
+        /* 忽略 */
+      }
+      const last = localStorage.getItem('travelog.voiceLastError') || tr('无')
+      setSpeechDiag(
+        tr('可用：{a} · 权限：{p} · 监听：{l} · 最近错误：{e}', {
+          a: available.available ? tr('是') : tr('否'),
+          p: permission,
+          l: active ? tr('是') : tr('否'),
+          e: last,
+        }),
+      )
+    } catch (error) {
+      setSpeechDiag(
+        tr('检测失败：{msg}', {
+          msg: error instanceof Error ? error.message : String(error),
+        }),
+      )
+    }
+  }
 
   /** 版本号本身不做任何提示，连续点 7 次才会静默开启开发者模式 */
   const tapVersion = () => {
@@ -195,6 +236,12 @@ export function AboutPage() {
               </p>
             </div>
           </div>
+          <SettingRow
+            icon={<Microphone size={17} />}
+            title={tr('语音识别诊断')}
+            value={speechDiag || tr('点击检测语音服务与权限')}
+            onClick={() => void checkSpeech()}
+          />
           <div className="px-4 py-3">
             <button
               type="button"

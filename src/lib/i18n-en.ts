@@ -638,6 +638,20 @@ export const EN_TEXT: Record<string, string> = {
   年度海报已导出: 'Poster exported',
   '年度海报已生成，可分享或保存': 'Poster ready — share or save it',
   已退出其他设备: 'Signed out other devices',
+  '当前设备不支持语音识别，请先安装系统语音服务':
+    'Speech recognition is unavailable — install a system speech service first',
+  '语音识别失败：{msg}': 'Speech recognition failed: {msg}',
+  '语音识别没有启动，请检查系统语音服务':
+    'Speech recognition did not start — check the system speech service',
+  网页端使用浏览器自带的语音识别: 'Web uses the browser speech recognition',
+  '可用：{a} · 权限：{p} · 监听：{l} · 最近错误：{e}':
+    'Available: {a} · Permission: {p} · Listening: {l} · Last error: {e}',
+  是: 'Yes',
+  否: 'No',
+  无: 'None',
+  '检测失败：{msg}': 'Check failed: {msg}',
+  语音识别诊断: 'Speech diagnostics',
+  点击检测语音服务与权限: 'Tap to check speech service and permission',
   '导出失败，请重试': 'Export failed, please retry',
   足迹热力图: 'Footprint heatmap',
   少: 'Less',

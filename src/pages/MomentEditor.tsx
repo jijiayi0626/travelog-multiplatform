@@ -32,10 +32,20 @@ interface SpeechRecognitionLike {
   interimResults: boolean
   continuous: boolean
   onresult: ((event: SpeechRecognitionEventLike) => void) | null
-  onerror: (() => void) | null
+  onerror: ((event: { error?: string }) => void) | null
   onend: (() => void) | null
   start: () => void
   stop: () => void
+}
+
+/** 语音失败时留一条可查的记录，方便在开发者模式里定位 */
+function logVoiceError(message: string): void {
+  console.warn('[travelog:voice]', message)
+  try {
+    localStorage.setItem('travelog.voiceLastError', `${new Date().toLocaleString()} ${message}`)
+  } catch {
+    /* 隐私模式写不了就算了 */
+  }
 }
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
@@ -175,7 +185,8 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
         )
         const available = await NativeSpeech.available()
         if (!available.available) {
-          toast(tr('当前设备不支持语音识别'))
+          logVoiceError('native: 系统没有可用的语音识别服务')
+          toast(tr('当前设备不支持语音识别，请先安装系统语音服务'))
           return
         }
         let permission = (await NativeSpeech.checkPermissions()).speechRecognition
@@ -183,14 +194,17 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
           permission = (await NativeSpeech.requestPermissions()).speechRecognition
         }
         if (permission !== 'granted') {
+          logVoiceError(`native: 麦克风权限 ${permission}`)
           toast(tr('需要麦克风权限才能语音输入'))
           return
         }
 
         const base = content
+        let gotResult = false
         const partial = await NativeSpeech.addListener('partialResults', (data) => {
           const text = (data.matches?.[0] || '').trim()
           if (!text) return
+          gotResult = true
           setContent(base ? `${base.trimEnd()}\n${text}` : text)
           if (error) setError('')
         })
@@ -208,15 +222,35 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
           maxResults: 5,
           partialResults: true,
           popup: false,
-        }).catch(() => {
+        }).catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err)
+          logVoiceError(`native start: ${message}`)
           setListening(false)
           clearNativeListeners()
-          toast(tr('没能听清，请再试一次'))
+          toast(tr('语音识别失败：{msg}', { msg: message }))
         })
-      } catch {
+
+        // start() 在 partialResults 模式下不 resolve；用系统监听状态兜底检测启动失败
+        window.setTimeout(() => {
+          if (nativeStoppingRef.current || gotResult) return
+          void NativeSpeech.isListening()
+            .then(({ listening: active }) => {
+              if (active) return
+              logVoiceError('native: 启动后未进入监听状态')
+              setListening(false)
+              clearNativeListeners()
+              toast(tr('语音识别没有启动，请检查系统语音服务'))
+            })
+            .catch(() => {
+              /* 旧版本插件没有 isListening 时忽略 */
+            })
+        }, 6000)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        logVoiceError(`native: ${message}`)
         setListening(false)
         clearNativeListeners()
-        toast(tr('没能听清，请再试一次'))
+        toast(tr('语音识别失败：{msg}', { msg: message }))
       }
       return
     }
@@ -248,9 +282,15 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
       setContent(base ? `${base.trimEnd()}\n${value}` : value)
       if (error) setError('')
     }
-    recognition.onerror = () => {
+    recognition.onerror = (event) => {
+      const message = event?.error || 'unknown'
+      logVoiceError(`web: ${message}`)
       setListening(false)
-      toast(tr('没能听清，请再试一次'))
+      if (message === 'no-speech' || message === 'aborted') {
+        toast(tr('没能听清，请再试一次'))
+      } else {
+        toast(tr('语音识别失败：{msg}', { msg: message }))
+      }
     }
     recognition.onend = () => {
       setListening(false)
