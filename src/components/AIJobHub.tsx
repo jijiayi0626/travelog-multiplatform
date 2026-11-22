@@ -4,6 +4,7 @@ import {
   CheckCircle,
   CircleNotch,
   Copy,
+  PaperPlaneTilt,
   Sparkle,
   Trash,
   WarningCircle,
@@ -17,11 +18,12 @@ import {
   markAIJobsRead,
   refreshAIJobs,
   startAIJobWatcher,
+  submitAIJob,
   subscribeAIJobs,
   type AIJob,
   type AIJobKind,
 } from '../lib/ai-jobs'
-import { isSignedIn } from '../lib/cloud'
+import { getAIModels, isSignedIn, type AIModelsResult } from '../lib/cloud'
 import { cn } from '../lib/cn'
 import { formatDate, formatTime } from '../lib/utils'
 import { useI18n, useNav, useToast } from '../lib/app-context'
@@ -82,12 +84,18 @@ function StatusIcon({ status }: { status: AIJob['status'] }) {
 
 export function AIJobHub() {
   const { tr } = useI18n()
+  const { navigate } = useNav()
   const toast = useToast()
   const [jobs, setJobs] = useState<AIJob[]>(() => getAIJobs())
   const [open, setOpen] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<AIJob | null>(null)
   const [signedIn, setSignedIn] = useState(() => isSignedIn())
+  const [modelState, setModelState] = useState<AIModelsResult | null>(null)
+  const [modelsError, setModelsError] = useState('')
+  const [picked, setPicked] = useState<string[]>([])
+  const [draft, setDraft] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
     const syncAuth = () => {
@@ -131,7 +139,74 @@ export function AIJobHub() {
     }
   }, [open])
 
-  if (!signedIn || jobs.length === 0) return null
+  useEffect(() => {
+    if (!open || !signedIn) return
+    let alive = true
+    void getAIModels()
+      .then((result) => {
+        if (!alive) return
+        setModelState(result)
+        setModelsError('')
+        setPicked((previous) => {
+          const kept = previous.filter((id) => result.models.some((item) => item.id === id))
+          return kept.length > 0 ? kept : result.models.slice(0, 1).map((item) => item.id)
+        })
+      })
+      .catch((error: unknown) => {
+        if (!alive) return
+        setModelState(null)
+        setModelsError(error instanceof Error ? error.message : '模型列表加载失败')
+      })
+    return () => {
+      alive = false
+    }
+  }, [open, signedIn])
+
+  if (!signedIn) return null
+
+  const models = modelState?.models || []
+
+  const toggleModel = (id: string) => {
+    setPicked((previous) => {
+      if (previous.includes(id)) return previous.filter((value) => value !== id)
+      if (previous.length >= 4) {
+        toast(tr('最多同时对比 4 个模型'))
+        return previous
+      }
+      return [...previous, id]
+    })
+  }
+
+  const sendParallel = async () => {
+    const text = draft.trim()
+    const chosen = models.filter((item) => picked.includes(item.id))
+    if (!text || chosen.length === 0) return
+    setSubmitting(true)
+    try {
+      const results = await Promise.allSettled(
+        chosen.map((item) =>
+          submitAIJob({
+            kind: 'custom',
+            label: `对比 · ${item.model}`,
+            system: '你是严谨的旅行助手。用简洁中文回答，必要时分点说明。',
+            prompt: text,
+            endpointId: item.id,
+          }),
+        ),
+      )
+      const ok = results.filter((result) => result.status === 'fulfilled').length
+      const failure = results.find((result) => result.status === 'rejected')
+      if (ok > 0) {
+        setDraft('')
+        toast(tr('已同时提交 {n} 个模型，生成中', { n: ok }))
+      }
+      if (failure && failure.status === 'rejected') {
+        toast(failure.reason instanceof Error ? failure.reason.message : tr('部分模型提交失败'))
+      }
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   const active = getActiveAIJobs(jobs)
   const unread = getUnreadAIJobs(jobs)
@@ -186,6 +261,90 @@ export function AIJobHub() {
             </header>
 
             <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto overscroll-contain px-4 py-4">
+              <div className="rounded-2xl border border-line bg-surface p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="flex items-center gap-1.5 text-body-sm font-medium text-ink">
+                    <Sparkle size={14} weight="fill" className="text-accent" />
+                    {tr('多模型并行')}
+                  </p>
+                  <span className="text-caption text-ink-3">{tr('可多选，最多 4 个')}</span>
+                </div>
+
+                {models.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {models.map((item) => {
+                      const active = picked.includes(item.id)
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => toggleModel(item.id)}
+                          className={cn(
+                            'press rounded-full border px-2.5 py-1 text-caption transition-colors',
+                            active
+                              ? 'border-accent bg-accent-soft text-accent'
+                              : 'border-line bg-paper text-ink-2',
+                          )}
+                        >
+                          {item.model}
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div className="mt-1.5 flex items-center justify-between gap-2">
+                    <p className="text-caption leading-4 text-ink-3">
+                      {modelsError ||
+                        (modelState && !modelState.canUse
+                          ? tr('多模型对比是会员功能，开通后可用')
+                          : tr('管理员还没有配置可用模型'))}
+                    </p>
+                    {modelState && !modelState.canUse ? (
+                      <button
+                        type="button"
+                        className="btn-ghost h-8 shrink-0 px-2.5 text-note text-accent"
+                        onClick={() => {
+                          setOpen(false)
+                          navigate({ name: 'sync' })
+                        }}
+                      >
+                        {tr('去开通')}
+                      </button>
+                    ) : null}
+                  </div>
+                )}
+
+                <textarea
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  rows={3}
+                  placeholder={tr('输入同一个问题，选中的模型会同时生成，方便对比')}
+                  className="mt-2 w-full resize-none rounded-xl border border-line bg-paper px-3 py-2 text-body-sm leading-5 text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none"
+                />
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <p className="text-caption text-ink-3">{tr('并行提交，不会互相阻塞')}</p>
+                  <button
+                    type="button"
+                    disabled={submitting || !draft.trim() || picked.length === 0}
+                    onClick={() => void sendParallel()}
+                    className="btn-primary h-9 shrink-0 px-3 text-note disabled:opacity-50"
+                  >
+                    {submitting ? (
+                      <CircleNotch size={14} className="animate-spin" />
+                    ) : (
+                      <PaperPlaneTilt size={14} />
+                    )}
+                    {tr('发送给 {n} 个模型', { n: picked.length })}
+                  </button>
+                </div>
+              </div>
+
+              {jobs.length === 0 ? (
+                <p className="px-2 py-6 text-center text-caption text-ink-3">
+                  {tr('还没有 AI 任务，用上面的输入框试试')}
+                </p>
+              ) : null}
               {jobs.map((job) => {
                 const isOpen = expanded === job.id
                 const running = job.status === 'queued' || job.status === 'running'

@@ -811,6 +811,7 @@ async function handleAdminSettingsGet(request, env) {
           type: item.type === 'workers' ? 'workers' : 'openai',
           base: item.base || '',
           model: item.model || '',
+          models: endpointModels(item),
           key: maskKey(item.key),
           hasKey: Boolean(item.key),
           weight: Number(item.weight) || 1,
@@ -848,12 +849,14 @@ async function handleAdminSettingsPut(request, env) {
       const prev = byId.get(item.id) || {}
       const typed = typeof item.key === 'string' ? item.key.trim() : ''
       const keepKey = !typed || typed.includes('…')
+      const models = endpointModels(item)
       return {
         id: String(item.id || `ep${index + 1}`),
         name: String(item.name || `接口 ${index + 1}`).slice(0, 30),
         type: item.type === 'workers' ? 'workers' : 'openai',
         base: String(item.base || 'https://api.openai.com/v1').slice(0, 200),
-        model: String(item.model || '').slice(0, 80),
+        model: models[0] || '',
+        models,
         key: keepKey ? prev.key || '' : typed,
         weight: Math.max(1, Math.min(10, Number(item.weight) || 1)),
         enabled: item.enabled !== false,
@@ -1633,6 +1636,14 @@ async function handleStats(request, env) {
 
 /* ---------------- AI ---------------- */
 
+/** 兼容 model 逗号分隔与 models 数组，最多 6 个模型 */
+function endpointModels(item) {
+  const values = []
+  if (Array.isArray(item.models)) values.push(...item.models)
+  if (item.model) values.push(...String(item.model).split(/[,，\s]+/))
+  return [...new Set(values.map((value) => String(value).trim()).filter(Boolean))].slice(0, 6)
+}
+
 async function loadEndpoints(env) {
   const map = await getSettings(env, [
     'ai.enabled',
@@ -1680,11 +1691,16 @@ async function loadEndpoints(env) {
     }
   }
 
-  const usable = list.filter((item) => {
-    if (item.enabled === false) return false
-    if (item.type === 'workers') return Boolean(env.AI)
-    return Boolean(item.key)
-  })
+  const usable = []
+  for (const item of list) {
+    if (item.enabled === false) continue
+    if (item.type === 'workers' && !env.AI) continue
+    if (item.type !== 'workers' && !item.key) continue
+    // 一个站点（base + key）可以绑定多个模型：每个模型展开成可独立选择的入口
+    for (const model of endpointModels(item)) {
+      usable.push({ ...item, id: `${item.id}::${model}`, baseId: item.id, model })
+    }
+  }
 
   return {
     enabled: map['ai.enabled'] !== '0',
@@ -1743,12 +1759,23 @@ async function callEndpoint(env, endpoint, messages, temperature) {
   }
 }
 
-/** 多个接口按权重随机，失败自动切换到下一个 */
-async function runAI(env, messages, temperature) {
+/** 多个接口按权重随机，失败自动切换到下一个；指定 endpointId 时只跑该模型（用于多模型对比） */
+async function runAI(env, messages, temperature, endpointId = '') {
   const config = await loadEndpoints(env)
   if (!config.enabled) throw new HttpError(503, 'AI 已在管理面板中关闭')
   if (config.endpoints.length === 0) {
     throw new HttpError(503, 'AI 未配置：在管理面板添加接口，或绑定 Workers AI')
+  }
+
+  const temp = temperature ?? config.temperature
+  if (endpointId) {
+    const chosen = config.endpoints.find((item) => item.id === endpointId)
+    if (!chosen) throw new HttpError(400, '所选模型不可用，请刷新后重试')
+    try {
+      return await callEndpoint(env, chosen, messages, temp)
+    } catch (error) {
+      throw new HttpError(502, `${chosen.name || chosen.model} 生成失败：${error.message}`)
+    }
   }
 
   const tried = new Set()
@@ -1759,7 +1786,7 @@ async function runAI(env, messages, temperature) {
     const endpoint = pickEndpoint(candidates)
     tried.add(endpoint.id)
     try {
-      return await callEndpoint(env, endpoint, messages, temperature ?? config.temperature)
+      return await callEndpoint(env, endpoint, messages, temp)
     } catch (error) {
       lastError = error
       console.error(`ai endpoint failed: ${endpoint.name} ${error.message}`)
@@ -1779,7 +1806,8 @@ async function handleAI(request, env) {
   if (system) messages.push({ role: 'system', content: system })
   messages.push({ role: 'user', content: prompt })
   const temperature = Math.min(Math.max(Number(body.temperature) || 0.6, 0), 1)
-  const result = await runAI(env, messages, temperature)
+  const endpointId = String(body.endpointId || '').slice(0, 160)
+  const result = await runAI(env, messages, temperature, endpointId)
   console.log(`ai user=${user.id} model=${result.model} chars=${result.text.length}`)
   return json(result, 200, env, request)
 }
@@ -1862,7 +1890,7 @@ async function runAIJob(env, jobId) {
   if (job.system) messages.push({ role: 'system', content: job.system })
   messages.push({ role: 'user', content: job.prompt })
   try {
-    const result = await runAI(env, messages, job.temperature)
+    const result = await runAI(env, messages, job.temperature, job.endpoint || '')
     await env.DB.prepare(
       `UPDATE ai_jobs SET status = 'done', result = ?, model = ?, endpoint = ?, finished_at = ?
        WHERE id = ?`,
@@ -1902,10 +1930,38 @@ async function handleAIConfig(request, env) {
   )
 }
 
+/** GET /api/ai/models：当前可用模型列表（一个站点可绑定多个模型） */
+async function handleAIModels(request, env) {
+  const user = await requireUser(request, env)
+  const config = await loadEndpoints(env)
+  const member = Boolean(user.membership?.active)
+  const canUse =
+    config.enabled && config.endpoints.length > 0 && (!config.requireMembership || member)
+  return json(
+    {
+      enabled: config.enabled,
+      canUse,
+      member,
+      membershipRequired: config.requireMembership,
+      models: canUse
+        ? config.endpoints.map((item) => ({
+            id: item.id,
+            name: item.name || item.model,
+            model: item.model,
+            type: item.type || 'openai',
+          }))
+        : [],
+    },
+    200,
+    env,
+    request,
+  )
+}
+
 /** POST /api/ai/jobs：入队后立即返回 202 */
 async function handleAIJobCreate(request, env, ctx) {
   const user = await requireUser(request, env)
-  await requireAIAccess(env, user)
+  const aiConfig = await requireAIAccess(env, user)
   await rateLimit(env, bucketKey(request, 'ai-job'), 40, 3600, 'AI 任务提交太频繁，请稍后再试')
   const body = await readJSON(request)
   const kind = String(body.kind || 'custom').slice(0, 24)
@@ -1913,13 +1969,17 @@ async function handleAIJobCreate(request, env, ctx) {
   const prompt = String(body.prompt || '').slice(0, 8000)
   if (!prompt.trim()) throw new HttpError(400, 'prompt 不能为空')
   const temperature = Math.min(Math.max(Number(body.temperature) || 0.6, 0), 1)
+  const endpointId = String(body.endpointId || '').slice(0, 160)
+  if (endpointId && !aiConfig.endpoints.some((item) => item.id === endpointId)) {
+    throw new HttpError(400, '所选模型不可用，请刷新后重试')
+  }
   const id = randomToken(12)
   const now = Date.now()
   await env.DB.prepare(
-    `INSERT INTO ai_jobs (id, user_id, kind, status, prompt, system, temperature, created_at)
-     VALUES (?, ?, ?, 'queued', ?, ?, ?, ?)`,
+    `INSERT INTO ai_jobs (id, user_id, kind, status, prompt, system, temperature, endpoint, created_at)
+     VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?)`,
   )
-    .bind(id, user.id, kind, prompt, system, temperature, now)
+    .bind(id, user.id, kind, prompt, system, temperature, endpointId, now)
     .run()
   await pruneAIJobs(env, user.id)
 
@@ -1930,7 +1990,7 @@ async function handleAIJobCreate(request, env, ctx) {
     result: '',
     error: '',
     model: '',
-    endpoint: '',
+    endpoint: endpointId,
     createdAt: now,
     startedAt: 0,
     finishedAt: 0,
@@ -2527,8 +2587,42 @@ async function handleAdminPhotoDelete(request, env, id) {
 
 /* ---------------- 入口 ---------------- */
 
+const APP_REPO = 'jijiayi0626/travelog-multiplatform'
+
+/** GET /api/app/latest：服务端代理 GitHub Releases，避免客户端被限流/直连不稳 */
+async function handleAppLatest(request, env) {
+  const response = await fetch(`https://api.github.com/repos/${APP_REPO}/releases/latest`, {
+    headers: { accept: 'application/vnd.github+json', 'user-agent': 'travelog-app' },
+    cf: { cacheTtl: 600, cacheEverything: true, cacheKey: 'travelog-latest-release-v1' },
+  }).catch(() => null)
+  if (!response || !response.ok) throw new HttpError(502, '检查更新失败，请稍后再试')
+  const release = await response.json()
+  const assets = (release.assets || [])
+    .filter((asset) => String(asset.name || '').toLowerCase().endsWith('.apk'))
+    .map((asset) => ({
+      name: String(asset.name || ''),
+      size: Number(asset.size) || 0,
+      url: String(asset.browser_download_url || ''),
+    }))
+  return json(
+    {
+      version: String(release.tag_name || '').replace(/^v/, ''),
+      tag: String(release.tag_name || ''),
+      name: String(release.name || ''),
+      publishedAt: Number(new Date(release.published_at || 0)) || 0,
+      notes: String(release.body || '').slice(0, 2000),
+      assets,
+    },
+    200,
+    env,
+    request,
+  )
+}
+
 async function handleApi(request, env, url, ctx) {
   const route = `${request.method} ${url.pathname}`
+
+  if (route === 'GET /api/app/latest') return await handleAppLatest(request, env)
 
   if (route === 'GET /api/health') {
     const ai = await loadEndpoints(env).catch(() => null)
@@ -2640,6 +2734,7 @@ async function handleApi(request, env, url, ctx) {
   }
   if (route === 'POST /api/ai/complete') return await handleAI(request, env)
   if (route === 'GET /api/ai/config') return await handleAIConfig(request, env)
+  if (route === 'GET /api/ai/models') return await handleAIModels(request, env)
   if (route === 'POST /api/ai/jobs') return await handleAIJobCreate(request, env, ctx)
   if (route === 'GET /api/ai/jobs') return await handleAIJobsList(request, env, url)
   const aiJobMatch = url.pathname.match(/^\/api\/ai\/jobs\/([A-Za-z0-9]+)$/)

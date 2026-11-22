@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import {
+  ArrowLeft,
   BookOpen,
   CaretDown,
   CaretRight,
@@ -22,6 +24,7 @@ import {
   Sun,
   UploadSimple,
   UserPlus,
+  X,
 } from '@phosphor-icons/react'
 import type { AppStats, Profile } from '../lib/types'
 import { exportAll, getProfile, importAll, saveProfile, stats } from '../lib/repo'
@@ -1146,31 +1149,119 @@ function SettingsGroup({
   defaultOpen?: boolean
 }) {
   const [open, setOpen] = useState(defaultOpen)
-  return (
-    <div className="border-b border-line last:border-b-0">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-        className="press flex w-full items-center gap-3 px-4 py-3.5 text-left"
-      >
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-ink-2">
-          {icon}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-body text-ink">{title}</span>
-          {summary ? (
-            <span className="mt-0.5 block truncate text-caption text-ink-3">{summary}</span>
-          ) : null}
-        </span>
-        <CaretDown
-          size={15}
-          className={cn('shrink-0 text-ink-3 transition-transform', open && 'rotate-180')}
-        />
-      </button>
-      {open ? <div className="border-t border-line/70 px-4 py-3">{children}</div> : null}
-    </div>
+  const wide = useWideLayout()
+
+  useEffect(() => {
+    if (!open) return
+    const previous = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = previous
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const header = (
+    <>
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-ink-2">
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-body text-ink">{title}</span>
+        {summary ? (
+          <span className="mt-0.5 block truncate text-caption text-ink-3">{summary}</span>
+        ) : null}
+      </span>
+    </>
   )
+
+  return (
+    <>
+      <div className="border-b border-line last:border-b-0">
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          onClick={() => setOpen(true)}
+          className="press flex w-full items-center gap-3 px-4 py-3.5 text-left"
+        >
+          {header}
+          <CaretRight size={15} className="shrink-0 text-ink-3" />
+        </button>
+      </div>
+      {open
+        ? createPortal(
+            wide ? (
+              <div
+                className="sheet-backdrop fixed inset-0 z-[70] flex items-center justify-center bg-[#0b0b0a]/35 p-6 backdrop-blur-[2px]"
+                onClick={() => setOpen(false)}
+              >
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label={title}
+                  className="sheet-panel flex max-h-[86vh] w-[400px] flex-col overflow-hidden rounded-[28px] border border-line bg-paper shadow-[var(--shadow-float)]"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <header className="flex shrink-0 items-center gap-3 border-b border-line px-4 py-3">
+                    {header}
+                    <button
+                      type="button"
+                      aria-label="关闭"
+                      className="press flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-paper-2 text-ink-2"
+                      onClick={() => setOpen(false)}
+                    >
+                      <X size={16} />
+                    </button>
+                  </header>
+                  <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
+                    {children}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="fixed inset-0 z-[70] flex flex-col bg-paper">
+                <header className="safe-top flex shrink-0 items-center gap-2 border-b border-line px-3 pb-2 pt-3">
+                  <button
+                    type="button"
+                    aria-label="返回"
+                    className="press flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink"
+                    onClick={() => setOpen(false)}
+                  >
+                    <ArrowLeft size={19} />
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-title">{title}</p>
+                    {summary ? <p className="truncate text-caption text-ink-3">{summary}</p> : null}
+                  </div>
+                </header>
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 pb-[calc(env(safe-area-inset-bottom)+28px)]">
+                  {children}
+                </div>
+              </div>
+            ),
+            document.body,
+          )
+        : null}
+    </>
+  )
+}
+
+/** 屏幕够宽（平板 / 桌面）时设置项用居中的手机尺寸弹窗，否则跳转到整页。 */
+function useWideLayout() {
+  const [wide, setWide] = useState(() =>
+    typeof window === 'undefined' ? false : window.matchMedia('(min-width: 768px)').matches,
+  )
+  useEffect(() => {
+    const query = window.matchMedia('(min-width: 768px)')
+    const onChange = () => setWide(query.matches)
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
+  return wide
 }
 
 function Row({

@@ -26,6 +26,8 @@ export interface SubmitAIJobInput {
   system: string
   prompt: string
   temperature?: number
+  /** 指定模型入口；为空时由服务端按权重挑选 */
+  endpointId?: string
   silent?: boolean
 }
 
@@ -220,6 +222,7 @@ export async function submitAIJob(input: SubmitAIJobInput): Promise<AIJob> {
         system: input.system,
         prompt: input.prompt,
         temperature: input.temperature ?? 0.6,
+        endpointId: input.endpointId || '',
       },
       timeoutMs: 15_000,
     })

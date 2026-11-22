@@ -10,6 +10,7 @@ import {
   CaretRight,
   CheckCircle,
   Code,
+  DownloadSimple,
   GithubLogo,
   Info,
   MapTrifold,
@@ -19,7 +20,7 @@ import {
 } from '@phosphor-icons/react'
 import { resetAll } from '../lib/repo'
 import { useI18n, useNav, useRefresh, useToast } from '../lib/app-context'
-import { apiOrigin, getCloudConfig } from '../lib/cloud'
+import { apiOrigin, getCloudConfig, getLatestAppRelease, type AppRelease } from '../lib/cloud'
 import { isDevMode, setDevMode, subscribeDevMode } from '../lib/dev-mode'
 import { openOnboarding } from '../lib/onboarding'
 import { isNative } from '../lib/native'
@@ -37,6 +38,32 @@ interface RemoteVersion {
 const REPO_URL = 'https://github.com/jijiayi0626/travelog-multiplatform'
 const TAPS_TO_UNLOCK = 7
 
+/** 国内下载加速：两个优选 CDN 节点 + GitHub 直连 */
+const APK_MIRRORS = [
+  { label: '节点一 · 优选', base: 'https://v6.gh-proxy.org/' },
+  { label: '节点二 · 优选', base: 'https://cdn.gh-proxy.com/' },
+  { label: 'GitHub 直连', base: '' },
+]
+
+function versionValue(version: string): number {
+  return String(version)
+    .replace(/^v/i, '')
+    .split('.')
+    .slice(0, 3)
+    .map((part) => Number.parseInt(part, 10) || 0)
+    .reduce((acc, part) => acc * 1000 + part, 0)
+}
+
+function mirrorUrl(base: string, url: string): string {
+  if (!base) return url
+  return `${base.replace(/\/+$/, '')}/${url}`
+}
+
+function formatSize(size: number): string {
+  if (!size) return ''
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
+}
+
 export function AboutPage() {
   const nav = useNav()
   const toast = useToast()
@@ -48,8 +75,27 @@ export function AboutPage() {
   const [applying, setApplying] = useState(false)
   const [confirmReset, setConfirmReset] = useState(false)
   const [taps, setTaps] = useState(0)
+  const [release, setRelease] = useState<AppRelease | null>(null)
+  const [releaseError, setReleaseError] = useState('')
   const tapTimer = useRef(0)
   const checking = useRef(false)
+
+  useEffect(() => {
+    let alive = true
+    void getLatestAppRelease()
+      .then((data) => {
+        if (alive) {
+          setRelease(data)
+          setReleaseError('')
+        }
+      })
+      .catch((error: unknown) => {
+        if (alive) setReleaseError(error instanceof Error ? error.message : '检查更新失败')
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   useEffect(() => subscribeDevMode(() => setDevModeState(isDevMode())), [])
 
@@ -137,6 +183,9 @@ export function AboutPage() {
     bump()
     toast(tr('已恢复示例数据'))
   }
+
+  const apk = release?.assets.find((asset) => /release/i.test(asset.name)) ?? release?.assets[0] ?? null
+  const hasNewer = release ? versionValue(release.version) > versionValue(__APP_VERSION__) : false
 
   const statusText =
     updateState === 'checking'
@@ -264,6 +313,65 @@ export function AboutPage() {
           value={isNative() ? tr('移动应用') : tr('网页')}
           onClick={() => toast(navigator.userAgent)}
         />
+      </section>
+
+      <section className="overflow-hidden rounded-2xl border border-line bg-surface">
+        <div className="flex items-center gap-3 border-b border-line px-4 py-3.5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-ink-2">
+            <DownloadSimple size={17} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-body text-ink">{tr('Android 安装包')}</p>
+            <p className="mt-0.5 truncate text-caption text-ink-3">
+              {releaseError
+                ? tr('暂时无法获取最新版本')
+                : release
+                  ? `v${release.version}${apk ? ` · ${formatSize(apk.size)}` : ''}`
+                  : tr('正在检查…')}
+            </p>
+          </div>
+          {release && apk ? (
+            <span
+              className={cn(
+                'shrink-0 rounded-full px-2 py-0.5 text-caption',
+                hasNewer ? 'bg-accent-soft text-accent' : 'bg-paper-2 text-ink-3',
+              )}
+            >
+              {hasNewer ? tr('有新版本') : tr('已是最新')}
+            </span>
+          ) : null}
+        </div>
+
+        {release && apk ? (
+          <div className="grid gap-2 px-4 py-3 sm:grid-cols-3">
+            {APK_MIRRORS.map((mirror) => (
+              <button
+                key={mirror.label}
+                type="button"
+                className="btn-ghost h-10 justify-center px-2 text-note"
+                onClick={() => void Browser.open({ url: mirrorUrl(mirror.base, apk.url) })}
+              >
+                <DownloadSimple size={15} />
+                {tr(mirror.label)}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="px-4 py-3 text-caption leading-5 text-ink-3">
+            {releaseError || (release ? tr('当前版本还没有上传 APK') : tr('正在检查…'))}
+          </div>
+        )}
+
+        {release && apk ? (
+          <p className="border-t border-line px-4 py-2.5 text-caption leading-5 text-ink-3">
+            {hasNewer
+              ? tr('当前 v{current}，可更新到 v{latest}；优先使用上面的优选节点下载。', {
+                  current: __APP_VERSION__,
+                  latest: release.version,
+                })
+              : tr('下载会跳转浏览器，安装时请允许「安装未知应用」。')}
+          </p>
+        ) : null}
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-line bg-surface">

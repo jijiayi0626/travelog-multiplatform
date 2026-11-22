@@ -368,13 +368,55 @@ export async function aiComplete(
   prompt: string,
   system: string,
   temperature = 0.6,
+  endpointId = '',
 ): Promise<AIResult> {
   if (!isSignedIn()) throw new ApiError('请先在「云同步」里登录', 401)
   return api<AIResult>('/ai/complete', {
     method: 'POST',
-    body: { prompt, system, temperature },
+    body: { prompt, system, temperature, endpointId },
     timeoutMs: 45000,
   })
+}
+
+export interface AIModelOption {
+  id: string
+  name: string
+  model: string
+  type: string
+}
+
+export interface AIModelsResult {
+  enabled: boolean
+  canUse: boolean
+  member: boolean
+  membershipRequired: boolean
+  models: AIModelOption[]
+}
+
+/** 当前账号可用的模型列表（一个站点可绑定多个模型） */
+export async function getAIModels(): Promise<AIModelsResult> {
+  if (!isSignedIn()) throw new ApiError('请先在「云同步」里登录', 401)
+  return api<AIModelsResult>('/ai/models', { timeoutMs: 15000 })
+}
+
+export interface AppReleaseAsset {
+  name: string
+  size: number
+  url: string
+}
+
+export interface AppRelease {
+  version: string
+  tag: string
+  name: string
+  publishedAt: number
+  notes: string
+  assets: AppReleaseAsset[]
+}
+
+/** 最新 GitHub Release（由 Worker 代理，避免客户端直连被限流） */
+export async function getLatestAppRelease(): Promise<AppRelease> {
+  return api<AppRelease>('/app/latest', { timeoutMs: 15000 })
 }
 
 /* ---------------- 照片（R2） ---------------- */
@@ -574,6 +616,7 @@ export interface AdminEndpoint {
   type: 'openai' | 'workers'
   base: string
   model: string
+  models?: string[]
   key: string
   hasKey: boolean
   weight: number

@@ -1359,7 +1359,10 @@ function AISettings({
   const [membershipRequired, setMembershipRequired] = useState(settings.ai.membershipRequired)
   const [temperature, setTemperature] = useState(String(settings.ai.temperature))
   const [drafts, setDrafts] = useState<AdminEndpoint[]>(() =>
-    settings.ai.endpoints.map((item) => ({ ...item })),
+    settings.ai.endpoints.map((item) => ({
+      ...item,
+      model: item.models?.length ? item.models.join(',') : item.model,
+    })),
   )
   const [busy, setBusy] = useState<'save' | 'test' | 'models' | null>(null)
   const [testResults, setTestResults] = useState<AdminAITestResult[]>([])
@@ -1604,18 +1607,34 @@ function AISettings({
                 {tr('拉取模型')}
               </button>
             </div>
+            <p className="text-caption leading-4 text-ink-3">
+              {tr('一个站点可绑定多个模型：用逗号分隔，例如 gpt-4o-mini,gpt-4o；保存后会展开成多个可对比入口。')}
+            </p>
             {modelOptions[item.id]?.length ? (
               <div className="flex flex-wrap gap-1">
-                {modelOptions[item.id].slice(0, 12).map((model) => (
-                  <button
-                    key={model}
-                    type="button"
-                    className="chip px-2 py-0.5 text-caption"
-                    onClick={() => patchDraft(item.id, { model })}
-                  >
-                    {model}
-                  </button>
-                ))}
+                {modelOptions[item.id].slice(0, 12).map((model) => {
+                  const active = item.model
+                    .split(/[,，\s]+/)
+                    .filter(Boolean)
+                    .includes(model)
+                  return (
+                    <button
+                      key={model}
+                      type="button"
+                      aria-pressed={active}
+                      className={cn('chip px-2 py-0.5 text-caption', active && 'chip-active')}
+                      onClick={() => {
+                        const current = item.model.split(/[,，\s]+/).filter(Boolean)
+                        const next = active
+                          ? current.filter((value) => value !== model)
+                          : [...current, model].slice(0, 6)
+                        patchDraft(item.id, { model: next.join(',') })
+                      }}
+                    >
+                      {model}
+                    </button>
+                  )
+                })}
               </div>
             ) : null}
 
