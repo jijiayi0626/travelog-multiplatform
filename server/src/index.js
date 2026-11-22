@@ -1471,6 +1471,7 @@ async function handlePush(request, env) {
     const deleted = item.deleted ? 1 : 0
     const data = item.deleted ? '{}' : JSON.stringify(item.data ?? {})
     if (data.length > MAX_ENTITY_BYTES) {
+      console.warn(`[sync] 跳过超大实体 kind=${kind} id=${id} bytes=${data.length}`)
       invalid++
       continue
     }
