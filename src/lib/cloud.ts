@@ -80,9 +80,19 @@ export function isSignedIn(): boolean {
   return Boolean(getCloudConfig().token)
 }
 
+/** 原生包没有同源服务器，未配置时回退到官方 Worker，避免一装好就同步不了 */
+const DEFAULT_NATIVE_SERVER = 'https://travelog.mr-jijiayi.workers.dev'
+
+function isNativeApp(): boolean {
+  const capacitor = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } })
+    .Capacitor
+  return Boolean(capacitor?.isNativePlatform?.())
+}
+
 export function apiOrigin(): string {
   const base = getCloudConfig().baseUrl.trim().replace(/\/$/, '')
   if (base) return `${base}/api`
+  if (typeof window !== 'undefined' && isNativeApp()) return `${DEFAULT_NATIVE_SERVER}/api`
   if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {
     return `${window.location.origin}/api`
   }
@@ -416,7 +426,17 @@ export interface AppRelease {
 
 /** 最新 GitHub Release（由 Worker 代理，避免客户端直连被限流） */
 export async function getLatestAppRelease(): Promise<AppRelease> {
-  return api<AppRelease>('/app/latest', { timeoutMs: 15000 })
+  try {
+    return await api<AppRelease>('/app/latest', { timeoutMs: 15000 })
+  } catch (error) {
+    // 自建服务器版本较旧、没有该接口时，回退到官方 Worker 查询
+    if (apiOrigin() === `${DEFAULT_NATIVE_SERVER}/api`) throw error
+    const response = await fetch(`${DEFAULT_NATIVE_SERVER}/api/app/latest`, {
+      headers: { accept: 'application/json' },
+    })
+    if (!response.ok) throw error
+    return (await response.json()) as AppRelease
+  }
 }
 
 /* ---------------- 照片（R2） ---------------- */
