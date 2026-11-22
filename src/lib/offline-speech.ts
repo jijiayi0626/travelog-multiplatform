@@ -12,8 +12,9 @@ const SCRIPT_ID = 'travelog-vosk-engine'
 /** 中文模型约 40MB，用于页面提示 */
 export const VOSK_MODEL_SIZE_MB = 40
 
-/** 依次尝试：GitHub raw → 加速节点一 → 加速节点二 */
+/** 依次尝试：jsDelivr → GitHub raw → 加速节点一 → 加速节点二 */
 export const VOSK_MODEL_MIRRORS = [
+  'https://cdn.jsdelivr.net/gh/jijiayi0626/travelog-multiplatform@main/models',
   'https://raw.githubusercontent.com/jijiayi0626/travelog-multiplatform/main/models',
   'https://v6.gh-proxy.org/https://raw.githubusercontent.com/jijiayi0626/travelog-multiplatform/main/models',
   'https://cdn.gh-proxy.com/https://raw.githubusercontent.com/jijiayi0626/travelog-multiplatform/main/models',
@@ -111,6 +112,7 @@ export async function isVoskModelReady(): Promise<boolean> {
   }
 }
 
+const PART_BYTES = 9_000_000
 const PART_COUNT = 5
 const TOTAL_BYTES = 43_900_310
 
@@ -165,7 +167,13 @@ export async function downloadVoskModel(
           signal: controller.signal,
         })
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        part = await readPart(response, doneBytes, controller, onProgress)
+        const blob = await readPart(response, doneBytes, controller, onProgress)
+        const expected =
+          index === PART_COUNT - 1 ? TOTAL_BYTES - index * PART_BYTES : PART_BYTES
+        if (blob.size !== expected) {
+          throw new Error(`分片 ${index + 1} 不完整（${blob.size}/${expected}）`)
+        }
+        part = blob
         break
       } catch (error) {
         lastError =
