@@ -33,7 +33,7 @@ const footer = `
 ### 安装
 
 - \`travelog-${version}-debug.apk\`：可直接安装调试
-- \`travelog-${version}-release.apk\`：CI 临时签名，正式发布请换成自己的 keystore
+- \`travelog-${version}-release.apk\`：仓库内固定 keystore 签名，可直接覆盖升级
 
 应用为 WebView + Java 实现，**不含 native 库**，单个 APK 兼容 \`arm64-v8a\` / \`armeabi-v7a\` / \`x86_64\`。
 

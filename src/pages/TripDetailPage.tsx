@@ -50,6 +50,7 @@ import {
 import { useLoader } from '../lib/hooks'
 import { answerTripQuestion, generatePlan, generatePackingList } from '../lib/ai'
 import { deleteCloudPhoto, isSignedIn, leaveTripShare, listTripShares } from '../lib/cloud'
+import { runSync } from '../lib/sync-engine'
 import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import {
   CATEGORY_COLOR,
@@ -135,6 +136,23 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
   const [joinedShare, setJoinedShare] = useState<{ owner: string } | null>(null)
   const [confirmLeaveShare, setConfirmLeaveShare] = useState(false)
   const [leaveBusy, setLeaveBusy] = useState(false)
+
+  // 协作近实时：停在行程详情时每 12 秒拉一次增量，别人的改动会尽快出现
+  useEffect(() => {
+    if (!isSignedIn()) return
+    let busy = false
+    const timer = window.setInterval(() => {
+      if (busy || document.visibilityState !== 'visible' || !navigator.onLine) return
+      busy = true
+      void runSync({ pullOnly: true })
+        .then(() => bump())
+        .catch(() => undefined)
+        .finally(() => {
+          busy = false
+        })
+    }, 12_000)
+    return () => window.clearInterval(timer)
+  }, [bump])
 
   useEffect(() => {
     if (!menuOpen || !isSignedIn()) return

@@ -44,6 +44,70 @@ async function trackedDelete(store: StoreName, id: string): Promise<void> {
   await deleteOne(store, id)
 }
 
+/* ---------------- 回收站（30 天内可恢复） ---------------- */
+
+const TRASH_TTL = 30 * 24 * 60 * 60 * 1000
+
+export interface TrashRow {
+  store: StoreName
+  row: { id: string }
+}
+
+export interface TrashEntry {
+  id: string
+  kind: 'trip' | 'moment'
+  title: string
+  deletedAt: number
+  expiresAt: number
+  rows: TrashRow[]
+}
+
+async function pushTrash(
+  kind: TrashEntry['kind'],
+  title: string,
+  rows: TrashRow[],
+): Promise<void> {
+  if (rows.length === 0) return
+  const now = Date.now()
+  await putOne<TrashEntry>('trash', {
+    id: uid(),
+    kind,
+    title: title.trim() || '未命名',
+    deletedAt: now,
+    expiresAt: now + TRASH_TTL,
+    rows,
+  })
+}
+
+export async function listTrash(): Promise<TrashEntry[]> {
+  const all = await getAll<TrashEntry>('trash')
+  return all.sort((a, b) => b.deletedAt - a.deletedAt)
+}
+
+export async function restoreTrashEntry(id: string): Promise<boolean> {
+  const entry = await getOne<TrashEntry>('trash', id)
+  if (!entry) return false
+  const now = Date.now()
+  let offset = 0
+  for (const item of entry.rows) {
+    await putOne(item.store, { ...item.row, updatedAt: now + offset, syncState: 1 })
+    offset += 1
+  }
+  await deleteOne('trash', id)
+  localStorage.setItem('travelog.syncDirty', '1')
+  return true
+}
+
+export async function purgeTrashEntry(id: string): Promise<void> {
+  await deleteOne('trash', id)
+}
+
+export async function purgeExpiredTrash(): Promise<void> {
+  const now = Date.now()
+  const all = await getAll<TrashEntry>('trash')
+  await Promise.all(all.filter((entry) => entry.expiresAt <= now).map((entry) => deleteOne('trash', entry.id)))
+}
+
 /* ---------------- 归一化（兼容旧版本数据） ---------------- */
 
 function normalizeTrip(raw: Trip): Trip {
@@ -90,6 +154,7 @@ function normalizePlan(raw: Plan): Plan {
 
 export async function ensureReady(): Promise<void> {
   await seedIfNeeded()
+  await purgeExpiredTrash()
 }
 
 /* ---------------- 旅行 ---------------- */
@@ -142,7 +207,8 @@ export async function saveTrip(trip: Trip): Promise<Trip> {
 }
 
 export async function deleteTrip(id: string): Promise<void> {
-  const [moments, expenses, checklist, footprints, members, plans] = await Promise.all([
+  const [trip, moments, expenses, checklist, footprints, members, plans] = await Promise.all([
+    getOne<Trip>('trips', id),
     getAll<Moment>('moments'),
     getAll<Expense>('expenses'),
     getAll<ChecklistItem>('checklist'),
@@ -150,14 +216,33 @@ export async function deleteTrip(id: string): Promise<void> {
     getAll<Member>('members'),
     getAll<Plan>('plans'),
   ])
+  const tripMoments = moments.filter((item) => item.tripId === id)
+  const tripExpenses = expenses.filter((item) => item.tripId === id)
+  const tripChecklist = checklist.filter((item) => item.tripId === id)
+  const tripFootprints = footprints.filter((item) => item.tripId === id)
+  const tripMembers = members.filter((item) => item.tripId === id)
+  const tripPlans = plans.filter((item) => item.tripId === id)
+
+  if (trip) {
+    await pushTrash('trip', trip.title, [
+      { store: 'trips', row: trip },
+      ...tripMoments.map((row) => ({ store: 'moments' as const, row })),
+      ...tripExpenses.map((row) => ({ store: 'expenses' as const, row })),
+      ...tripChecklist.map((row) => ({ store: 'checklist' as const, row })),
+      ...tripFootprints.map((row) => ({ store: 'footprints' as const, row })),
+      ...tripMembers.map((row) => ({ store: 'members' as const, row })),
+      ...tripPlans.map((row) => ({ store: 'plans' as const, row })),
+    ])
+  }
+
   await Promise.all([
     trackedDelete('trips', id),
-    ...moments.filter((item) => item.tripId === id).map((item) => trackedDelete('moments', item.id)),
-    ...expenses.filter((item) => item.tripId === id).map((item) => trackedDelete('expenses', item.id)),
-    ...checklist.filter((item) => item.tripId === id).map((item) => trackedDelete('checklist', item.id)),
-    ...footprints.filter((item) => item.tripId === id).map((item) => trackedDelete('footprints', item.id)),
-    ...members.filter((item) => item.tripId === id).map((item) => trackedDelete('members', item.id)),
-    ...plans.filter((item) => item.tripId === id).map((item) => trackedDelete('plans', item.id)),
+    ...tripMoments.map((item) => trackedDelete('moments', item.id)),
+    ...tripExpenses.map((item) => trackedDelete('expenses', item.id)),
+    ...tripChecklist.map((item) => trackedDelete('checklist', item.id)),
+    ...tripFootprints.map((item) => trackedDelete('footprints', item.id)),
+    ...tripMembers.map((item) => trackedDelete('members', item.id)),
+    ...tripPlans.map((item) => trackedDelete('plans', item.id)),
   ])
 }
 
@@ -218,6 +303,11 @@ export async function saveMoment(moment: Moment): Promise<Moment> {
 }
 
 export async function deleteMoment(id: string): Promise<void> {
+  const moment = await getOne<Moment>('moments', id)
+  if (moment) {
+    const title = moment.content.trim().slice(0, 30) || '一条记录'
+    await pushTrash('moment', title, [{ store: 'moments', row: moment }])
+  }
   await trackedDelete('moments', id)
 }
 

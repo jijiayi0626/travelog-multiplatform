@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
+  BookmarkSimple,
   CheckCircle,
   CircleNotch,
   Copy,
@@ -24,6 +25,8 @@ import {
   type AIJobKind,
 } from '../lib/ai-jobs'
 import { getAIModels, isSignedIn, type AIModelsResult } from '../lib/cloud'
+import { getTrip, listTrips, saveTrip } from '../lib/repo'
+import { markLocalChanges, scheduleAutoSync } from '../lib/sync-engine'
 import { cn } from '../lib/cn'
 import { formatDate, formatTime } from '../lib/utils'
 import { useI18n, useNav, useToast } from '../lib/app-context'
@@ -96,6 +99,9 @@ export function AIJobHub() {
   const [picked, setPicked] = useState<string[]>([])
   const [draft, setDraft] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [applyingJob, setApplyingJob] = useState<AIJob | null>(null)
+  const [applyTrips, setApplyTrips] = useState<Array<{ id: string; title: string; destination: string }>>([])
+  const [applying, setApplying] = useState(false)
 
   useEffect(() => {
     const syncAuth = () => {
@@ -413,6 +419,25 @@ export function AIJobHub() {
                               </button>
                               <button
                                 type="button"
+                                className="btn-ghost h-9 px-3 text-note"
+                                onClick={() => {
+                                  setApplyingJob(job)
+                                  void listTrips().then((items) =>
+                                    setApplyTrips(
+                                      items.map((item) => ({
+                                        id: item.id,
+                                        title: item.title,
+                                        destination: item.destination,
+                                      })),
+                                    ),
+                                  )
+                                }}
+                              >
+                                <BookmarkSimple size={14} />
+                                {tr('存进行程')}
+                              </button>
+                              <button
+                                type="button"
                                 className="btn-ghost h-9 px-3 text-note text-danger"
                                 onClick={() => setDeleting(job)}
                               >
@@ -458,6 +483,60 @@ export function AIJobHub() {
           })
       }}
     />
+  )
+
+  const applyToTrip = async (tripId: string) => {
+    if (!applyingJob || applying) return
+    setApplying(true)
+    try {
+      const trip = await getTrip(tripId)
+      if (!trip) throw new Error('行程不存在')
+      const text = prettyResult(applyingJob)
+      await saveTrip({ ...trip, note: [trip.note.trim(), text].filter(Boolean).join('\n\n') })
+      markLocalChanges()
+      scheduleAutoSync(800)
+      toast(tr('已存入行程备注'))
+      setApplyingJob(null)
+    } catch (error) {
+      toast(error instanceof Error ? error.message : tr('保存失败'))
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  const applySheet = (
+    <Sheet
+      open={Boolean(applyingJob)}
+      title={tr('存进行程')}
+      onClose={() => {
+        if (!applying) setApplyingJob(null)
+      }}
+    >
+      <p className="pb-2 text-caption text-ink-3">
+        {tr('选择行程后，这段 AI 结果会追加到行程备注里。')}
+      </p>
+      {applyTrips.length === 0 ? (
+        <p className="py-6 text-center text-caption text-ink-3">{tr('还没有行程，先新建一个行程')}</p>
+      ) : (
+        applyTrips.map((trip) => (
+          <button
+            key={trip.id}
+            type="button"
+            disabled={applying}
+            onClick={() => void applyToTrip(trip.id)}
+            className="flex w-full items-center gap-3 border-b border-line py-3 text-left last:border-0 disabled:opacity-60"
+          >
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-body-sm text-ink">{trip.title || tr('未命名行程')}</span>
+              <span className="block text-caption text-ink-3">{trip.destination}</span>
+            </span>
+            <span className="shrink-0 text-caption text-accent">
+              {applying ? tr('保存中…') : tr('存到这里')}
+            </span>
+          </button>
+        ))
+      )}
+    </Sheet>
   )
 
   return (
@@ -534,6 +613,7 @@ export function AIJobHub() {
         </div>
       ) : null}
       {drawer}
+      {applySheet}
       {confirm}
     </>
   )

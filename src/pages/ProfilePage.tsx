@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -14,7 +14,9 @@ import {
   Images,
   Info,
   Translate,
+  ClockCounterClockwise,
   MapPinLine,
+  MagnifyingGlass,
   SignIn,
   ShieldCheck,
   Sparkle,
@@ -31,7 +33,18 @@ import { exportAll, getProfile, importAll, saveProfile, stats } from '../lib/rep
 import { useLoader } from '../lib/hooks'
 import { hasPendingLocalChanges, runSync } from '../lib/sync-engine'
 import { useI18n, useNav, useRefresh, useToast } from '../lib/app-context'
-import { ACCENTS, type AccentName, currentTheme, getAccent, setAccent, setThemeMode } from '../lib/theme'
+import {
+  ACCENTS,
+  type AccentName,
+  currentTheme,
+  getAccent,
+  getThemeMode,
+  getThemeSchedule,
+  setAccent,
+  setThemeMode,
+  setThemeSchedule,
+  type ThemeMode,
+} from '../lib/theme'
 import { compressImage, downloadText, readTextFile, relativeTime } from '../lib/utils'
 import { getBestFix, isNative, shareTextFile } from '../lib/native'
 import { ensureExactAlarmPermission, ensureNotificationPermission } from '../lib/reminder'
@@ -51,6 +64,12 @@ import {
   type CloudConfig,
   type StorageInfo,
 } from '../lib/cloud'
+import {
+  listTrash,
+  purgeTrashEntry,
+  restoreTrashEntry,
+  type TrashEntry,
+} from '../lib/repo'
 import { scheduleAutoSync } from '../lib/sync-engine'
 import { countPendingImages } from '../lib/photo-sync'
 import {
@@ -99,7 +118,12 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
   }, [])
   const { data, loading } = useLoader(loader, { profile: null as Profile | null, stats: EMPTY_STATS }, 'profile')
 
+  const [themeMode, setThemeModeState] = useState<ThemeMode>(() => getThemeMode())
   const [theme, setTheme] = useState<'light' | 'dark'>(() => currentTheme())
+  const [themeSchedule, setThemeScheduleState] = useState(() => getThemeSchedule())
+  const [settingsQuery, setSettingsQuery] = useState('')
+  const [trashOpen, setTrashOpen] = useState(false)
+  const [trashItems, setTrashItems] = useState<TrashEntry[]>([])
   const [accent, setAccentState] = useState<AccentName>(() => getAccent())
   const [editing, setEditing] = useState(false)
   const [nickname, setNickname] = useState('')
@@ -262,11 +286,31 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
     setAutoCheckin(next)
   }
 
-  const toggleTheme = () => {
-    const next = theme === 'dark' ? 'light' : 'dark'
-    setThemeMode(next)
-    setTheme(next)
+  const chooseThemeMode = (mode: ThemeMode) => {
+    setThemeMode(mode)
+    setThemeModeState(mode)
+    setTheme(currentTheme())
   }
+
+  const changeSchedule = (patch: { start?: string; end?: string }) => {
+    setThemeSchedule(patch)
+    setThemeScheduleState((prev) => ({ ...prev, ...patch }))
+    setTheme(currentTheme())
+  }
+
+  useEffect(() => {
+    void listTrash().then(setTrashItems)
+  }, [])
+
+  useEffect(() => {
+    const onThemeChanged = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      setTheme(detail === 'dark' ? 'dark' : 'light')
+      setThemeModeState(getThemeMode())
+    }
+    window.addEventListener('travelog:theme-changed', onThemeChanged)
+    return () => window.removeEventListener('travelog:theme-changed', onThemeChanged)
+  }, [])
 
   const chooseAccent = (value: AccentName) => {
     setAccent(value)
@@ -441,10 +485,32 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
   const autoSummary = autoCheckin.enabled
     ? `已开启 · 半径 ${autoCheckin.radius}m`
     : '进入常去地点附近自动补足迹'
-  const appearanceSummary = `${theme === 'dark' ? '深色' : '浅色'} · ${lang === 'zh' ? '中文' : 'English'}`
+  const themeModeLabel =
+    themeMode === 'light'
+      ? '浅色'
+      : themeMode === 'dark'
+        ? '深色'
+        : themeMode === 'system'
+          ? '跟随系统'
+          : '定时切换'
+  const appearanceSummary = `${themeModeLabel} · ${lang === 'zh' ? '中文' : 'English'}`
   const backupSummary = lastBackupAt
     ? `上次备份 ${new Date(lastBackupAt).toLocaleDateString('zh-CN')}`
     : '导出 / 导入 JSON 备份'
+  const settingsSearch = (
+    <div className="relative px-4 py-3">
+      <MagnifyingGlass
+        size={15}
+        className="pointer-events-none absolute left-7 top-1/2 -translate-y-1/2 text-ink-3"
+      />
+      <input
+        value={settingsQuery}
+        onChange={(event) => setSettingsQuery(event.target.value)}
+        placeholder={tr('搜索设置')}
+        className="w-full rounded-xl border border-line bg-paper py-2 pl-9 pr-3 text-body-sm text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none"
+      />
+    </div>
+  )
   const syncSummary = cloudConfig.autoSync
     ? cloudConfig.syncIntervalMinutes === 0
       ? `实时同步${cloudConfig.wifiOnly ? ' · 仅 Wi-Fi' : ''}`
@@ -712,12 +778,58 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
       title={tr('外观与语言')}
       summary={appearanceSummary}
     >
-      <Row
-        icon={<ThemeGlyph size={16} />}
-        title={t('profile.appearance')}
-        value={theme === 'dark' ? '深色' : '浅色'}
-        onClick={toggleTheme}
-      />
+      <div className="border-b border-line py-3">
+        <div className="flex items-center gap-3">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-ink-2">
+            <ThemeGlyph size={16} />
+          </span>
+          <span className="min-w-0 flex-1 text-body-sm text-ink">{t('profile.appearance')}</span>
+          <span className="shrink-0 text-caption text-ink-3">{theme === 'dark' ? '深色' : '浅色'}</span>
+        </div>
+        <div className="mt-2 grid grid-cols-4 gap-1.5">
+          {(
+            [
+              ['light', '浅色'],
+              ['dark', '深色'],
+              ['system', '跟随系统'],
+              ['schedule', '定时切换'],
+            ] as Array<[ThemeMode, string]>
+          ).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              aria-pressed={themeMode === mode}
+              onClick={() => chooseThemeMode(mode)}
+              className={cn(
+                'press rounded-lg border px-1 py-1.5 text-caption transition-colors',
+                themeMode === mode
+                  ? 'border-accent bg-accent/10 font-medium text-accent'
+                  : 'border-line text-ink-2',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {themeMode === 'schedule' ? (
+          <div className="mt-2 flex items-center gap-2 text-caption text-ink-3">
+            <span className="shrink-0">深色时段</span>
+            <input
+              type="time"
+              value={themeSchedule.start}
+              onChange={(event) => changeSchedule({ start: event.target.value })}
+              className="min-w-0 flex-1 rounded-lg border border-line bg-paper px-2 py-1.5 text-note text-ink"
+            />
+            <span className="shrink-0">至</span>
+            <input
+              type="time"
+              value={themeSchedule.end}
+              onChange={(event) => changeSchedule({ end: event.target.value })}
+              className="min-w-0 flex-1 rounded-lg border border-line bg-paper px-2 py-1.5 text-note text-ink"
+            />
+          </div>
+        ) : null}
+      </div>
       <div className="flex items-center gap-3 border-b border-line py-3">
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-ink-2">
           <PaintBrush size={15} />
@@ -766,6 +878,77 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
         value="JSON"
         onClick={() => fileRef.current?.click()}
       />
+      <Row
+        icon={<ClockCounterClockwise size={16} />}
+        title="回收站"
+        value={trashOpen ? '收起' : `${trashItems.length} 项`}
+        onClick={() => {
+          void (async () => {
+            if (trashOpen) {
+              setTrashOpen(false)
+              return
+            }
+            setTrashItems(await listTrash())
+            setTrashOpen(true)
+          })()
+        }}
+      />
+      {trashOpen ? (
+        <div className="mt-1 rounded-xl border border-line bg-paper/60">
+          {trashItems.length === 0 ? (
+            <p className="py-6 text-center text-caption text-ink-3">回收站是空的</p>
+          ) : (
+            trashItems.map((item) => {
+              const daysLeft = Math.max(0, Math.ceil((item.expiresAt - Date.now()) / 86_400_000))
+              return (
+                <div
+                  key={item.id}
+                  className="flex items-center gap-2 border-b border-line px-3 py-2.5 last:border-0"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-body-sm text-ink">
+                      <span className="mr-1.5 rounded bg-paper-2 px-1.5 py-0.5 text-caption text-ink-3">
+                        {item.kind === 'trip' ? '行程' : '记录'}
+                      </span>
+                      {item.title}
+                    </p>
+                    <p className="mt-0.5 text-caption text-ink-3">
+                      {relativeTime(item.deletedAt)}删除 · {daysLeft} 天后自动清理
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-ghost h-8 shrink-0 px-2 text-caption"
+                    onClick={() => {
+                      void (async () => {
+                        await restoreTrashEntry(item.id)
+                        setTrashItems(await listTrash())
+                        bump()
+                        toast('已恢复')
+                      })()
+                    }}
+                  >
+                    恢复
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost h-8 shrink-0 px-2 text-caption text-ink-3"
+                    onClick={() => {
+                      void (async () => {
+                        await purgeTrashEntry(item.id)
+                        setTrashItems(await listTrash())
+                        toast('已彻底删除')
+                      })()
+                    }}
+                  >
+                    删除
+                  </button>
+                </div>
+              )
+            })
+          )}
+        </div>
+      ) : null}
       <div className="mt-2 rounded-xl bg-paper-2/60 p-3 text-caption leading-4 text-ink-3">
         <p>
           本地占用 {storage ? formatBytes(storage.usage) : '计算中…'}
@@ -800,6 +983,21 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
       />
     </SettingsGroup>
   )
+
+  const settingGroups = [
+    { key: 'sync', title: tr('云同步与备份'), keywords: '同步 云备份 云相册 实时 wifi 备份', node: syncGroup },
+    { key: 'security', title: tr('账号与安全'), keywords: '账号 密码 邮箱 设备 登录 头像 资料', node: securityGroup },
+    { key: 'auto', title: tr('自动打卡'), keywords: '打卡 签到 自动 定位', node: autoCheckinGroup },
+    { key: 'appearance', title: tr('外观与语言'), keywords: '外观 主题 颜色 深色 浅色 定时 语言 字体', node: appearanceGroup },
+    { key: 'data', title: tr('数据与备份'), keywords: '数据 备份 导出 导入 回收站 恢复 删除 清理 重置', node: dataGroup },
+    { key: 'about', title: tr('关于与帮助'), keywords: '关于 帮助 版本 更新 开发者 github 仓库 隐私', node: aboutGroup },
+  ]
+  const normalizedQuery = settingsQuery.trim().toLowerCase()
+  const visibleGroups = normalizedQuery
+    ? settingGroups.filter((group) =>
+        `${group.title} ${group.keywords}`.toLowerCase().includes(normalizedQuery),
+      )
+    : settingGroups
 
   if (!signedIn) {
     return (
@@ -856,10 +1054,16 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
 
         {guestTools ? (
           <section className="overflow-hidden rounded-2xl border border-line bg-surface">
-            {autoCheckinGroup}
-            {appearanceGroup}
-            {dataGroup}
-            {aboutGroup}
+            {settingsSearch}
+            {visibleGroups
+              .filter((group) => group.key !== 'sync' && group.key !== 'security')
+              .map((group) => (
+                <Fragment key={group.key}>{group.node}</Fragment>
+              ))}
+            {normalizedQuery &&
+            !visibleGroups.some((group) => group.key !== 'sync' && group.key !== 'security') ? (
+              <p className="px-4 py-6 text-center text-caption text-ink-3">没有匹配的设置</p>
+            ) : null}
           </section>
         ) : null}
 
@@ -980,12 +1184,13 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-line bg-surface">
-        {syncGroup}
-        {securityGroup}
-        {autoCheckinGroup}
-        {appearanceGroup}
-        {dataGroup}
-        {aboutGroup}
+        {settingsSearch}
+        {visibleGroups.map((group) => (
+          <Fragment key={group.key}>{group.node}</Fragment>
+        ))}
+        {normalizedQuery && visibleGroups.length === 0 ? (
+          <p className="px-4 py-6 text-center text-caption text-ink-3">没有匹配的设置</p>
+        ) : null}
       </section>
 
       <input

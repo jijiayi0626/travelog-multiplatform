@@ -1,5 +1,5 @@
 const DB_NAME = 'travelog'
-const DB_VERSION = 3
+const DB_VERSION = 4
 
 export type StoreName =
   | 'trips'
@@ -12,6 +12,7 @@ export type StoreName =
   | 'profile'
   | 'tombstones'
   | 'meta'
+  | 'trash'
 
 const STORES: StoreName[] = [
   'trips',
@@ -24,6 +25,7 @@ const STORES: StoreName[] = [
   'profile',
   'tombstones',
   'meta',
+  'trash',
 ]
 
 interface MetaRow {
