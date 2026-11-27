@@ -79,7 +79,7 @@ export function Onboarding() {
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState(0)
   const [narrow, setNarrow] = useState(() =>
-    typeof window === 'undefined' ? true : window.matchMedia('(max-width: 639px)').matches,
+    typeof window === 'undefined' ? true : window.matchMedia('(max-width: 1023px)').matches,
   )
   const [permissions, setPermissions] = useState<{
     location: PermissionState
@@ -152,7 +152,7 @@ export function Onboarding() {
   })
 
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 639px)')
+    const mq = window.matchMedia('(max-width: 1023px)')
     const onChange = () => setNarrow(mq.matches)
     mq.addEventListener('change', onChange)
     return () => mq.removeEventListener('change', onChange)
@@ -162,7 +162,7 @@ export function Onboarding() {
   useEffect(() => {
     if (!open || STEPS[step].key !== 'nav') return
     // 从「关于」重看引导时先回到首页，保证底部导航真的存在
-    if (window.matchMedia('(max-width: 639px)').matches) nav.navigate({ name: 'trips' })
+    if (window.matchMedia('(max-width: 1023px)').matches) nav.navigate({ name: 'trips' })
     const onClick = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null
       if (!target?.closest('nav')) return

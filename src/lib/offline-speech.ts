@@ -30,7 +30,7 @@ const PART_TIMEOUT_MS = 180_000
 /** 分片连续 60 秒没有新字节就放弃 */
 const PART_IDLE_TIMEOUT_MS = 60_000
 /** 首次解压 68MB 模型在低端设备上较慢，给足时间 */
-const MODEL_LOAD_TIMEOUT_MS = 120_000
+const MODEL_LOAD_TIMEOUT_MS = 45_000
 /** Vosk 中文模型固定 16kHz */
 const VOSK_SAMPLE_RATE = 16_000
 
@@ -648,8 +648,11 @@ export async function testVoskModelStartup(): Promise<string> {
   }
   if (workerError) {
     lastError = `识别器初始化失败：${workerError}`
+    releaseVoskModel()
     return lastError
   }
+  // 测试完释放模型，避免测试留下的识别器状态影响真正开始识别
+  releaseVoskModel()
   return ''
 }
 
@@ -666,6 +669,8 @@ export async function startOfflineListening({
   onResult,
   onError,
 }: OfflineListenOptions): Promise<() => Promise<void>> {
+  // 模型状态不对时先释放，避免测试/上次失败留下半初始化实例
+  if (cachedModel && !cachedModel.ready) releaseVoskModel()
   // 已加载过模型时直接复用，避免每次开始说话都重新读 44MB 缓存
   if (!cachedModel) {
     const blob = await getModelBlob()
@@ -706,6 +711,7 @@ export async function startOfflineListening({
     model = await getVoskModel(Vosk)
   } catch (error) {
     stopStream()
+    releaseVoskModel()
     throw new Error(errorText(error))
   }
 

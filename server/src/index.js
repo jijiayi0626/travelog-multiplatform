@@ -127,7 +127,11 @@ function clientInfo(request) {
   const cf = request.cf || {}
   const forwarded = (request.headers.get('x-forwarded-for') || '').split(',')[0].trim()
   return {
-    ip: request.headers.get('cf-connecting-ip') || forwarded || '',
+    ip:
+      request.headers.get('cf-connecting-ip') ||
+      request.headers.get('x-real-ip') ||
+      forwarded ||
+      '',
     userAgent: (request.headers.get('user-agent') || '').slice(0, 300),
     country: cf.country || '',
     region: cf.region || cf.regionCode || '',
@@ -228,7 +232,7 @@ async function deviceIdOf(token) {
     .join('')
 }
 
-async function listDevices(env, userId, currentToken = '') {
+async function listDevices(env, userId, currentToken = '', currentIp = '') {
   const { results } = await env.DB.prepare(
     `SELECT token, device_name, user_agent, ip, created_at, last_seen_at
      FROM user_tokens WHERE user_id = ?
@@ -240,9 +244,11 @@ async function listDevices(env, userId, currentToken = '') {
     (results || []).map(async (row) => ({
       id: await deviceIdOf(row.token),
       // 设备主标题直接用 IP，避免暴露用户自定义设备名
-      deviceName: row.ip || '未知 IP',
+      // 当前设备即使登录时没记到 IP，也用本次请求的 IP 兜底
+      deviceName:
+        row.ip || (row.token === currentToken ? currentIp : '') || '未知 IP',
       userAgent: row.user_agent || '',
-      ip: row.ip || '',
+      ip: row.ip || (row.token === currentToken ? currentIp : '') || '',
       createdAt: row.created_at,
       lastSeenAt: row.last_seen_at || 0,
       current: Boolean(currentToken) && row.token === currentToken,
@@ -1351,7 +1357,17 @@ async function handleUpdateAccount(request, env) {
 /** 当前账号的登录设备列表 */
 async function handleAccountDevices(request, env) {
   const user = await requireUser(request, env)
-  const devices = await listDevices(env, user.id, bearerToken(request))
+  const token = bearerToken(request)
+  const ip = clientInfo(request).ip
+  if (token && ip) {
+    // 登录时可能拿不到 IP，这里顺手给当前设备补上
+    await env.DB.prepare(
+      "UPDATE user_tokens SET ip = ? WHERE token = ? AND (ip IS NULL OR ip = '')",
+    )
+      .bind(ip, token)
+      .run()
+  }
+  const devices = await listDevices(env, user.id, token, ip)
   return json({ devices }, 200, env, request)
 }
 

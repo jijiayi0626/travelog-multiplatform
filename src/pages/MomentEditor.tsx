@@ -212,6 +212,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
     offlineFinalTextRef.current = ''
     const base = content
     setListening(true)
+    toast(tr('正在加载离线语音模型，请稍候…'))
     try {
       const stop = await startOfflineListening({
         onResult: (text, isFinal) => {
