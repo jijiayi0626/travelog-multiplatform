@@ -211,6 +211,8 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
     microphone: 'idle',
   })
   const [grantAllBusy, setGrantAllBusy] = useState(false)
+  const [pendingPermission, setPendingPermission] = useState<PermissionKey | null>(null)
+  const [confirmExport, setConfirmExport] = useState(false)
   const [clipboardInvite, setClipboardInvite] = useState(() => {
     try {
       return localStorage.getItem('travelog.clipboardInvite') !== '0'
@@ -280,85 +282,78 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
     }
   }, [])
 
-  const markPermission = (key: PermissionKey, status: PermissionStatus) => {
-    setPermissionStatus((previous) => ({ ...previous, [key]: status }))
-  }
-
   const requestLocationAccess = async (): Promise<PermissionStatus> => {
-    markPermission('location', 'busy')
-    let status: PermissionStatus = 'denied'
     try {
-      status = (await requestLocationPermission()) ? 'granted' : 'denied'
+      return (await requestLocationPermission()) ? 'granted' : 'denied'
     } catch {
-      status = 'denied'
+      return 'denied'
     }
-    markPermission('location', status)
-    return status
   }
 
   const requestNotificationAccess = async (): Promise<PermissionStatus> => {
-    markPermission('notification', 'busy')
-    let status: PermissionStatus = 'denied'
     try {
       const granted = await ensureNotificationPermission()
-      status = granted ? 'granted' : 'denied'
       if (granted && isNative()) void ensureExactAlarmPermission()
+      return granted ? 'granted' : 'denied'
     } catch {
-      status = 'denied'
+      return 'denied'
     }
-    markPermission('notification', status)
-    return status
   }
 
   const requestCameraAccess = async (): Promise<PermissionStatus> => {
-    markPermission('camera', 'busy')
-    let status: PermissionStatus = 'unsupported'
     try {
       const result = await Camera.requestPermissions({ permissions: ['camera'] })
-      status = result.camera === 'granted' ? 'granted' : 'denied'
+      return result.camera === 'granted' ? 'granted' : 'denied'
     } catch {
-      status = 'unsupported'
+      return 'unsupported'
     }
-    markPermission('camera', status)
-    return status
   }
 
   const requestMicrophoneAccess = async (): Promise<PermissionStatus> => {
-    if (!isNative()) {
-      markPermission('microphone', 'unsupported')
-      return 'unsupported'
-    }
-    markPermission('microphone', 'busy')
-    let status: PermissionStatus = 'unsupported'
+    if (!isNative()) return 'unsupported'
     try {
       const { SpeechRecognition } = await import('@capacitor-community/speech-recognition')
       const available = await SpeechRecognition.available()
-      if (available.available) {
-        const result = await SpeechRecognition.requestPermissions()
-        status = result.speechRecognition === 'granted' ? 'granted' : 'denied'
-      }
+      if (!available.available) return 'unsupported'
+      const result = await SpeechRecognition.requestPermissions()
+      return result.speechRecognition === 'granted' ? 'granted' : 'denied'
     } catch {
-      status = 'unsupported'
+      return 'unsupported'
     }
-    markPermission('microphone', status)
-    return status
   }
 
-  // 依次申请定位、通知、相机、麦克风；单项失败不阻塞后续
+  // 单项申请：只在结果返回后写入一次状态，避免计数中途跳动
+  const requestPermission = async (
+    key: PermissionKey,
+    request: () => Promise<PermissionStatus>,
+  ) => {
+    if (grantAllBusy || pendingPermission) return
+    setPendingPermission(key)
+    try {
+      const status = await request()
+      setPermissionStatus((previous) => ({ ...previous, [key]: status }))
+    } finally {
+      setPendingPermission(null)
+    }
+  }
+
+  // 依次申请定位、通知、相机、麦克风；全部结束后一次性写入最终计数
   const grantAllPermissions = async () => {
     if (grantAllBusy) return
     setGrantAllBusy(true)
-    let granted = 0
-    let needSettings = 0
-    const tally = (status: PermissionStatus) => {
-      if (status === 'granted') granted += 1
-      else if (status !== 'unsupported') needSettings += 1
-    }
     try {
-      tally(await requestLocationAccess())
-      tally(await requestNotificationAccess())
-      tally(await requestCameraAccess())
-      tally(await requestMicrophoneAccess())
+      const results: Record<PermissionKey, PermissionStatus> = {
+        location: await requestLocationAccess(),
+        notification: await requestNotificationAccess(),
+        camera: await requestCameraAccess(),
+        microphone: await requestMicrophoneAccess(),
+      }
+      setPermissionStatus(results)
+      const values = Object.values(results)
+      const granted = values.filter((status) => status === 'granted').length
+      const needSettings = values.filter(
+        (status) => status !== 'granted' && status !== 'unsupported',
+      ).length
       toast(
         tr('已开启 {n} 项，{m} 项需在系统设置开启', {
           n: granted,
@@ -400,7 +395,7 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
       await revokeAccountDevice(device.id)
       setDevices((list) => list.filter((item) => item.id !== device.id))
       setAccount((prev) => (prev ? { ...prev, deviceCount: Math.max(0, prev.deviceCount - 1) } : prev))
-      toast(`已让「${device.name}」下线`)
+      toast(`已让「${device.deviceName}」下线`)
     } catch (error) {
       toast(`操作失败：${error instanceof Error ? error.message : '请稍后重试'}`)
     } finally {
@@ -1127,7 +1122,11 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
     <SettingsGroup
       icon={<Lock size={17} />}
       title={tr('权限')}
-      summary={tr('已开启 {n} / 4 项', { n: permissionGrantedCount })}
+      summary={
+        grantAllBusy
+          ? tr('正在申请…')
+          : tr('已开启 {n} / 4 项', { n: permissionGrantedCount })
+      }
     >
       <div className="space-y-3">
         <button
@@ -1163,10 +1162,10 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
                 <button
                   type="button"
                   className="chip shrink-0 px-2.5 py-1 text-caption"
-                  disabled={status === 'busy'}
-                  onClick={() => void item.onRequest()}
+                  disabled={grantAllBusy || pendingPermission !== null}
+                  onClick={() => void requestPermission(item.key, item.onRequest)}
                 >
-                  {status === 'busy' ? tr('请求中…') : tr('开启')}
+                  {pendingPermission === item.key ? tr('请求中…') : tr('开启')}
                 </button>
               )}
             </div>
@@ -1303,7 +1302,7 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
         icon={<DownloadSimple size={16} />}
         title={t('profile.export')}
         value="JSON"
-        onClick={doExport}
+        onClick={() => setConfirmExport(true)}
       />
       <Row
         icon={<UploadSimple size={16} />}
@@ -1718,8 +1717,9 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
 
       <Sheet
         open={devicesOpen}
-        title="登录设备"
+        title={tr('登录设备')}
         onClose={() => setDevicesOpen(false)}
+        zIndex={80}
         footer={
           <div className="flex gap-2">
             {devices.some((device) => !device.current) ? (
@@ -1751,7 +1751,7 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
               <div key={device.id} className="rounded-xl border border-line p-3">
                 <div className="flex items-center gap-2">
                   <Devices size={16} className="shrink-0 text-ink-3" />
-                  <p className="min-w-0 flex-1 truncate text-body-sm text-ink">{device.name}</p>
+                  <p className="min-w-0 flex-1 truncate text-body-sm text-ink">{device.deviceName}</p>
                   {device.current ? (
                     <span className="shrink-0 rounded-full bg-accent-soft px-1.5 py-0.5 text-caption text-accent">
                       当前设备
@@ -1769,9 +1769,8 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
                 </div>
                 <p className="mt-1 text-caption text-ink-3">
                   {device.lastSeenAt > 0
-                    ? `最近活跃 ${relativeTime(device.lastSeenAt)}`
-                    : `登录于 ${relativeTime(device.createdAt)}`}
-                  {device.ip ? ` · ${device.ip}` : ''}
+                    ? tr('最近活跃 {time}', { time: relativeTime(device.lastSeenAt) })
+                    : tr('登录于 {time}', { time: relativeTime(device.createdAt) })}
                 </p>
                 {device.userAgent ? (
                   <p className="mt-0.5 truncate text-caption text-ink-3" title={device.userAgent}>
@@ -1786,11 +1785,30 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
 
       <ConfirmDialog
         open={confirmRevokeAll}
-        title="退出其他设备"
-        message="除当前设备外的所有设备都会退出登录，需要重新输入账号密码。"
-        confirmText="全部退出"
+        title={tr('退出其他设备')}
+        message={tr('除当前设备外的所有设备都会退出登录，需要重新输入账号密码。')}
+        confirmText={tr('全部退出')}
         onConfirm={() => void revokeOtherDevices()}
         onClose={() => setConfirmRevokeAll(false)}
+        zIndex={90}
+      />
+
+      <ConfirmDialog
+        open={confirmExport}
+        title={tr('导出备份')}
+        message={tr(
+          '将导出 {trips} 段行程、{moments} 条记录、{expenses} 笔账目。文件包含照片元数据，请妥善保管。',
+          {
+            trips: data.stats.tripCount,
+            moments: data.stats.momentCount,
+            expenses: data.stats.expenseCount,
+          },
+        )}
+        confirmText={tr('导出')}
+        tone="accent"
+        onConfirm={() => void doExport()}
+        onClose={() => setConfirmExport(false)}
+        zIndex={90}
       />
     </div>
   )

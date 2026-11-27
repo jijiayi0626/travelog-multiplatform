@@ -364,7 +364,8 @@ export function updateAccountNickname(nickname: string): Promise<{ nickname: str
 
 export interface AccountDevice {
   id: string
-  name: string
+  /** 服务端返回的展示名，当前为登录 IP（缺失时为「未知 IP」） */
+  deviceName: string
   userAgent: string
   ip: string
   createdAt: number
@@ -374,7 +375,7 @@ export interface AccountDevice {
 
 /** 当前账号的登录设备列表 */
 export function listAccountDevices(): Promise<{ devices: AccountDevice[] }> {
-  return api('/account/devices')
+  return api<{ devices: AccountDevice[] }>('/account/devices')
 }
 
 /** 让指定设备下线（传当前设备的 id 等于退出当前设备） */
@@ -798,7 +799,7 @@ export function adminPatchUser(
 
 /** 管理员查看某个用户的登录设备 */
 export function adminListUserDevices(userId: string): Promise<{ devices: AccountDevice[] }> {
-  return adminApi(`/admin/users/${encodeURIComponent(userId)}/devices`)
+  return adminApi<{ devices: AccountDevice[] }>(`/admin/users/${encodeURIComponent(userId)}/devices`)
 }
 
 /** 管理员强制某个用户的设备下线 */

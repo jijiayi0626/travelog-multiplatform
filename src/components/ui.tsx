@@ -190,6 +190,7 @@ export function Sheet({
   children,
   footer,
   wide = false,
+  zIndex,
 }: {
   open: boolean
   title: string
@@ -197,6 +198,8 @@ export function Sheet({
   children: ReactNode
   footer?: ReactNode
   wide?: boolean
+  /** 需要盖在设置分组等更高层遮罩之上时传入 */
+  zIndex?: number
 }) {
   const { tr } = useI18n()
   // onClose 多为内联函数，放进依赖会让 effect 反复重建，导致遮罩/滚动锁残留
@@ -222,6 +225,7 @@ export function Sheet({
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
+      style={zIndex ? { zIndex } : undefined}
       role="dialog"
       aria-modal="true"
       aria-label={title}
@@ -270,6 +274,7 @@ export function ConfirmDialog({
   tone = 'danger',
   onConfirm,
   onClose,
+  zIndex,
 }: {
   open: boolean
   title: string
@@ -278,11 +283,18 @@ export function ConfirmDialog({
   tone?: 'danger' | 'accent'
   onConfirm: () => void
   onClose: () => void
+  /** 需要盖在 Sheet / 设置分组之上时传入 */
+  zIndex?: number
 }) {
   const { tr } = useI18n()
   if (!open) return null
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-center justify-center px-5" role="alertdialog" aria-modal="true">
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center px-5"
+      style={zIndex ? { zIndex } : undefined}
+      role="alertdialog"
+      aria-modal="true"
+    >
       <button
         type="button"
         aria-label={tr('关闭')}

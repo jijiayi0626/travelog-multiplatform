@@ -692,12 +692,11 @@ export function AdminPage({ embedded = false }: { embedded?: boolean }) {
                   <div key={device.id} className="flex items-start gap-2 rounded-xl border border-line p-2.5">
                     <Devices size={15} className="mt-0.5 shrink-0 text-ink-3" />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-body-sm text-ink">{device.name}</p>
+                      <p className="truncate text-body-sm text-ink">{device.deviceName}</p>
                       <p className="text-caption text-ink-3">
                         {device.lastSeenAt > 0
                           ? tr('最近活跃 {time}', { time: relativeTime(device.lastSeenAt) })
                           : tr('登录于 {time}', { time: relativeTime(device.createdAt) })}
-                        {device.ip ? ` · ${device.ip}` : ''}
                       </p>
                     </div>
                     <button

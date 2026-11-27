@@ -4,6 +4,7 @@ import { CHINA_CITIES } from './chinaCities'
 import { reverseGeocode } from './cloud'
 import {
   clearNativeWatch,
+  getBestFix,
   isNative,
   requestLocationPermission,
   watchNativeFix,
@@ -94,13 +95,82 @@ export interface AutoCheckinEvent {
   message?: string
 }
 
-function nearestCity(latitude: number, longitude: number): { short: string; city: string; distance: number } | null {
-  let best: { short: string; city: string; distance: number } | null = null
+function nearestCity(
+  latitude: number,
+  longitude: number,
+): { short: string; province: string; city: string; distance: number } | null {
+  let best: { short: string; province: string; city: string; distance: number } | null = null
   for (const item of CHINA_CITIES) {
     const distance = distanceMeters(latitude, longitude, item.lat, item.lng)
-    if (!best || distance < best.distance) best = { short: item.short, city: item.name, distance }
+    if (!best || distance < best.distance) {
+      best = { short: item.short, province: item.province, city: item.name, distance }
+    }
   }
   return best
+}
+
+/** 城市名归一化：去掉行政级别后缀，便于「杭州」「杭州市」互相比较 */
+function normalizeCityKey(name: string): string {
+  return String(name || '')
+    .trim()
+    .replace(/(特别行政区|自治州|地区|市|区|县|盟|州)$/g, '')
+}
+
+/** 把反查结果对齐到本地城市库里的规范名称（如「杭州」→「杭州市」） */
+function canonicalCityName(raw: string, fallback: string): string {
+  const name = String(raw || '').trim()
+  if (!name) return fallback
+  const key = normalizeCityKey(name)
+  const hit = CHINA_CITIES.find(
+    (item) =>
+      item.name === name ||
+      item.short === name ||
+      (key.length > 0 && normalizeCityKey(item.name) === key),
+  )
+  return hit ? hit.name : name
+}
+
+const UNLOCKED_CITIES_KEY = 'travelog.unlockedCities'
+
+function readUnlockedCities(): string[] {
+  try {
+    const raw = localStorage.getItem(UNLOCKED_CITIES_KEY)
+    const list: unknown = raw ? JSON.parse(raw) : []
+    return Array.isArray(list) ? list.map((item) => String(item)) : []
+  } catch {
+    return []
+  }
+}
+
+/** 标记城市已提示过；已存在时返回 false，保证同一城市只弹一次 */
+function markCityUnlocked(cityName: string): boolean {
+  const key = normalizeCityKey(cityName)
+  if (!key) return false
+  const list = readUnlockedCities()
+  if (list.some((item) => normalizeCityKey(item) === key)) return false
+  list.push(cityName)
+  try {
+    localStorage.setItem(UNLOCKED_CITIES_KEY, JSON.stringify(list))
+  } catch {
+    return false
+  }
+  return true
+}
+
+/** 打卡成功且城市此前未出现在足迹里时，通知界面弹出新城市解锁 */
+function unlockIfNewCity(cityName: string, province: string, footprints: FootprintLite[]): void {
+  const key = normalizeCityKey(cityName)
+  if (!key) return
+  const visited = footprints.some(
+    (item) => normalizeCityKey(item.city || item.placeName) === key,
+  )
+  if (visited) return
+  if (!markCityUnlocked(cityName)) return
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('travelog:newCity', { detail: { city: cityName, province } }),
+    )
+  }
 }
 
 function cooled(key: string, cooldownMs: number): boolean {
@@ -161,7 +231,7 @@ function noteEvent(text: string): void {
   status.lastEventAt = Date.now()
 }
 
-/** 命中已知地点用其名称；否则用最近国内城市识别周边地名 */
+/** 自动打卡统一记录城市名；命中已知地点只用于提前判断，不再拼区县/街道 */
 async function handleFix(
   fix: Fix,
   settings: AutoCheckinSettings,
@@ -178,18 +248,7 @@ async function handleFix(
     const distance = distanceMeters(fix.latitude, fix.longitude, item.latitude, item.longitude)
     if (!nearest || distance < nearest.distance) nearest = { item, distance }
   }
-
-  if (nearest && nearest.distance <= settings.radius) {
-    status.lastMatch = `地点：${nearest.item.placeName}（${Math.round(nearest.distance)} 米）`
-    if (!cooled(nearest.item.placeName, settings.cooldownMs)) {
-      noteEvent('命中已知地点，但仍在冷却')
-      return
-    }
-    await record(nearest.item.placeName, nearest.item.city, fix, tripId, '自动打卡')
-    noteEvent(`已打卡：${nearest.item.placeName}`)
-    listener?.({ type: 'checked', place: nearest.item.placeName, distance: nearest.distance })
-    return
-  }
+  const known = nearest && nearest.distance <= settings.radius ? nearest : null
 
   const city = nearestCity(fix.latitude, fix.longitude)
   if (!city) {
@@ -197,43 +256,67 @@ async function handleFix(
     noteEvent('未匹配到城市')
     return
   }
-  status.lastMatch = `城市：${city.city}（${(city.distance / 1000).toFixed(1)} 公里）`
-  if (city.distance > 50000) {
+
+  // 没有命中已知地点时保留原有 50 公里距离限制
+  if (!known && city.distance > 50000) {
+    status.lastMatch = `城市：${city.city}（${(city.distance / 1000).toFixed(1)} 公里）`
     noteEvent('最近城市超过 50 公里，不打卡')
     return
   }
-  const key = `city:${city.city}`
+
+  // 用反查结果确认所属城市；取不到城市时退回「城市附近」兜底
+  let cityName = city.city
+  let province = city.province
+  let placeName = `${city.short}附近`
+  try {
+    const info = await reverseGeocode(fix.latitude, fix.longitude, 6000)
+    if (info.province) province = info.province
+    if (info.city) {
+      cityName = canonicalCityName(info.city, city.city)
+      placeName = cityName
+    }
+  } catch {
+    // 网络或服务不可用时静默退回「城市附近」
+  }
+
+  status.lastMatch = known
+    ? `地点：${known.item.placeName}（${Math.round(known.distance)} 米）· 城市：${cityName}`
+    : `城市：${cityName}（${(city.distance / 1000).toFixed(1)} 公里）`
+
+  const key = `city:${normalizeCityKey(cityName)}`
   if (!cooled(key, settings.cooldownMs)) {
     noteEvent('该城市已打卡，冷却中')
     return
   }
 
-  // 反查区县 / 街道，让自动打卡不只知道城市；失败时仍用「城市附近」兜底
-  let placeName = `${city.short}附近`
-  let cityName = city.city
-  try {
-    const info = await reverseGeocode(fix.latitude, fix.longitude, 6000)
-    const detail = info.name || info.street || info.district
-    if (info.city) cityName = info.city
-    if (detail && detail !== cityName && detail !== info.province) {
-      placeName = detail
-      status.lastMatch = `地点：${detail}（${info.district || city.city}）`
-    } else if (info.district) {
-      placeName = info.district
-      status.lastMatch = `地点：${info.district}（${city.city}）`
-    }
-  } catch {
-    // 网络或服务不可用时静默退回城市名
-  }
+  await record(placeName, cityName, fix, tripId, known ? '自动打卡' : '自动打卡（城市）')
+  noteEvent(`已打卡：${cityName}`)
+  listener?.({ type: 'checked', place: cityName, distance: known ? known.distance : city.distance })
+  unlockIfNewCity(cityName, province, footprints)
+}
 
-  await record(placeName, cityName, fix, tripId, '自动打卡（周边地名）')
-  noteEvent(`已打卡：${placeName}`)
-  listener?.({ type: 'checked', place: placeName, distance: city.distance })
+/**
+ * 定位出错统一收口：权限未开时静默跳过，避免自动打卡反复弹窗。
+ * 其他错误（超时、不可用）仍交给调用方提示。
+ */
+function reportPositionError(message: string, listener?: (event: AutoCheckinEvent) => void): void {
+  if (/权限|permission|denied|not authorized/i.test(message)) {
+    noteEvent('定位权限未开启，自动打卡已跳过')
+    return
+  }
+  listener?.({ type: 'error', message })
+}
+
+function runFix(fix: Fix, settings: AutoCheckinSettings, listener?: (event: AutoCheckinEvent) => void): void {
+  void handleFix(fix, settings, listener).catch((error) =>
+    listener?.({ type: 'error', message: (error as Error).message }),
+  )
 }
 
 /**
  * 原生端走 Capacitor Geolocation（WebView 的 navigator.geolocation 在部分机型不可用），
  * 浏览器端继续用 navigator.geolocation。返回停止函数。
+ * 启动后先立即检查一次，再进入持续监听。
  */
 export function startAutoCheckin(listener?: (event: AutoCheckinEvent) => void): () => void {
   const settings = getAutoCheckinSettings()
@@ -246,18 +329,19 @@ export function startAutoCheckin(listener?: (event: AutoCheckinEvent) => void): 
     void (async () => {
       const allowed = await requestLocationPermission()
       if (!allowed) {
-        listener?.({ type: 'error', message: '未授予定位权限，请在系统设置里打开' })
+        // 权限未开：静默跳过，不向界面抛错误
+        noteEvent('定位权限未开启，自动打卡已跳过')
         return
       }
+      // 打开 App 后立即检查一次，不等持续定位回调
+      void getBestFix().then((fix) => {
+        if (fix) runFix(fix, settings, listener)
+      })
       nativeWatchId = await watchNativeFix(
-        (fix) => {
-          void handleFix(fix, settings, listener).catch((error) =>
-            listener?.({ type: 'error', message: (error as Error).message }),
-          )
-        },
-        (message) => listener?.({ type: 'error', message }),
+        (fix) => runFix(fix, settings, listener),
+        (message) => reportPositionError(message, listener),
       )
-      if (!nativeWatchId) listener?.({ type: 'error', message: '无法启动原生定位' })
+      if (!nativeWatchId) noteEvent('无法启动原生定位')
     })()
     return () => stopAutoCheckin()
   }
@@ -267,16 +351,22 @@ export function startAutoCheckin(listener?: (event: AutoCheckinEvent) => void): 
     return () => {}
   }
 
-  watchId = navigator.geolocation.watchPosition(
-    (position) => {
-      const fix = { latitude: position.coords.latitude, longitude: position.coords.longitude }
-      void handleFix(fix, settings, listener).catch((error) =>
-        listener?.({ type: 'error', message: (error as Error).message }),
-      )
-    },
-    (error) => listener?.({ type: 'error', message: error.message }),
-    { enableHighAccuracy: false, maximumAge: 60000, timeout: 20000 },
-  )
+  const options: PositionOptions = { enableHighAccuracy: false, maximumAge: 60000, timeout: 20000 }
+  const onFix = (position: GeolocationPosition) => {
+    runFix({ latitude: position.coords.latitude, longitude: position.coords.longitude }, settings, listener)
+  }
+  const onError = (error: GeolocationPositionError) => {
+    if (error.code === 1) {
+      // 用户未授权定位：静默跳过，避免反复弹窗
+      noteEvent('定位权限未开启，自动打卡已跳过')
+      return
+    }
+    listener?.({ type: 'error', message: error.message })
+  }
+
+  // 启动即取一次当前位置，再进入持续监听
+  navigator.geolocation.getCurrentPosition(onFix, onError, options)
+  watchId = navigator.geolocation.watchPosition(onFix, onError, options)
 
   return () => stopAutoCheckin()
 }

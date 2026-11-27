@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import {
   ArrowLeft,
+  CheckCircle,
   DownloadSimple,
+  Play,
   Trash,
   WarningCircle,
 } from '@phosphor-icons/react'
@@ -19,6 +21,7 @@ import {
   downloadVoskModel,
   getVoskModelError,
   isVoskModelReady,
+  testVoskModelStartup,
 } from '../lib/offline-speech'
 
 export function OcrModelPage() {
@@ -35,6 +38,11 @@ export function OcrModelPage() {
   const [voiceBusy, setVoiceBusy] = useState(false)
   const [voiceProgress, setVoiceProgress] = useState(0)
   const [voiceError, setVoiceError] = useState('')
+  const [voiceTestBusy, setVoiceTestBusy] = useState(false)
+  const [voiceTestResult, setVoiceTestResult] = useState<{
+    ok: boolean
+    message: string
+  } | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -78,6 +86,7 @@ export function OcrModelPage() {
     setVoiceBusy(true)
     setVoiceProgress(0)
     setVoiceError('')
+    setVoiceTestResult(null)
     try {
       const ok = await downloadVoskModel((value) => setVoiceProgress(value))
       if (ok) {
@@ -97,7 +106,28 @@ export function OcrModelPage() {
     setVoiceReady(false)
     setVoiceProgress(0)
     setVoiceError('')
+    setVoiceTestResult(null)
     toast(tr('离线语音模型已删除'))
+  }
+
+  /** 只加载引擎和模型并创建一次识别器，用来确认模型能正常启动 */
+  const testVoice = async () => {
+    if (voiceTestBusy) return
+    setVoiceTestBusy(true)
+    setVoiceTestResult(null)
+    try {
+      const reason = await testVoskModelStartup()
+      if (reason) {
+        setVoiceTestResult({ ok: false, message: reason })
+      } else {
+        setVoiceTestResult({
+          ok: true,
+          message: tr('离线语音引擎加载成功，可以开始识别'),
+        })
+      }
+    } finally {
+      setVoiceTestBusy(false)
+    }
   }
 
   return (
@@ -232,14 +262,25 @@ export function OcrModelPage() {
 
         <div className="mt-4 flex gap-2">
           {voiceReady ? (
-            <button
-              type="button"
-              className="btn-ghost h-10 flex-1 text-note"
-              onClick={() => void removeVoice()}
-            >
-              <Trash size={14} />
-              {tr('删除模型')}
-            </button>
+            <>
+              <button
+                type="button"
+                className="btn-primary h-10 flex-1 text-note"
+                disabled={voiceTestBusy}
+                onClick={() => void testVoice()}
+              >
+                <Play size={14} />
+                {voiceTestBusy ? tr('正在加载模型…') : tr('测试启动')}
+              </button>
+              <button
+                type="button"
+                className="btn-ghost h-10 flex-1 text-note"
+                onClick={() => void removeVoice()}
+              >
+                <Trash size={14} />
+                {tr('删除模型')}
+              </button>
+            </>
           ) : (
             <button
               type="button"
@@ -252,6 +293,23 @@ export function OcrModelPage() {
             </button>
           )}
         </div>
+
+        {voiceTestResult ? (
+          <p
+            className={
+              voiceTestResult.ok
+                ? 'mt-3 flex items-start gap-1.5 break-all text-caption leading-5 text-accent'
+                : 'mt-3 flex items-start gap-1.5 break-all text-caption leading-5 text-warn'
+            }
+          >
+            {voiceTestResult.ok ? (
+              <CheckCircle size={14} className="mt-0.5 shrink-0" />
+            ) : (
+              <WarningCircle size={14} className="mt-0.5 shrink-0" />
+            )}
+            {voiceTestResult.message}
+          </p>
+        ) : null}
 
         <p className="mt-3 text-caption leading-5 text-ink-3">
           {tr('模型从 GitHub 仓库下载，失败时会自动切换备用镜像。识别全程在本机完成，不会上传录音。')}

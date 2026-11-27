@@ -221,7 +221,7 @@ export function AppShell({
   const ThemeGlyph = theme === 'dark' ? Moon : Sun
 
   return (
-    <div className="min-h-[100dvh] bg-paper">
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-paper">
       {isDesktop ? (
         <aside className="fixed inset-y-0 left-0 z-30 flex w-[236px] flex-col border-r border-line bg-surface/70 px-4 py-6 backdrop-blur-xl">
           <div className="flex items-center gap-2.5 px-2">
@@ -304,10 +304,10 @@ export function AppShell({
         </aside>
       ) : null}
 
-      <div className={cn(isDesktop && 'pl-[236px]')}>
+      <div className={cn('min-h-0 flex-1', isDesktop && 'pl-[236px]')}>
         <main
           className={cn(
-            'safe-top mx-auto w-full max-w-[1180px] px-4',
+            'safe-top mx-auto h-full w-full max-w-[1180px] overflow-y-auto overscroll-contain px-4',
             isRoot(view) ? 'pb-[calc(88px+env(safe-area-inset-bottom))] lg:pb-12' : 'pb-10',
             'sm:px-6',
           )}
@@ -316,7 +316,7 @@ export function AppShell({
         </main>
 
         {!isDesktop && isRoot(view) ? (
-          <nav className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/97 backdrop-blur-2xl shadow-edge">
+          <nav className="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface/97 backdrop-blur-2xl shadow-edge">
             <div className="mx-auto grid max-w-[600px] grid-cols-5 px-1 pt-1.5">
               {TABS.map(({ key, labelKey, Icon }) => {
                 const isActive = active === key

@@ -19,6 +19,7 @@ import { SearchPalette } from './components/SearchPalette'
 import { InstallBanner } from './components/InstallBanner'
 import { ShortcutsSheet } from './components/ShortcutsSheet'
 import { Onboarding } from './components/Onboarding'
+import { NewCityDialog } from './components/NewCityDialog'
 import { AIJobHub, AIPaywall } from './components/AIJobHub'
 import { TripsPage } from './pages/TripsPage'
 import { TripDetailPage } from './pages/TripDetailPage'
@@ -466,6 +467,7 @@ export default function App() {
               <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
               <ShortcutsSheet open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
               <Onboarding />
+              <NewCityDialog />
               <InstallBanner />
               <UpdatePrompt />
               <AIJobHub />

@@ -239,7 +239,8 @@ async function listDevices(env, userId, currentToken = '') {
   return Promise.all(
     (results || []).map(async (row) => ({
       id: await deviceIdOf(row.token),
-      name: row.device_name || '未命名设备',
+      // 设备主标题直接用 IP，避免暴露用户自定义设备名
+      deviceName: row.ip || '未知 IP',
       userAgent: row.user_agent || '',
       ip: row.ip || '',
       createdAt: row.created_at,

@@ -8,6 +8,7 @@ import {
   Camera as CameraIcon,
   Check,
   CloudArrowUp,
+  HandPointing,
   Images,
   MapPinLine,
   MapTrifold,
@@ -29,6 +30,7 @@ import { hasOnboarded, markOnboarded, subscribeOnboardingOpen } from '../lib/onb
 
 const STEPS = [
   { key: 'welcome', Icon: MapTrifold },
+  { key: 'nav', Icon: MapPinLine },
   { key: 'permissions', Icon: ShieldCheck },
   { key: 'sections', Icon: Images },
   { key: 'record', Icon: MapPinLine },
@@ -76,6 +78,9 @@ export function Onboarding() {
   const nav = useNav()
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState(0)
+  const [narrow, setNarrow] = useState(() =>
+    typeof window === 'undefined' ? true : window.matchMedia('(max-width: 639px)').matches,
+  )
   const [permissions, setPermissions] = useState<{
     location: PermissionState
     notification: PermissionState
@@ -145,6 +150,27 @@ export function Onboarding() {
       window.removeEventListener('keydown', onKey, true)
     }
   })
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 639px)')
+    const onChange = () => setNarrow(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+
+  // 导航引导：真实底部导航不盖蒙版，点任意一个入口就进入下一步
+  useEffect(() => {
+    if (!open || STEPS[step].key !== 'nav') return
+    // 从「关于」重看引导时先回到首页，保证底部导航真的存在
+    if (window.matchMedia('(max-width: 639px)').matches) nav.navigate({ name: 'trips' })
+    const onClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null
+      if (!target?.closest('nav')) return
+      window.setTimeout(() => setStep((value) => Math.min(STEPS.length - 1, value + 1)), 180)
+    }
+    document.addEventListener('click', onClick, true)
+    return () => document.removeEventListener('click', onClick, true)
+  }, [open, step])
 
   if (!open) return null
 
@@ -253,6 +279,40 @@ export function Onboarding() {
   ]
 
   const copy = stepCopy(current.key, tr)
+
+  if (current.key === 'nav' && narrow) {
+    return createPortal(
+      <>
+        <div
+          className="fixed inset-x-0 top-0 z-[35] bg-[#0b0b0a]/55 backdrop-blur-[2px]"
+          style={{ bottom: 'calc(76px + env(safe-area-inset-bottom))' }}
+        />
+        <div
+          className="fixed inset-x-0 z-[45] flex flex-col items-center px-6"
+          style={{ bottom: 'calc(94px + env(safe-area-inset-bottom))' }}
+        >
+          <div
+            className="rounded-2xl border border-line bg-paper px-4 py-3 text-center"
+            style={{ boxShadow: 'var(--shadow-float)' }}
+          >
+            <p className="text-body-sm font-medium text-ink">{tr('点一下底部导航，切换页面')}</p>
+            <p className="mt-1 text-caption text-ink-3">
+              {tr('行程、相册、足迹、账本和我的都在这里')}
+            </p>
+          </div>
+          <HandPointing size={34} weight="fill" className="mt-1 animate-bounce text-white drop-shadow-lg" />
+          <button
+            type="button"
+            className="mt-2 rounded-full bg-paper/90 px-3 py-1 text-caption text-ink-2"
+            onClick={() => setStep((value) => Math.min(STEPS.length - 1, value + 1))}
+          >
+            {tr('跳过这一步')}
+          </button>
+        </div>
+      </>,
+      document.body,
+    )
+  }
 
   return createPortal(
     <div className="fixed inset-0 z-[85] flex items-end justify-center sm:items-center" role="dialog" aria-modal="true" aria-label={tr('新手引导')}>
@@ -406,6 +466,11 @@ function stepCopy(
   tr: (zh: string, vars?: Record<string, string | number>) => string,
 ): { title: string; body: string } {
   switch (key) {
+    case 'nav':
+      return {
+        title: tr('先从导航开始'),
+        body: tr('手机底部（电脑端在左侧）有五个入口：行程、相册、足迹、账本和我的。点一下任意入口，就能切换页面。'),
+      }
     case 'permissions':
       return {
         title: tr('先给旅记几项权限'),
