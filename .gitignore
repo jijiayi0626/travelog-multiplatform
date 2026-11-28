@@ -33,3 +33,6 @@ android/app/src/main/assets/public
 
 # Local build artifacts
 artifacts/
+
+# Wrangler local dev state
+server/.wrangler
