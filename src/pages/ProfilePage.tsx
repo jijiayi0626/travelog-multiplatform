@@ -14,6 +14,8 @@ import {
   Devices,
   DownloadSimple,
   Crown,
+  Fingerprint,
+  FirstAidKit,
   Images,
   Info,
   Lock,
@@ -1626,6 +1628,18 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
           title={tr('旅行月报')}
           value={tr('本月汇总')}
           onClick={() => nav.navigate({ name: 'monthly' })}
+        />
+        <QuickAction
+          icon={<Fingerprint size={18} />}
+          title={tr('旅行人格')}
+          value={tr('看看你是哪型')}
+          onClick={() => nav.navigate({ name: 'persona' })}
+        />
+        <QuickAction
+          icon={<FirstAidKit size={18} />}
+          title={tr('离线应急包')}
+          value={tr('电话 · 汇率 · 常用语')}
+          onClick={() => nav.navigate({ name: 'emergency' })}
         />
       </section>
 

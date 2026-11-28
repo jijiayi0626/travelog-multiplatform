@@ -158,7 +158,7 @@ export function SegmentedTabs<T extends string>({
   className,
 }: {
   value: T
-  options: Array<{ value: T; label: string }>
+  options: Array<{ value: T; label: string; icon?: ReactNode }>
   onChange: (value: T) => void
   className?: string
 }) {
@@ -177,7 +177,10 @@ export function SegmentedTabs<T extends string>({
           className="tab-pill"
           onClick={() => onChange(option.value)}
         >
-          {option.label}
+          <span className="inline-flex items-center justify-center gap-1">
+            {option.icon}
+            {option.label}
+          </span>
         </button>
       ))}
     </div>

@@ -2,6 +2,7 @@ import type {
   AppStats,
   CategoryStat,
   ChecklistItem,
+  Comment,
   Currency,
   Expense,
   Footprint,
@@ -10,6 +11,7 @@ import type {
   MonthStat,
   Plan,
   PlanKind,
+  Poll,
   Profile,
   SearchResult,
   Trip,
@@ -207,7 +209,7 @@ export async function saveTrip(trip: Trip): Promise<Trip> {
 }
 
 export async function deleteTrip(id: string): Promise<void> {
-  const [trip, moments, expenses, checklist, footprints, members, plans] = await Promise.all([
+  const [trip, moments, expenses, checklist, footprints, members, plans, comments, polls] = await Promise.all([
     getOne<Trip>('trips', id),
     getAll<Moment>('moments'),
     getAll<Expense>('expenses'),
@@ -215,6 +217,8 @@ export async function deleteTrip(id: string): Promise<void> {
     getAll<Footprint>('footprints'),
     getAll<Member>('members'),
     getAll<Plan>('plans'),
+    getAll<Comment>('comments'),
+    getAll<Poll>('polls'),
   ])
   const tripMoments = moments.filter((item) => item.tripId === id)
   const tripExpenses = expenses.filter((item) => item.tripId === id)
@@ -222,6 +226,8 @@ export async function deleteTrip(id: string): Promise<void> {
   const tripFootprints = footprints.filter((item) => item.tripId === id)
   const tripMembers = members.filter((item) => item.tripId === id)
   const tripPlans = plans.filter((item) => item.tripId === id)
+  const tripComments = comments.filter((item) => item.tripId === id)
+  const tripPolls = polls.filter((item) => item.tripId === id)
 
   if (trip) {
     await pushTrash('trip', trip.title, [
@@ -232,6 +238,8 @@ export async function deleteTrip(id: string): Promise<void> {
       ...tripFootprints.map((row) => ({ store: 'footprints' as const, row })),
       ...tripMembers.map((row) => ({ store: 'members' as const, row })),
       ...tripPlans.map((row) => ({ store: 'plans' as const, row })),
+      ...tripComments.map((row) => ({ store: 'comments' as const, row })),
+      ...tripPolls.map((row) => ({ store: 'polls' as const, row })),
     ])
   }
 
@@ -243,6 +251,8 @@ export async function deleteTrip(id: string): Promise<void> {
     ...tripFootprints.map((item) => trackedDelete('footprints', item.id)),
     ...tripMembers.map((item) => trackedDelete('members', item.id)),
     ...tripPlans.map((item) => trackedDelete('plans', item.id)),
+    ...tripComments.map((item) => trackedDelete('comments', item.id)),
+    ...tripPolls.map((item) => trackedDelete('polls', item.id)),
   ])
 }
 
@@ -756,6 +766,78 @@ export async function removeMember(id: string): Promise<void> {
   await trackedDelete('members', id)
 }
 
+/* ---------------- 旅伴协作：评论 / 投票 ---------------- */
+
+export async function listComments(tripId: string): Promise<Comment[]> {
+  const all = await getAll<Comment>('comments')
+  return all.filter((item) => item.tripId === tripId).sort((a, b) => b.createdAt - a.createdAt)
+}
+
+export async function saveComment(comment: Comment): Promise<Comment> {
+  const now = Date.now()
+  const next: Comment = { ...comment, text: comment.text.trim() }
+  if (!next.id) {
+    next.id = uid()
+    next.createdAt = now
+  }
+  next.updatedAt = now
+  next.syncState = 1
+  await putOne('comments', next)
+  return next
+}
+
+export async function deleteComment(id: string): Promise<void> {
+  await trackedDelete('comments', id)
+}
+
+export async function listPolls(tripId: string): Promise<Poll[]> {
+  const all = await getAll<Poll>('polls')
+  return all.filter((item) => item.tripId === tripId).sort((a, b) => b.createdAt - a.createdAt)
+}
+
+export async function savePoll(poll: Poll): Promise<Poll> {
+  const now = Date.now()
+  const next: Poll = {
+    ...poll,
+    question: poll.question.trim(),
+    options: poll.options.map((option) => ({ ...option, text: option.text.trim(), votes: [...option.votes] })),
+  }
+  if (!next.id) {
+    next.id = uid()
+    next.createdAt = now
+  }
+  next.updatedAt = now
+  next.syncState = 1
+  await putOne('polls', next)
+  return next
+}
+
+export async function deletePoll(id: string): Promise<void> {
+  await trackedDelete('polls', id)
+}
+
+/** 同一用户只能投一个选项：先从所有选项移除，再加入目标；已结束的投票不再变化 */
+export async function votePoll(pollId: string, optionId: string, userId: string): Promise<Poll | undefined> {
+  const poll = await getOne<Poll>('polls', pollId)
+  if (!poll) return undefined
+  if (poll.closed) return poll
+  if (!poll.options.some((option) => option.id === optionId)) return poll
+  const options = poll.options.map((option) => ({
+    ...option,
+    votes: option.votes.filter((id) => id !== userId),
+  }))
+  const target = options.find((option) => option.id === optionId)
+  if (!target) return poll
+  target.votes.push(userId)
+  return savePoll({ ...poll, options })
+}
+
+export async function closePoll(pollId: string): Promise<Poll | undefined> {
+  const poll = await getOne<Poll>('polls', pollId)
+  if (!poll || poll.closed) return poll
+  return savePoll({ ...poll, closed: true })
+}
+
 /* ---------------- 账号 ---------------- */
 
 export async function getProfile(): Promise<Profile> {
@@ -1126,6 +1208,8 @@ export const SYNC_KINDS = [
   'footprints',
   'members',
   'plans',
+  'comments',
+  'polls',
   'profile',
 ] as const
 export type SyncKind = (typeof SYNC_KINDS)[number]

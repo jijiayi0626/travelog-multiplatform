@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Share } from '@capacitor/share'
 import {
   ArrowLeft,
@@ -6,9 +7,13 @@ import {
   CalendarCheck,
   CaretDown,
   CaretUp,
+  ChatCircleDots,
+  CheckCircle,
   Copy,
   DotsThree,
   DownloadSimple,
+  Heartbeat,
+  WarningCircle,
   FileHtml,
   FileImage,
   FileMd,
@@ -90,6 +95,8 @@ import { BudgetBar, HeatStrip } from '../components/charts'
 import { Lightbox } from '../components/Lightbox'
 import { EmptyArt } from '../components/EmptyArt'
 import { PlanGlyph } from '../components/Icons'
+import { TripCollab } from '../components/TripCollab'
+import { planHealth } from '../lib/plan-health'
 import {
   Avatar,
   ConfirmDialog,
@@ -119,12 +126,13 @@ const EMPTY: DetailData = {
   plans: [],
 }
 
-const TAB_OPTIONS: Array<{ value: TabKey; label: string }> = [
+const TAB_OPTIONS: Array<{ value: TabKey; label: string; icon?: ReactNode }> = [
   { value: 'plan', label: '日程' },
   { value: 'timeline', label: '时间线' },
   { value: 'ledger', label: '账本' },
   { value: 'checklist', label: '清单' },
   { value: 'members', label: '旅伴' },
+  { value: 'collab', label: '协作', icon: <ChatCircleDots size={13} /> },
 ]
 
 const DAY_MS = 864e5
@@ -829,6 +837,8 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
                 onShare={shareTrip}
               />
             ) : null}
+
+            {tab === 'collab' ? <TripCollab tripId={tripId} /> : null}
           </div>
         </div>
 
@@ -1154,6 +1164,98 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
 
 /* ---------------- 日程 ---------------- */
 
+function PlanHealthCard({ plans, dayCount }: { plans: Plan[]; dayCount: number }) {
+  const { tr } = useI18n()
+  const [open, setOpen] = useState(false)
+  const health = useMemo(() => planHealth(plans, dayCount), [plans, dayCount])
+  if (!health) return null
+
+  const tone =
+    health.score >= 85
+      ? 'text-accent'
+      : health.score >= 60
+        ? 'text-[#b45309]'
+        : 'text-[#b42318]'
+  const first = health.issues[0]
+
+  return (
+    <div className="overflow-hidden rounded-[1.1rem] border border-line bg-surface">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className="press flex w-full items-center gap-2.5 px-3.5 py-3 text-left"
+      >
+        <span className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-paper-2', tone)}>
+          <Heartbeat size={17} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-baseline gap-1.5">
+            <span className="text-body-sm font-medium text-ink">{tr('行程体检')}</span>
+            <span className={cn('text-note font-semibold tabular-nums', tone)}>{health.score}</span>
+            <span className="text-caption text-ink-3">/ 100</span>
+          </span>
+          <span className="mt-0.5 block truncate text-caption text-ink-3">
+            {health.issues.length === 0
+              ? tr('节奏刚刚好，注意休息')
+              : open
+                ? tr('{n} 条提醒，点击收起', { n: health.issues.length })
+                : first.title}
+          </span>
+        </span>
+        <CaretDown
+          size={14}
+          className={cn('shrink-0 text-ink-3 transition-transform', open && 'rotate-180')}
+        />
+      </button>
+
+      {open ? (
+        <div className="border-t border-line px-3.5 pb-3 pt-2.5">
+          {health.issues.length === 0 ? (
+            <p className="flex items-center gap-1.5 text-caption text-accent">
+              <CheckCircle size={14} weight="fill" />
+              {tr('没有发现明显冲突，保持这个节奏就很好。')}
+            </p>
+          ) : (
+            <ul className="space-y-2.5">
+              {health.issues.slice(0, 6).map((issue, index) => (
+                <li key={`${issue.title}-${index}`} className="flex gap-2">
+                  <span
+                    className={cn(
+                      'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full',
+                      issue.level === 'warn'
+                        ? 'bg-[#fef3f2] text-[#b42318]'
+                        : 'bg-paper-2 text-ink-3',
+                    )}
+                  >
+                    <WarningCircle size={12} weight="fill" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-note font-medium leading-5 text-ink">
+                      {issue.dayIndex ? (
+                        <span className="mr-1.5 rounded bg-accent-soft px-1.5 py-0.5 text-caption text-accent">
+                          {tr('第 {n} 天', { n: issue.dayIndex })}
+                        </span>
+                      ) : null}
+                      {issue.title}
+                    </span>
+                    <span className="mt-0.5 block text-caption leading-4 text-ink-3">
+                      {issue.detail}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-2.5 text-caption text-ink-3">
+            {tr('只做提醒，不会改动你的日程。')}
+          </p>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function PlanTab({
   plans,
   startDate,
@@ -1231,6 +1333,8 @@ function PlanTab({
           </p>
         </button>
       ) : null}
+
+      <PlanHealthCard plans={plans} dayCount={dayCount} />
 
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2 text-note text-ink-3">

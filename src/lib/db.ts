@@ -1,5 +1,5 @@
 const DB_NAME = 'travelog'
-const DB_VERSION = 4
+const DB_VERSION = 5
 
 export type StoreName =
   | 'trips'
@@ -9,6 +9,8 @@ export type StoreName =
   | 'footprints'
   | 'members'
   | 'plans'
+  | 'comments'
+  | 'polls'
   | 'profile'
   | 'tombstones'
   | 'meta'
@@ -22,6 +24,8 @@ const STORES: StoreName[] = [
   'footprints',
   'members',
   'plans',
+  'comments',
+  'polls',
   'profile',
   'tombstones',
   'meta',

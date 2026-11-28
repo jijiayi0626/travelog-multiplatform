@@ -69,6 +69,8 @@ function rootOf(view: View): RootKey {
     case 'about':
     case 'download':
     case 'changelog':
+    case 'persona':
+    case 'emergency':
       return 'profile'
     default:
       return 'trips'
@@ -265,7 +267,11 @@ export function AppShell({
     }
   }
 
-  const showAppBanner = appBannerOpen && !isNative() && view.name !== 'download'
+  // iOS 还没有 App，网页端不再提示下载；只保留 Android/桌面这一条横幅
+  const isIosWeb =
+    typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent)
+  const showAppBanner =
+    appBannerOpen && !isNative() && !isIosWeb && view.name !== 'download'
 
   const ThemeGlyph = theme === 'dark' ? Moon : Sun
 

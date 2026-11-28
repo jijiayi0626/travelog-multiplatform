@@ -171,7 +171,39 @@ export interface MonthStat {
   amount: number
 }
 
-export type TabKey = 'plan' | 'timeline' | 'ledger' | 'checklist' | 'members'
+/** 行程内的旅伴评论 */
+export interface Comment {
+  id: string
+  tripId: string
+  userId: string
+  name: string
+  text: string
+  createdAt: number
+  updatedAt: number
+  syncState: SyncState
+}
+
+export interface PollOption {
+  id: string
+  text: string
+  /** 投票用户的 id 列表；同一用户只会出现在一个选项里 */
+  votes: string[]
+}
+
+/** 行程内的旅伴投票 */
+export interface Poll {
+  id: string
+  tripId: string
+  question: string
+  options: PollOption[]
+  createdBy: string
+  closed: boolean
+  createdAt: number
+  updatedAt: number
+  syncState: SyncState
+}
+
+export type TabKey = 'plan' | 'timeline' | 'ledger' | 'checklist' | 'members' | 'collab'
 
 export type View =
   | { name: 'trips' }
@@ -195,6 +227,8 @@ export type View =
   | { name: 'admin' }
   | { name: 'passport' }
   | { name: 'monthly' }
+  | { name: 'persona' }
+  | { name: 'emergency' }
   | { name: 'share'; code: string }
 
 export interface SearchResult {

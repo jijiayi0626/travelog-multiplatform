@@ -16,7 +16,6 @@ import { getCloudConfig } from './lib/cloud'
 import { startAutoCheckin } from './lib/autocheckin'
 import { AppShell, type RootKey } from './components/AppShell'
 import { SearchPalette } from './components/SearchPalette'
-import { InstallBanner } from './components/InstallBanner'
 import { ShortcutsSheet } from './components/ShortcutsSheet'
 import { Onboarding } from './components/Onboarding'
 import { NewCityDialog } from './components/NewCityDialog'
@@ -39,11 +38,13 @@ import { OcrModelPage } from './pages/OcrModelPage'
 import { ChangelogPage } from './pages/ChangelogPage'
 import { PassportPage } from './pages/PassportPage'
 import { MonthlyPage } from './pages/MonthlyPage'
+import { PersonaPage } from './pages/PersonaPage'
+import { EmergencyPage } from './pages/EmergencyPage'
 import { SharePage } from './pages/SharePage'
 import { UpdatePrompt } from './components/UpdatePrompt'
 import { isDevMode, subscribeDevMode } from './lib/dev-mode'
 
-const TABS: TabKey[] = ['plan', 'timeline', 'ledger', 'checklist', 'members']
+const TABS: TabKey[] = ['plan', 'timeline', 'ledger', 'checklist', 'members', 'collab']
 const TEMPLATES: TripTemplate[] = ['blank', 'city', 'beach', 'road', 'ski']
 
 function parseHash(): View {
@@ -99,6 +100,10 @@ function parseHash(): View {
       return { name: 'passport' }
     case 'monthly':
       return { name: 'monthly' }
+    case 'persona':
+      return { name: 'persona' }
+    case 'emergency':
+      return { name: 'emergency' }
     case 'admin':
       return { name: 'admin' }
     case 'share':
@@ -152,6 +157,10 @@ function toHash(view: View): string {
       return '#/passport'
     case 'monthly':
       return '#/monthly'
+    case 'persona':
+      return '#/persona'
+    case 'emergency':
+      return '#/emergency'
     case 'admin':
       return '#/admin'
     case 'share':
@@ -441,6 +450,10 @@ export default function App() {
         return <PassportPage />
       case 'monthly':
         return <MonthlyPage />
+      case 'persona':
+        return <PersonaPage />
+      case 'emergency':
+        return <EmergencyPage />
       case 'admin':
         return devMode ? (
           <ConsolePage tab="admin" showAdmin />
@@ -482,7 +495,6 @@ export default function App() {
               <ShortcutsSheet open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
               <Onboarding />
               <NewCityDialog />
-              <InstallBanner />
               <UpdatePrompt />
               <AIJobHub />
               <AIPaywall />

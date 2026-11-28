@@ -77,6 +77,8 @@ export interface PosterData {
   stamps?: PosterStamp[]
   cities?: string[]
   categories?: PosterCategory[]
+  /** categories 区域的小标题，默认「分类占比」 */
+  categoriesLabel?: string
   money?: { label: string; value: string }
   footnote?: string
   footer: string
@@ -324,7 +326,7 @@ function renderMagazine(ctx: CanvasRenderingContext2D, data: PosterData): void {
   if (data.categories && data.categories.length > 0 && y + 60 < bottom) {
     ctx.fillStyle = MUTED
     ctx.font = fontOf(500, 23, SANS)
-    ctx.fillText(tr('分类占比'), M, y)
+    ctx.fillText(data.categoriesLabel ?? tr('分类占比'), M, y)
     y += 34
     for (const item of data.categories.slice(0, 5)) {
       if (y + 46 > bottom) break

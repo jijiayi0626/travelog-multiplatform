@@ -184,6 +184,7 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
       setCategoryTouched(true)
       setAutoHint('')
       if (result.note) setNote(result.note)
+      if (result.spentAt) setSpentAt(result.spentAt)
       if (error) setError('')
       toast(
         tr('已识别：{currency} {amount}', {

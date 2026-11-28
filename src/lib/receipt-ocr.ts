@@ -7,6 +7,52 @@ export interface ParsedReceipt {
   currency: Currency
   category: ExpenseCategory
   note: string
+  /** 小票上的消费日期；识别不到则为 undefined */
+  spentAt?: number
+}
+
+function detectDate(text: string): number | undefined {
+  const now = new Date()
+  const full = text.match(/(20\d{2})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})/)
+  if (full) {
+    const date = new Date(Number(full[1]), Number(full[2]) - 1, Number(full[3]))
+    return plausible(date)
+  }
+  const compact = text.match(/(20\d{2})(\d{2})(\d{2})/)
+  if (compact) {
+    const date = new Date(Number(compact[1]), Number(compact[2]) - 1, Number(compact[3]))
+    return plausible(date)
+  }
+  const short = text.match(/(\d{1,2})\s*月\s*(\d{1,2})\s*日?/)
+  if (short) {
+    const date = new Date(now.getFullYear(), Number(short[1]) - 1, Number(short[2]))
+    return plausible(date)
+  }
+  return undefined
+}
+
+function plausible(date: Date): number | undefined {
+  const time = date.getTime()
+  if (!Number.isFinite(time)) return undefined
+  const now = Date.now()
+  // 排除明显不合理的时间：太早或落在未来
+  if (time < now - 3 * 365 * 24 * 60 * 60 * 1000 || time > now + 24 * 60 * 60 * 1000) {
+    return undefined
+  }
+  return time
+}
+
+const MERCHANT_SKIP = /(合计|总计|应付|实付|金额|小计|total|amount|sum|发票|收据|电话|地址|欢迎|谢谢|tel|thank)/i
+
+function detectMerchant(lines: string[]): string {
+  for (const line of lines.slice(0, 4)) {
+    if (line.length < 2 || line.length > 28) continue
+    if (!/[\u4e00-\u9fa5A-Za-z]{2,}/.test(line)) continue
+    if (MERCHANT_SKIP.test(line)) continue
+    if (/^[\d\s.,:¥￥$€฿-]+$/.test(line)) continue
+    return line.slice(0, 28)
+  }
+  return ''
 }
 
 const CATEGORY_HINTS: Array<{ category: ExpenseCategory; words: string[] }> = [
@@ -60,8 +106,10 @@ export function parseReceiptText(raw: string): ParsedReceipt | null {
   }
   if (amount <= 0) return null
 
+  const merchant = detectMerchant(lines)
   const note =
-    lines.find((line) => line.length <= 24 && !/\d{3,}/.test(line) && line !== String(amount))?.slice(0, 24) ??
+    merchant ||
+    lines.find((line) => line.length <= 24 && !/\d{3,}/.test(line) && line !== String(amount))?.slice(0, 24) ||
     ''
 
   return {
@@ -69,5 +117,6 @@ export function parseReceiptText(raw: string): ParsedReceipt | null {
     currency: detectCurrency(text),
     category: detectCategory(text),
     note,
+    spentAt: detectDate(text),
   }
 }
