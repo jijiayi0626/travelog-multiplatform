@@ -1361,6 +1361,8 @@ function AISettings({
   const [drafts, setDrafts] = useState<AdminEndpoint[]>(() =>
     settings.ai.endpoints.map((item) => ({
       ...item,
+      // 密钥输入框不要回填掩码，否则用户追加输入时会带着「…」，服务端会误判为保持原密钥
+      key: '',
       model: item.models?.length ? item.models.join(',') : item.model,
     })),
   )
@@ -1368,6 +1370,17 @@ function AISettings({
   const [rowBusy, setRowBusy] = useState<{ id: string; kind: 'models' | 'test' } | null>(null)
   const [testResults, setTestResults] = useState<AdminAITestResult[]>([])
   const [modelOptions, setModelOptions] = useState<Record<string, string[]>>({})
+
+  // 保存后父级会重新拉配置；用服务端结果刷新草稿，密钥框保持为空（只显示「已保存」提示）
+  useEffect(() => {
+    setDrafts(
+      settings.ai.endpoints.map((item) => ({
+        ...item,
+        key: '',
+        model: item.models?.length ? item.models.join(',') : item.model,
+      })),
+    )
+  }, [settings])
 
   const patchDraft = (id: string, patch: Partial<AdminEndpoint>) => {
     setDrafts((list) => list.map((item) => (item.id === id ? { ...item, ...patch } : item)))
@@ -1395,34 +1408,7 @@ function AISettings({
     setDrafts((list) => list.filter((item) => item.id !== id))
   }
 
-  const loadModels = async (id: string) => {
-    setRowBusy({ id, kind: 'models' })
-    try {
-      const result = await adminListModels(id)
-      setModelOptions((map) => ({ ...map, [id]: result.models }))
-      toast(tr('已拉取 {n} 个模型', { n: result.models.length }))
-    } catch (error) {
-      onError(error)
-    } finally {
-      setRowBusy(null)
-    }
-  }
-
-  const testOne = async (id: string) => {
-    setRowBusy({ id, kind: 'test' })
-    setTestResults([])
-    try {
-      const result = await adminTestAI(id)
-      setTestResults(result.results)
-      toast(result.ok ? tr('接口正常') : tr('接口测试失败'))
-    } catch (error) {
-      onError(error)
-    } finally {
-      setRowBusy(null)
-    }
-  }
-
-  const save = async () => {
+  const persist = async (silent = false): Promise<boolean> => {
     setBusy('save')
     try {
       await adminSaveSettings({
@@ -1442,18 +1428,51 @@ function AISettings({
           })),
         },
       })
-      toast(tr('AI 配置已保存'))
+      if (!silent) toast(tr('AI 配置已保存'))
       onSaved()
+      return true
     } catch (error) {
       onError(error)
+      return false
     } finally {
       setBusy(null)
     }
   }
 
-  const test = async () => {
-    setBusy('test')
+  const loadModels = async (id: string) => {
+    setRowBusy({ id, kind: 'models' })
+    try {
+      // 用户常常填完密钥直接点拉取，这里先自动保存，避免服务端还在用旧密钥
+      if (!(await persist(true))) return
+      const result = await adminListModels(id)
+      setModelOptions((map) => ({ ...map, [id]: result.models }))
+      toast(tr('已拉取 {n} 个模型', { n: result.models.length }))
+    } catch (error) {
+      onError(error)
+    } finally {
+      setRowBusy(null)
+    }
+  }
+
+  const testOne = async (id: string) => {
+    setRowBusy({ id, kind: 'test' })
     setTestResults([])
+    try {
+      if (!(await persist(true))) return
+      const result = await adminTestAI(id)
+      setTestResults(result.results)
+      toast(result.ok ? tr('接口正常') : tr('接口测试失败'))
+    } catch (error) {
+      onError(error)
+    } finally {
+      setRowBusy(null)
+    }
+  }
+
+  const test = async () => {
+    setTestResults([])
+    if (!(await persist(true))) return
+    setBusy('test')
     try {
       const result = await adminTestAI()
       setTestResults(result.results)
@@ -1583,10 +1602,17 @@ function AISettings({
                 <input
                   className="input font-mono"
                   type="password"
+                  autoComplete="new-password"
+                  spellCheck={false}
                   placeholder={item.hasKey ? tr('已保存，留空则不改') : 'sk-…'}
                   value={item.key}
                   onChange={(event) => patchDraft(item.id, { key: event.target.value })}
                 />
+                {item.hasKey && !item.key ? (
+                  <p className="text-caption leading-4 text-ink-3">
+                    {tr('密钥已保存；只有需要更换时才填写，留空不会清空。')}
+                  </p>
+                ) : null}
                 <input
                   type="url"
                   inputMode="url"
@@ -1691,7 +1717,7 @@ function AISettings({
         <button
           type="button"
           className="btn-primary"
-          onClick={save}
+          onClick={() => void persist(false)}
           disabled={busy !== null || rowBusy !== null}
         >
           {busy === 'save' ? tr('保存中…') : tr('保存配置')}
