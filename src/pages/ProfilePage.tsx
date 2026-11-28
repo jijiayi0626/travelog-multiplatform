@@ -1615,6 +1615,18 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
           value={tr('{n} 天', { n: data.stats.totalDays })}
           onClick={() => nav.navigate({ name: 'recap' })}
         />
+        <QuickAction
+          icon={<MapPinLine size={18} />}
+          title={tr('城市护照')}
+          value={tr('{n} 座城市', { n: data.stats.cityCount })}
+          onClick={() => nav.navigate({ name: 'passport' })}
+        />
+        <QuickAction
+          icon={<ClockCounterClockwise size={18} />}
+          title={tr('旅行月报')}
+          value={tr('本月汇总')}
+          onClick={() => nav.navigate({ name: 'monthly' })}
+        />
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-line bg-surface">

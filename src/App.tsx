@@ -37,6 +37,8 @@ import { AboutPage } from './pages/AboutPage'
 import { DownloadPage } from './pages/DownloadPage'
 import { OcrModelPage } from './pages/OcrModelPage'
 import { ChangelogPage } from './pages/ChangelogPage'
+import { PassportPage } from './pages/PassportPage'
+import { MonthlyPage } from './pages/MonthlyPage'
 import { SharePage } from './pages/SharePage'
 import { UpdatePrompt } from './components/UpdatePrompt'
 import { isDevMode, subscribeDevMode } from './lib/dev-mode'
@@ -93,6 +95,10 @@ function parseHash(): View {
       return { name: 'ocrModel' }
     case 'changelog':
       return { name: 'changelog' }
+    case 'passport':
+      return { name: 'passport' }
+    case 'monthly':
+      return { name: 'monthly' }
     case 'admin':
       return { name: 'admin' }
     case 'share':
@@ -142,6 +148,10 @@ function toHash(view: View): string {
       return '#/ocr-model'
     case 'changelog':
       return '#/changelog'
+    case 'passport':
+      return '#/passport'
+    case 'monthly':
+      return '#/monthly'
     case 'admin':
       return '#/admin'
     case 'share':
@@ -427,6 +437,10 @@ export default function App() {
         return <OcrModelPage />
       case 'changelog':
         return <ChangelogPage />
+      case 'passport':
+        return <PassportPage />
+      case 'monthly':
+        return <MonthlyPage />
       case 'admin':
         return devMode ? (
           <ConsolePage tab="admin" showAdmin />

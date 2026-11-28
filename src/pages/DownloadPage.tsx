@@ -15,16 +15,20 @@ import { cn } from '../lib/cn'
 import {
   APK_MIRRORS,
   UPDATE_MODES,
+  channelLabel,
   formatSize,
-  isNewer,
+  isNewerRelease,
   loadLatestRelease,
   mirrorUrl,
   pickApk,
   readCustomBase,
+  readUpdateChannel,
   readUpdateMode,
   writeCustomBase,
+  writeUpdateChannel,
   writeUpdateMode,
   downloadApk,
+  type UpdateChannel,
   type UpdateMode,
 } from '../lib/update'
 
@@ -37,6 +41,7 @@ export function DownloadPage() {
   const [error, setError] = useState('')
   const [mode, setMode] = useState<UpdateMode>(() => readUpdateMode())
   const [customBase, setCustomBase] = useState(() => readCustomBase())
+  const [channel, setChannel] = useState<UpdateChannel>(() => readUpdateChannel())
   const [busy, setBusy] = useState(false)
 
   const load = useCallback(
@@ -62,11 +67,18 @@ export function DownloadPage() {
   }, [])
 
   const apk = useMemo(() => pickApk(release), [release])
-  const hasNewer = release ? isNewer(release.version) : false
+  const hasNewer = release ? isNewerRelease(release) : false
 
   const chooseMode = (next: UpdateMode) => {
     setMode(next)
     writeUpdateMode(next)
+  }
+
+  const chooseChannel = (next: UpdateChannel) => {
+    if (next === channel) return
+    setChannel(next)
+    writeUpdateChannel(next)
+    void load(true)
   }
 
   const changeCustomBase = (value: string) => {
@@ -146,6 +158,9 @@ export function DownloadPage() {
           <div className="min-w-0">
             <p className="text-body-sm text-ink">
               {tr('当前 v{current}', { current: __APP_VERSION__ })}
+              <span className="ml-2 text-ink-3">
+                {tr(channelLabel(channel))}
+              </span>
               {release ? (
                 <span className="ml-2 text-ink-3">
                   {hasNewer ? tr('最新 v{latest}', { latest: release.version }) : tr('已是最新')}
@@ -192,6 +207,43 @@ export function DownloadPage() {
             {tr('更新日志')}
           </button>
         </div>
+      </section>
+
+      <section className="rounded-2xl border border-line bg-surface p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-body font-medium text-ink">{tr('接收预览版')}</p>
+            <p className="mt-0.5 text-caption leading-5 text-ink-3">
+              {channel === 'beta'
+                ? tr('预览通道会包含 beta / rc 版本，功能更新更快，但可能不稳定。')
+                : tr('正式通道只接收正式发布的稳定版本。')}
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={channel === 'beta'}
+            aria-label={tr('接收预览版')}
+            onClick={() => chooseChannel(channel === 'beta' ? 'stable' : 'beta')}
+            className={cn(
+              'press relative h-6 w-11 shrink-0 rounded-full transition-colors',
+              channel === 'beta' ? 'bg-accent' : 'bg-paper-2',
+            )}
+          >
+            <span
+              className={cn(
+                'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all',
+                channel === 'beta' ? 'left-[22px]' : 'left-0.5',
+              )}
+            />
+          </button>
+        </div>
+        <p className="mt-2 text-caption text-ink-3">
+          {tr('当前 v{current} · {channel}', {
+            current: __APP_VERSION__,
+            channel: tr(channelLabel(channel)),
+          })}
+        </p>
       </section>
 
       <section className="rounded-2xl border border-line bg-surface p-4">

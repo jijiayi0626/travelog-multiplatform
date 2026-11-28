@@ -2763,13 +2763,7 @@ async function handleAdminPhotoDelete(request, env, id) {
 const APP_REPO = 'jijiayi0626/travelog-multiplatform'
 
 /** GET /api/app/latest：服务端代理 GitHub Releases，避免客户端被限流/直连不稳 */
-async function handleAppLatest(request, env) {
-  const response = await fetch(`https://api.github.com/repos/${APP_REPO}/releases/latest`, {
-    headers: { accept: 'application/vnd.github+json', 'user-agent': 'travelog-app' },
-    cf: { cacheTtl: 600, cacheEverything: true, cacheKey: 'travelog-latest-release-v1' },
-  }).catch(() => null)
-  if (!response || !response.ok) throw new HttpError(502, '检查更新失败，请稍后再试')
-  const release = await response.json()
+function mapAppRelease(release) {
   const assets = (release.assets || [])
     .filter((asset) => String(asset.name || '').toLowerCase().endsWith('.apk'))
     .map((asset) => ({
@@ -2777,15 +2771,38 @@ async function handleAppLatest(request, env) {
       size: Number(asset.size) || 0,
       url: String(asset.browser_download_url || ''),
     }))
+  return {
+    version: String(release.tag_name || '').replace(/^v/, ''),
+    tag: String(release.tag_name || ''),
+    name: String(release.name || ''),
+    publishedAt: Number(new Date(release.published_at || 0)) || 0,
+    notes: String(release.body || '').slice(0, 2000),
+    assets,
+  }
+}
+
+async function handleAppLatest(request, env) {
+  const response = await fetch(`https://api.github.com/repos/${APP_REPO}/releases/latest`, {
+    headers: { accept: 'application/vnd.github+json', 'user-agent': 'travelog-app' },
+    cf: { cacheTtl: 600, cacheEverything: true, cacheKey: 'travelog-latest-release-v1' },
+  }).catch(() => null)
+  if (!response || !response.ok) throw new HttpError(502, '检查更新失败，请稍后再试')
+  const release = await response.json()
+  return json(mapAppRelease(release), 200, env, request)
+}
+
+/** GET /api/app/releases：最近 20 个版本（含 prerelease，排除 draft），供预览通道使用 */
+async function handleAppReleases(request, env) {
+  const response = await fetch(`https://api.github.com/repos/${APP_REPO}/releases?per_page=20`, {
+    headers: { accept: 'application/vnd.github+json', 'user-agent': 'travelog-app' },
+    cf: { cacheTtl: 600, cacheEverything: true, cacheKey: 'travelog-releases-v1' },
+  }).catch(() => null)
+  if (!response || !response.ok) throw new HttpError(502, '检查更新失败，请稍后再试')
+  const releases = await response.json()
   return json(
-    {
-      version: String(release.tag_name || '').replace(/^v/, ''),
-      tag: String(release.tag_name || ''),
-      name: String(release.name || ''),
-      publishedAt: Number(new Date(release.published_at || 0)) || 0,
-      notes: String(release.body || '').slice(0, 2000),
-      assets,
-    },
+    (Array.isArray(releases) ? releases : [])
+      .filter((release) => release && !release.draft)
+      .map(mapAppRelease),
     200,
     env,
     request,
@@ -2796,6 +2813,7 @@ async function handleApi(request, env, url, ctx) {
   const route = `${request.method} ${url.pathname}`
 
   if (route === 'GET /api/app/latest') return await handleAppLatest(request, env)
+  if (route === 'GET /api/app/releases') return await handleAppReleases(request, env)
 
   if (route === 'GET /api/health') {
     const ai = await loadEndpoints(env).catch(() => null)

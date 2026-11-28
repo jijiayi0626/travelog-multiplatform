@@ -33,6 +33,7 @@ import {
 } from '../lib/utils'
 import { cn } from '../lib/cn'
 import { useI18n } from '../lib/app-context'
+import { openAmapNav } from '../lib/amap'
 import { CategoryGlyph } from './Icons'
 import { Avatar } from './ui'
 
@@ -352,6 +353,19 @@ export function FootprintRow({
           ) : null}
         </p>
       </div>
+      {hasCoord ? (
+        <button
+          type="button"
+          aria-label={tr('导航到这里')}
+          onClick={() =>
+            openAmapNav(footprint.latitude, footprint.longitude, footprint.placeName)
+          }
+          className="press flex h-9 shrink-0 items-center gap-1 rounded-full bg-accent-soft px-2.5 text-caption font-medium text-accent"
+        >
+          <NavigationArrow size={13} />
+          {tr('导航')}
+        </button>
+      ) : null}
       {hasCoord ? (
         <button
           type="button"

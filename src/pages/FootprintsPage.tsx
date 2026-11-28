@@ -99,6 +99,9 @@ export function FootprintsPage() {
           </h1>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <IconButton label={tr('城市护照')} onClick={() => nav.navigate({ name: 'passport' })}>
+            <MapTrifold size={17} />
+          </IconButton>
           <IconButton label={tr('从照片导入位置')} onClick={() => photoInputRef.current?.click()}>
             <ImageSquare size={17} />
           </IconButton>

@@ -1,12 +1,14 @@
 import { Browser } from '@capacitor/browser'
-import { getLatestAppRelease, type AppRelease } from './cloud'
+import { getAppReleases, getLatestAppRelease, type AppRelease } from './cloud'
 import { isNative } from './native'
 
 export type UpdateMode = 'auto' | 'mirror1' | 'mirror2' | 'github' | 'custom'
+export type UpdateChannel = 'stable' | 'beta'
 
 export const UPDATE_MODE_KEY = 'travelog.updateMode'
 export const UPDATE_CUSTOM_KEY = 'travelog.updateCustomBase'
 export const UPDATE_SKIPPED_KEY = 'travelog.updateSkippedVersion'
+export const UPDATE_CHANNEL_KEY = 'travelog.updateChannel'
 
 /** 国内下载加速：两个优选 CDN 节点 + GitHub 直连 */
 export const APK_MIRRORS = [
@@ -43,18 +45,51 @@ export function writeCustomBase(value: string): void {
   localStorage.setItem(UPDATE_CUSTOM_KEY, value)
 }
 
-export function versionValue(version: string): number {
-  return String(version)
-    .replace(/^v/i, '')
-    .split('.')
-    .slice(0, 3)
-    .map((part) => Number.parseInt(part, 10) || 0)
-    .reduce((acc, part) => acc * 1000 + part, 0)
+/* ---------------- 更新通道 ---------------- */
+
+export function normalizeChannel(value: string | null): UpdateChannel {
+  return value === 'beta' ? 'beta' : 'stable'
 }
 
-/** 线上版本是否比当前应用更新 */
-export function isNewer(version: string, current = __APP_VERSION__): boolean {
-  return versionValue(version) > versionValue(current)
+export function readUpdateChannel(): UpdateChannel {
+  try {
+    return normalizeChannel(localStorage.getItem(UPDATE_CHANNEL_KEY))
+  } catch {
+    return 'stable'
+  }
+}
+
+export function writeUpdateChannel(channel: UpdateChannel): void {
+  try {
+    localStorage.setItem(UPDATE_CHANNEL_KEY, channel)
+  } catch {
+    /* 隐私模式下忽略 */
+  }
+}
+
+export function channelLabel(channel: UpdateChannel): string {
+  return channel === 'beta' ? '预览版' : '正式版'
+}
+
+function normalizeTag(tag: string): string {
+  return String(tag || '').trim().replace(/^v/i, '')
+}
+
+/**
+ * 线上 Release 是否比当前构建更新。
+ * 按发布时间判断（版本号重置后 0.0.2.2 不会再被 2.7.2 误判为更新），
+ * 且 tag 与当前版本相同则视为同一版本。
+ */
+export function isNewerRelease(
+  release: AppRelease | null,
+  currentVersion = __APP_VERSION__,
+): boolean {
+  if (!release) return false
+  const tag = normalizeTag(release.tag || release.version)
+  if (!tag || tag === normalizeTag(currentVersion)) return false
+  const publishedAt = Number(release.publishedAt) || 0
+  const builtAt = new Date(__BUILD_TIME__).getTime() || 0
+  return publishedAt > builtAt
 }
 
 export function mirrorUrl(base: string, url: string): string {
@@ -69,16 +104,36 @@ export function formatSize(size: number): string {
 
 /* ---------------- 最新版本 ---------------- */
 
-let releaseCache: { data: AppRelease; at: number } | null = null
+let releaseCache: { channel: UpdateChannel; data: AppRelease; at: number } | null = null
 const RELEASE_TTL = 5 * 60_000
 
-/** 5 分钟内复用结果，避免弹窗、下载页、关于页各查一次 */
-export async function loadLatestRelease(force = false): Promise<AppRelease> {
-  if (!force && releaseCache && Date.now() - releaseCache.at < RELEASE_TTL) {
+/**
+ * 5 分钟内复用结果，避免弹窗、下载页、关于页各查一次。
+ * 正式通道取 latest；预览通道取最近 20 个版本里发布时间最新的非 draft 版本（含 prerelease）。
+ */
+export async function loadLatestRelease(
+  force = false,
+  channel: UpdateChannel = readUpdateChannel(),
+): Promise<AppRelease> {
+  if (
+    !force &&
+    releaseCache &&
+    releaseCache.channel === channel &&
+    Date.now() - releaseCache.at < RELEASE_TTL
+  ) {
     return releaseCache.data
   }
-  const data = await getLatestAppRelease()
-  releaseCache = { data, at: Date.now() }
+  let data: AppRelease
+  if (channel === 'beta') {
+    const releases = await getAppReleases()
+    const latest = releases
+      .filter((item) => item && (item.tag || item.version))
+      .sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0))[0]
+    data = latest ?? (await getLatestAppRelease())
+  } else {
+    data = await getLatestAppRelease()
+  }
+  releaseCache = { channel, data, at: Date.now() }
   return data
 }
 

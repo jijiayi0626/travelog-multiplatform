@@ -24,6 +24,12 @@ import { isDevMode, setDevMode, subscribeDevMode } from '../lib/dev-mode'
 import { openOnboarding } from '../lib/onboarding'
 import { isNative } from '../lib/native'
 import { isOcrModelReady } from '../lib/ocr-model'
+import {
+  channelLabel,
+  readUpdateChannel,
+  writeUpdateChannel,
+  type UpdateChannel,
+} from '../lib/update'
 import { ConfirmDialog } from '../components/ui'
 
 const REPO_URL = 'https://github.com/jijiayi0626/travelog-multiplatform'
@@ -35,6 +41,7 @@ export function AboutPage() {
   const { bump } = useRefresh()
   const { tr } = useI18n()
   const [devMode, setDevModeState] = useState(() => isDevMode())
+  const [channel, setChannel] = useState<UpdateChannel>(() => readUpdateChannel())
   const [confirmReset, setConfirmReset] = useState(false)
   const [applying, setApplying] = useState(false)
   const [speechDiag, setSpeechDiag] = useState('')
@@ -115,6 +122,13 @@ export function AboutPage() {
     }
   }
 
+  const toggleChannel = () => {
+    const next: UpdateChannel = channel === 'beta' ? 'stable' : 'beta'
+    writeUpdateChannel(next)
+    setChannel(next)
+    toast(tr('已切换到{channel}', { channel: tr(channelLabel(next)) }))
+  }
+
   const doReset = async () => {
     await resetAll()
     bump()
@@ -146,7 +160,12 @@ export function AboutPage() {
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-title font-semibold tracking-tight text-ink">旅记 · Travelog</p>
-          <p className="mt-0.5 text-note text-ink-3">{tr('本地优先的旅行手帐')}</p>
+          <p className="mt-0.5 text-note text-ink-3">
+            {tr('当前版本 v{version} · {channel}', {
+              version: __APP_VERSION__,
+              channel: tr(channelLabel(channel)),
+            })}
+          </p>
         </div>
         <button
           type="button"
@@ -164,6 +183,35 @@ export function AboutPage() {
           value={tr('安装包与线路')}
           onClick={() => nav.navigate({ name: 'download' })}
         />
+        <div className="flex items-center gap-3 border-b border-line px-4 py-3.5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-ink-2">
+            <DownloadSimple size={17} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-body text-ink">{tr('接收预览版')}</p>
+            <p className="mt-0.5 text-caption text-ink-3">
+              {channel === 'beta'
+                ? tr('预览通道会包含 beta / rc 版本')
+                : tr('正式通道只接收稳定版本')}
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={channel === 'beta'}
+            aria-label={tr('接收预览版')}
+            onClick={toggleChannel}
+            className={`press relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+              channel === 'beta' ? 'bg-accent' : 'bg-paper-2'
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${
+                channel === 'beta' ? 'left-[22px]' : 'left-0.5'
+              }`}
+            />
+          </button>
+        </div>
         <SettingRow
           icon={<BookOpen size={17} />}
           title={tr('更新日志')}

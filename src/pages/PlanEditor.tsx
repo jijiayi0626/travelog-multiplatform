@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { CheckCircle, Trash } from '@phosphor-icons/react'
+import { CheckCircle, NavigationArrow, Trash } from '@phosphor-icons/react'
 import type { Plan, PlanKind, Trip } from '../lib/types'
 import { deletePlan, getTrip, listPlans, savePlan } from '../lib/repo'
 import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
+import { openAmapSearch } from '../lib/amap'
 import {
   PLAN_KIND_COLOR,
   PLAN_KIND_LABEL,
@@ -293,6 +294,16 @@ export function PlanEditor({
             placeholder={tr('例如「直岛 · Benesse House」')}
             onChange={(event) => setPlace(event.target.value)}
           />
+          {place.trim() ? (
+            <button
+              type="button"
+              onClick={() => openAmapSearch((placeRef.current?.value ?? place).trim())}
+              className="press inline-flex items-center gap-1 self-start rounded-full border border-line px-2.5 py-1 text-caption text-accent"
+            >
+              <NavigationArrow size={12} />
+              {tr('在高德中搜索')}
+            </button>
+          ) : null}
         </Field>
         <Field label={tr('备注')}>
           <textarea

@@ -4,7 +4,7 @@ import { ArrowRight, DownloadSimple, MapTrifold, Sparkle } from '@phosphor-icons
 import { useI18n, useNav, useToast } from '../lib/app-context'
 import {
   downloadApk,
-  isNewer,
+  isNewerRelease,
   loadLatestRelease,
   pickApk,
   plainNotes,
@@ -34,7 +34,7 @@ export function UpdatePrompt() {
     if (typeof navigator !== 'undefined' && !navigator.onLine) return
     try {
       const data = await loadLatestRelease()
-      if (!isNewer(data.version) || skippedVersion() === data.version) return
+      if (!isNewerRelease(data) || skippedVersion() === (data.tag || data.version)) return
       setRelease(data)
       setOpen(true)
     } catch {
@@ -57,7 +57,7 @@ export function UpdatePrompt() {
   const apk = pickApk(release)
 
   const dismiss = () => {
-    skipVersion(release.version)
+    skipVersion(release.tag || release.version)
     setOpen(false)
   }
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
-import { Receipt, Trash } from '@phosphor-icons/react'
+import { Microphone, Receipt, StopCircle, Trash } from '@phosphor-icons/react'
 import type { Currency, Expense, ExpenseCategory, Member, Trip } from '../lib/types'
 import {
   deleteExpense,
@@ -31,6 +31,9 @@ import { parseReceiptText, recognizeReceiptText } from '../lib/receipt-ocr'
 import { isOcrModelReady, OCR_MODEL_SIZE_MB } from '../lib/ocr-model'
 import { guessCategory } from '../lib/ai'
 import { isNative } from '../lib/native'
+import { isVoskModelReady, startOfflineListening } from '../lib/offline-speech'
+import { parseExpenseSpeech } from '../lib/expense-speech'
+import { startSystemVoice } from '../lib/speech'
 import { EditorScreen, FormBlock } from '../components/EditorScreen'
 import { ConfirmDialog, Field } from '../components/ui'
 import { CategoryGlyph } from '../components/Icons'
@@ -61,6 +64,15 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
   const [receiptBusy, setReceiptBusy] = useState(false)
   const [modelPrompt, setModelPrompt] = useState(false)
   const receiptRef = useRef<HTMLInputElement>(null)
+
+  const [voiceListening, setVoiceListening] = useState(false)
+  const [voiceStarting, setVoiceStarting] = useState(false)
+  const [voicePrompt, setVoicePrompt] = useState(false)
+  const voiceStopRef = useRef<(() => void) | null>(null)
+  const voiceOfflineStopRef = useRef<(() => Promise<void>) | null>(null)
+  const voiceHeardRef = useRef('')
+  const voiceOfflineFinalRef = useRef('')
+  const voiceCancelledRef = useRef(false)
 
   useEffect(() => {
     let alive = true
@@ -221,6 +233,176 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
     }
   }
 
+  const applyVoiceExpense = (raw: string) => {
+    const text = raw.trim()
+    if (!text) {
+      toast(tr('没听清，请再试一次'))
+      return
+    }
+    const parsed = parseExpenseSpeech(text)
+    if (parsed.amount > 0) {
+      setAmountText(String(parsed.amount))
+      if (parsed.note) setNote(parsed.note)
+      setCategory(parsed.category)
+      setCategoryTouched(true)
+      setAutoHint('')
+      if (error) setError('')
+      // 只填入表单让用户确认，不直接保存
+      toast(
+        tr('已识别：{note} ¥{amount}', {
+          note: parsed.note || tr('一笔'),
+          amount: parsed.amount,
+        }),
+      )
+      return
+    }
+    if (parsed.note) setNote(parsed.note)
+    toast(tr('没识别到金额，请手动填写'))
+  }
+
+  const finishVoice = () => {
+    const heard = voiceHeardRef.current
+    voiceHeardRef.current = ''
+    voiceOfflineFinalRef.current = ''
+    setVoiceListening(false)
+    setVoiceStarting(false)
+    applyVoiceExpense(heard)
+  }
+
+  const stopVoice = () => {
+    const stop = voiceStopRef.current
+    voiceStopRef.current = null
+    stop?.()
+    const offlineStop = voiceOfflineStopRef.current
+    voiceOfflineStopRef.current = null
+    if (offlineStop) {
+      void offlineStop()
+    } else {
+      // 模型还在加载时也要标记取消，避免加载完成后继续占用麦克风
+      voiceCancelledRef.current = true
+    }
+    finishVoice()
+  }
+
+  /** 用本地 Vosk 模型识别；partial 实时覆盖，最终结果追加 */
+  const startOfflineVoice = async () => {
+    setVoiceStarting(true)
+    setVoiceListening(true)
+    voiceHeardRef.current = ''
+    voiceOfflineFinalRef.current = ''
+    voiceCancelledRef.current = false
+    toast(tr('正在加载离线语音模型，请稍候…'))
+    try {
+      const stop = await startOfflineListening({
+        onResult: (text, isFinal) => {
+          const value = text.trim()
+          if (!value) return
+          if (isFinal) voiceOfflineFinalRef.current += value
+          voiceHeardRef.current = `${voiceOfflineFinalRef.current}${isFinal ? '' : value}`
+        },
+        onError: (message) => {
+          toast(tr('离线语音识别失败：{msg}', { msg: message }))
+          setVoiceListening(false)
+          setVoiceStarting(false)
+        },
+      })
+      if (voiceCancelledRef.current) {
+        voiceCancelledRef.current = false
+        await stop()
+        return
+      }
+      voiceOfflineStopRef.current = stop
+      setVoiceStarting(false)
+    } catch (error) {
+      toast(error instanceof Error ? error.message : tr('离线语音启动失败'))
+      setVoiceListening(false)
+      setVoiceStarting(false)
+    }
+  }
+
+  /** 系统语音不可用：模型已下载就直接回退，否则引导去下载 */
+  const fallbackToOfflineVoice = async () => {
+    const ready = await isVoskModelReady()
+    if (!ready) {
+      setVoicePrompt(true)
+      return
+    }
+    await startOfflineVoice()
+  }
+
+  const startSystemVoiceForExpense = async () => {
+    const result = await startSystemVoice({
+      onPartial: (text) => {
+        voiceHeardRef.current = text
+      },
+      onError: (message) => {
+        voiceStopRef.current = null
+        voiceHeardRef.current = ''
+        setVoiceListening(false)
+        setVoiceStarting(false)
+        toast(tr('语音识别失败：{msg}', { msg: message }))
+      },
+      onUnavailable: () => {
+        voiceStopRef.current = null
+        voiceHeardRef.current = ''
+        setVoiceListening(false)
+        setVoiceStarting(false)
+        void fallbackToOfflineVoice()
+      },
+      onEnd: () => {
+        voiceStopRef.current = null
+        finishVoice()
+      },
+    })
+    if (result.ok) {
+      voiceStopRef.current = result.stop
+      setVoiceListening(true)
+      setVoiceStarting(false)
+      return
+    }
+    voiceStopRef.current = null
+    setVoiceListening(false)
+    setVoiceStarting(false)
+    if (result.kind === 'permission') {
+      toast(tr('需要麦克风权限才能语音记账'))
+      return
+    }
+    toast(tr('系统语音不可用，改用离线语音'))
+    await fallbackToOfflineVoice()
+  }
+
+  /** 点一下开始，再点一下停止；优先系统语音，不可用时回退离线识别 */
+  const toggleVoiceExpense = async () => {
+    if (voiceListening) {
+      stopVoice()
+      return
+    }
+    if (voiceStarting) return
+    voiceHeardRef.current = ''
+    voiceOfflineFinalRef.current = ''
+    setVoiceStarting(true)
+    try {
+      await startSystemVoiceForExpense()
+    } catch (error) {
+      setVoiceListening(false)
+      setVoiceStarting(false)
+      toast(error instanceof Error ? error.message : tr('语音识别失败'))
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      voiceStopRef.current?.()
+      voiceStopRef.current = null
+      if (voiceOfflineStopRef.current) {
+        void voiceOfflineStopRef.current()
+        voiceOfflineStopRef.current = null
+      } else {
+        voiceCancelledRef.current = true
+      }
+    }
+  }, [])
+
   const doDelete = async () => {
     if (!original) return
     await deleteExpense(original.id)
@@ -242,7 +424,7 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
           <div className="flex items-end gap-2 border-b border-line pb-2">
             <span className="pb-1.5 text-heading-sm font-normal text-ink-3">{CURRENCY_SYMBOL[currency]}</span>
             <input
-              className="w-full bg-transparent text-display-lg font-semibold leading-none tabular-nums tracking-tight text-ink outline-none placeholder:text-ink-3/60"
+              className="min-w-0 flex-1 bg-transparent text-display-lg font-semibold leading-none tabular-nums tracking-tight text-ink outline-none placeholder:text-ink-3/60"
               inputMode="decimal"
               value={amountText}
               placeholder="0.00"
@@ -251,6 +433,26 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
                 if (error) setError('')
               }}
             />
+            <button
+              type="button"
+              disabled={voiceStarting}
+              onClick={() => void toggleVoiceExpense()}
+              aria-label={voiceListening ? tr('停止语音记账') : tr('语音记账')}
+              className={cn(
+                'press mb-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border disabled:opacity-50',
+                voiceListening
+                  ? 'border-transparent bg-accent-soft text-accent'
+                  : 'border-line text-ink-2 hover:text-accent',
+              )}
+            >
+              {voiceStarting ? (
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink-3 border-t-transparent" />
+              ) : voiceListening ? (
+                <StopCircle size={19} weight="fill" />
+              ) : (
+                <Microphone size={19} />
+              )}
+            </button>
           </div>
         </Field>
 
@@ -440,6 +642,16 @@ export function ExpenseEditor({ tripId, expenseId }: { tripId: string; expenseId
         confirmText={tr('去下载模型')}
         tone="accent"
         onClose={() => setModelPrompt(false)}
+        onConfirm={() => nav.navigate({ name: 'ocrModel' })}
+      />
+
+      <ConfirmDialog
+        open={voicePrompt}
+        title={tr('系统语音服务不可用')}
+        message={tr('系统语音服务不可用，请下载离线语音模型')}
+        confirmText={tr('去下载')}
+        tone="accent"
+        onClose={() => setVoicePrompt(false)}
         onConfirm={() => nav.navigate({ name: 'ocrModel' })}
       />
 

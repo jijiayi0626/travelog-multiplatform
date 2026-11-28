@@ -470,6 +470,20 @@ export async function getLatestAppRelease(): Promise<AppRelease> {
   }
 }
 
+/** 最近 20 个 GitHub Release（含 prerelease，排除 draft）；预览通道用 */
+export async function getAppReleases(): Promise<AppRelease[]> {
+  try {
+    return await api<AppRelease[]>('/app/releases', { timeoutMs: 15000 })
+  } catch (error) {
+    if (apiOrigin() === `${DEFAULT_NATIVE_SERVER}/api`) throw error
+    const response = await fetch(`${DEFAULT_NATIVE_SERVER}/api/app/releases`, {
+      headers: { accept: 'application/json' },
+    })
+    if (!response.ok) throw error
+    return (await response.json()) as AppRelease[]
+  }
+}
+
 /* ---------------- 照片（R2） ---------------- */
 
 export interface UploadedPhoto {

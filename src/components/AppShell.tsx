@@ -47,6 +47,8 @@ function rootOf(view: View): RootKey {
       return 'album'
     case 'footprints':
     case 'footprintEditor':
+    case 'passport':
+    case 'monthly':
       return 'footprints'
     case 'expenses':
     case 'expenseEditor':

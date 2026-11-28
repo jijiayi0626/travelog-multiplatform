@@ -1,13 +1,18 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Clipboard } from '@capacitor/clipboard'
 import {
+  ArrowClockwise,
   ArrowLeft,
   CheckCircle,
+  Copy,
   DownloadSimple,
+  Microphone,
   Play,
   Trash,
   WarningCircle,
 } from '@phosphor-icons/react'
 import { useI18n, useNav, useToast } from '../lib/app-context'
+import { translateText } from '../lib/i18n'
 import {
   OCR_MODEL_SIZE_MB,
   deleteOcrModel,
@@ -23,11 +28,34 @@ import {
   isVoskModelReady,
   testVoskModelStartup,
 } from '../lib/offline-speech'
+import {
+  collectVoiceDiagnostics,
+  testSystemSpeech,
+  type VoiceDiagnostics,
+} from '../lib/speech'
+
+type Tr = (zh: string, vars?: Record<string, string | number>) => string
+
+/** 诊断结果拼成可复制的多行文本 */
+function formatDiagnostics(data: VoiceDiagnostics, tr: Tr): string {
+  return [
+    tr('运行环境：{value}', { value: data.native ? tr('原生 App') : tr('网页') }),
+    tr('系统语音：{value}', { value: data.systemAvailable ? tr('可用') : tr('不可用') }),
+    data.systemDetail ? tr('系统语音详情：{value}', { value: data.systemDetail }) : '',
+    tr('麦克风权限：{value}', { value: data.permission }),
+    data.permissionDetail ? tr('权限详情：{value}', { value: data.permissionDetail }) : '',
+    tr('离线语音模型：{value}', { value: data.voskReady ? tr('已下载') : tr('未下载') }),
+    tr('最近一次语音错误：{value}', { value: data.lastError || tr('无') }),
+    tr('检测时间：{value}', { value: new Date().toLocaleString() }),
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
 
 export function OcrModelPage() {
   const nav = useNav()
   const toast = useToast()
-  const { tr } = useI18n()
+  const { tr, lang } = useI18n()
 
   const [ready, setReady] = useState(() => isOcrModelReady())
   const [busy, setBusy] = useState(false)
@@ -43,6 +71,91 @@ export function OcrModelPage() {
     ok: boolean
     message: string
   } | null>(null)
+
+  const [diagText, setDiagText] = useState('')
+  const [diagBusy, setDiagBusy] = useState(false)
+  const [diagTestBusy, setDiagTestBusy] = useState(false)
+  const [diagTest, setDiagTest] = useState<{
+    ok: boolean
+    message: string
+    needDownload: boolean
+  } | null>(null)
+  const voiceSectionRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    let alive = true
+    void collectVoiceDiagnostics()
+      .then((data) => {
+        if (alive) {
+          setDiagText(formatDiagnostics(data, (zh, vars) => translateText(lang, zh, vars)))
+        }
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [lang])
+
+  const refreshDiagnostics = async (): Promise<string> => {
+    if (diagBusy) return diagText
+    setDiagBusy(true)
+    try {
+      const text = formatDiagnostics(await collectVoiceDiagnostics(), tr)
+      setDiagText(text)
+      return text
+    } catch (error) {
+      const message = tr('检测失败：{msg}', {
+        msg: error instanceof Error ? error.message : String(error),
+      })
+      setDiagText(message)
+      return message
+    } finally {
+      setDiagBusy(false)
+    }
+  }
+
+  const copyDiagnostics = async () => {
+    const text = diagText || (await refreshDiagnostics())
+    if (!text) return
+    try {
+      await Clipboard.write({ string: text })
+      toast(tr('诊断信息已复制'))
+      return
+    } catch {
+      /* 网页端可能不支持 Capacitor Clipboard，继续尝试浏览器剪贴板 */
+    }
+    try {
+      await navigator.clipboard.writeText(text)
+      toast(tr('诊断信息已复制'))
+    } catch {
+      toast(tr('复制失败，请手动选择文本'))
+    }
+  }
+
+  const testSpeech = async () => {
+    if (diagTestBusy) return
+    setDiagTestBusy(true)
+    setDiagTest(null)
+    try {
+      const result = await testSystemSpeech()
+      if (result.ok) {
+        setDiagTest({
+          ok: true,
+          message: tr('收到语音：{text}', { text: result.text }),
+          needDownload: false,
+        })
+      } else {
+        setDiagTest({
+          ok: false,
+          message: tr('语音测试失败：{msg}', { msg: result.error }),
+          needDownload: result.unavailable,
+        })
+      }
+    } finally {
+      setDiagTestBusy(false)
+      void refreshDiagnostics()
+    }
+  }
 
   useEffect(() => {
     let alive = true
@@ -218,7 +331,7 @@ export function OcrModelPage() {
         </p>
       </section>
 
-      <section className="rounded-2xl border border-line bg-surface p-4">
+      <section ref={voiceSectionRef} className="rounded-2xl border border-line bg-surface p-4">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-body font-medium text-ink">{tr('离线语音模型')}</p>
@@ -314,6 +427,83 @@ export function OcrModelPage() {
         <p className="mt-3 text-caption leading-5 text-ink-3">
           {tr('模型从 GitHub 仓库下载，失败时会自动切换备用镜像。识别全程在本机完成，不会上传录音。')}
         </p>
+      </section>
+
+      <section className="rounded-2xl border border-line bg-surface p-4">
+        <div className="min-w-0">
+          <p className="text-body font-medium text-ink">{tr('语音诊断')}</p>
+          <p className="mt-0.5 text-caption leading-5 text-ink-3">
+            {tr('语音识别不可用时，先检测系统语音、麦克风权限和离线模型，再复制诊断信息。')}
+          </p>
+        </div>
+
+        <div className="mt-3 rounded-xl border border-line bg-paper-2/40 p-3">
+          <p className="select-text whitespace-pre-wrap break-all text-caption leading-5 text-ink-2">
+            {diagText || tr('点击「立即检测」查看语音状态')}
+          </p>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            className="btn-ghost h-10 text-note"
+            disabled={diagBusy}
+            onClick={() => void refreshDiagnostics()}
+          >
+            <ArrowClockwise size={14} />
+            {diagBusy ? tr('检测中…') : tr('立即检测')}
+          </button>
+          <button
+            type="button"
+            className="btn-ghost h-10 text-note"
+            disabled={diagBusy || diagTestBusy}
+            onClick={() => void copyDiagnostics()}
+          >
+            <Copy size={14} />
+            {tr('复制诊断')}
+          </button>
+        </div>
+
+        <button
+          type="button"
+          className="btn-primary mt-2 h-10 w-full text-note"
+          disabled={diagTestBusy}
+          onClick={() => void testSpeech()}
+        >
+          <Microphone size={15} />
+          {diagTestBusy ? tr('正在测试，请说话…') : tr('测试系统语音')}
+        </button>
+
+        {diagTest ? (
+          <div className="mt-3 space-y-2">
+            <p
+              className={
+                diagTest.ok
+                  ? 'flex items-start gap-1.5 break-all text-caption leading-5 text-accent'
+                  : 'flex items-start gap-1.5 break-all text-caption leading-5 text-warn'
+              }
+            >
+              {diagTest.ok ? (
+                <CheckCircle size={14} className="mt-0.5 shrink-0" />
+              ) : (
+                <WarningCircle size={14} className="mt-0.5 shrink-0" />
+              )}
+              {diagTest.message}
+            </p>
+            {diagTest.needDownload ? (
+              <button
+                type="button"
+                className="btn-ghost h-9 px-3 text-note"
+                onClick={() =>
+                  voiceSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                }
+              >
+                <DownloadSimple size={14} />
+                {tr('去下载离线语音模型')}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </section>
     </div>
   )

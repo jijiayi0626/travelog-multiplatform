@@ -193,6 +193,8 @@ export type View =
   | { name: 'ocrModel' }
   | { name: 'changelog' }
   | { name: 'admin' }
+  | { name: 'passport' }
+  | { name: 'monthly' }
   | { name: 'share'; code: string }
 
 export interface SearchResult {

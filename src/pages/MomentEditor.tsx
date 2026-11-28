@@ -4,6 +4,7 @@ import {
   Camera as CameraIcon,
   ImageSquare,
   Microphone,
+  NavigationArrow,
   Plus,
   Sparkle,
   StopCircle,
@@ -18,8 +19,10 @@ import { polishMoment } from '../lib/ai'
 import { readFileDate, readFileGps } from '../lib/exif'
 import { locateProvince } from '../lib/province'
 import { locateCity } from '../lib/chinaCities'
+import { openAmapNav, openAmapSearch } from '../lib/amap'
 import { isNative } from '../lib/native'
 import { isVoskModelReady, startOfflineListening } from '../lib/offline-speech'
+import { logVoiceError } from '../lib/speech'
 import { cn } from '../lib/cn'
 import { EditorScreen, FormBlock } from '../components/EditorScreen'
 import { ConfirmDialog, Field } from '../components/ui'
@@ -46,16 +49,6 @@ interface SpeechRecognitionLike {
   onend: (() => void) | null
   start: () => void
   stop: () => void
-}
-
-/** 语音失败时留一条可查的记录，方便在开发者模式里定位 */
-function logVoiceError(message: string): void {
-  console.warn('[travelog:voice]', message)
-  try {
-    localStorage.setItem('travelog.voiceLastError', `${new Date().toLocaleString()} ${message}`)
-  } catch {
-    /* 隐私模式写不了就算了 */
-  }
 }
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
@@ -329,21 +322,21 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
           toast(tr('语音识别失败：{msg}', { msg: message }))
         })
 
-        // start() 在 partialResults 模式下不 resolve；用系统监听状态兜底检测启动失败
+        // start() 在 partialResults 模式下不 resolve；12 秒仍无结果且未在监听就回退离线语音
         window.setTimeout(() => {
           if (nativeStoppingRef.current || gotResult) return
           void NativeSpeech.isListening()
             .then(({ listening: active }) => {
               if (active) return
-              logVoiceError('native: 启动后未进入监听状态')
+              logVoiceError('native: 启动后未进入监听状态，系统语音服务不可用')
               setListening(false)
               clearNativeListeners()
-              toast(tr('语音识别没有启动，请检查系统语音服务'))
+              void fallbackToOffline()
             })
             .catch(() => {
               /* 旧版本插件没有 isListening 时忽略 */
             })
-        }, 6000)
+        }, 12000)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         logVoiceError(`native: ${message}`)
@@ -666,6 +659,20 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
             placeholder={tr('例如「小樽运河」')}
             onChange={(event) => setLocationName(event.target.value)}
           />
+          {coords || locationName.trim() ? (
+            <button
+              type="button"
+              onClick={() => {
+                const name = (locationRef.current?.value ?? locationName).trim()
+                if (coords) openAmapNav(coords.lat, coords.lng, name || tr('目的地'))
+                else openAmapSearch(name)
+              }}
+              className="press inline-flex items-center gap-1 self-start rounded-full border border-line px-2.5 py-1 text-caption text-accent"
+            >
+              <NavigationArrow size={12} />
+              {tr('导航到这里')}
+            </button>
+          ) : null}
         </Field>
 
         <div className="space-y-2">
@@ -805,7 +812,7 @@ export function MomentEditor({ tripId, momentId }: { tripId: string; momentId?: 
       <ConfirmDialog
         open={offlinePrompt}
         title={tr('语音服务不可用')}
-        message={tr('当前设备语音服务不可用，可下载离线语音模型')}
+        message={tr('系统语音服务不可用，请下载离线语音模型')}
         confirmText={tr('去下载')}
         tone="accent"
         onClose={() => setOfflinePrompt(false)}
