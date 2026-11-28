@@ -850,11 +850,17 @@ export function adminSaveSettings(payload: {
 }
 
 export function adminTestAI(endpointId?: string): Promise<{ ok: boolean; results: AdminAITestResult[] }> {
-  return adminApi('/admin/ai/test', { method: 'POST', body: endpointId ? { endpointId } : {} })
+  return adminApi('/admin/ai/test', {
+    method: 'POST',
+    body: endpointId ? { endpointId } : {},
+    timeoutMs: 90_000,
+  })
 }
 
 export function adminListModels(endpointId: string): Promise<{ models: string[] }> {
-  return adminApi(`/admin/ai/models?endpointId=${encodeURIComponent(endpointId)}`)
+  return adminApi(`/admin/ai/models?endpointId=${encodeURIComponent(endpointId)}`, {
+    timeoutMs: 30_000,
+  })
 }
 
 export function adminChangePassword(password: string): Promise<{ ok: boolean }> {

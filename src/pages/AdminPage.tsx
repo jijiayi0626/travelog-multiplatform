@@ -3,6 +3,7 @@ import {
   ArrowClockwise,
   ArrowLeft,
   CheckCircle,
+  WarningCircle,
   Copy,
   Crown,
   Devices,
@@ -1363,7 +1364,8 @@ function AISettings({
       model: item.models?.length ? item.models.join(',') : item.model,
     })),
   )
-  const [busy, setBusy] = useState<'save' | 'test' | 'models' | null>(null)
+  const [busy, setBusy] = useState<'save' | 'test' | null>(null)
+  const [rowBusy, setRowBusy] = useState<{ id: string; kind: 'models' | 'test' } | null>(null)
   const [testResults, setTestResults] = useState<AdminAITestResult[]>([])
   const [modelOptions, setModelOptions] = useState<Record<string, string[]>>({})
 
@@ -1394,7 +1396,7 @@ function AISettings({
   }
 
   const loadModels = async (id: string) => {
-    setBusy('models')
+    setRowBusy({ id, kind: 'models' })
     try {
       const result = await adminListModels(id)
       setModelOptions((map) => ({ ...map, [id]: result.models }))
@@ -1402,7 +1404,21 @@ function AISettings({
     } catch (error) {
       onError(error)
     } finally {
-      setBusy(null)
+      setRowBusy(null)
+    }
+  }
+
+  const testOne = async (id: string) => {
+    setRowBusy({ id, kind: 'test' })
+    setTestResults([])
+    try {
+      const result = await adminTestAI(id)
+      setTestResults(result.results)
+      toast(result.ok ? tr('接口正常') : tr('接口测试失败'))
+    } catch (error) {
+      onError(error)
+    } finally {
+      setRowBusy(null)
     }
   }
 
@@ -1584,13 +1600,13 @@ function AISettings({
               </>
             ) : null}
 
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <input
                 type="text"
                 inputMode="text"
                 autoComplete="off"
                 autoCapitalize="off"
-                className="input flex-1 font-mono"
+                className="input min-w-[140px] flex-1 font-mono"
                 placeholder={
                   item.type === 'workers' ? '@cf/meta/llama-3.1-8b-instruct' : 'gpt-4o-mini'
                 }
@@ -1600,10 +1616,18 @@ function AISettings({
               <button
                 type="button"
                 className="btn-ghost h-[42px] shrink-0 px-3 text-caption"
-                disabled={busy !== null}
+                disabled={busy !== null || rowBusy !== null}
                 onClick={() => void loadModels(item.id)}
               >
-                {tr('拉取模型')}
+                {rowBusy?.id === item.id && rowBusy.kind === 'models' ? tr('拉取中…') : tr('拉取模型')}
+              </button>
+              <button
+                type="button"
+                className="btn-ghost h-[42px] shrink-0 px-3 text-caption"
+                disabled={busy !== null || rowBusy !== null}
+                onClick={() => void testOne(item.id)}
+              >
+                {rowBusy?.id === item.id && rowBusy.kind === 'test' ? tr('测试中…') : tr('测试')}
               </button>
             </div>
             <p className="text-caption leading-4 text-ink-3">
@@ -1664,29 +1688,58 @@ function AISettings({
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="btn-primary" onClick={save} disabled={busy !== null}>
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={save}
+          disabled={busy !== null || rowBusy !== null}
+        >
           {busy === 'save' ? tr('保存中…') : tr('保存配置')}
         </button>
-        <button type="button" className="btn-ghost" onClick={test} disabled={busy !== null}>
+        <button
+          type="button"
+          className="btn-ghost"
+          onClick={test}
+          disabled={busy !== null || rowBusy !== null}
+        >
           {busy === 'test' ? tr('测试中…') : tr('测试全部')}
         </button>
       </div>
 
       {testResults.length > 0 ? (
-        <div className="space-y-1.5">
+        <div className="space-y-2">
+          <p className="flex items-center justify-between text-caption text-ink-3">
+            <span>{tr('测试结果')}</span>
+            <span>
+              {tr('{ok} / {total} 可用', {
+                ok: testResults.filter((item) => item.ok).length,
+                total: testResults.length,
+              })}
+            </span>
+          </p>
           {testResults.map((item) => (
-            <p
+            <div
               key={item.id}
               className={cn(
-                'flex items-start gap-1.5 rounded-xl px-3 py-2 text-caption leading-4',
+                'flex items-start gap-2 rounded-xl px-3 py-2 text-caption leading-4',
                 item.ok ? 'bg-accent-soft/70 text-accent' : 'bg-danger/10 text-danger',
               )}
             >
-              <CheckCircle size={13} className="mt-0.5 shrink-0" weight="fill" />
-              <span className="min-w-0 break-all">
-                {item.name} · {item.ok ? `${item.ms}ms · ${item.sample}` : item.error}
-              </span>
-            </p>
+              {item.ok ? (
+                <CheckCircle size={14} className="mt-0.5 shrink-0" weight="fill" />
+              ) : (
+                <WarningCircle size={14} className="mt-0.5 shrink-0" weight="fill" />
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="font-medium">
+                  {item.name}
+                  <span className="ml-1.5 font-mono text-[11px] opacity-70">{item.model}</span>
+                </p>
+                <p className="mt-0.5 break-words opacity-90">
+                  {item.ok ? `${item.ms}ms · ${item.sample || tr('（空内容）')}` : item.error}
+                </p>
+              </div>
+            </div>
           ))}
         </div>
       ) : null}

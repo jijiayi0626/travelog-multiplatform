@@ -885,36 +885,52 @@ async function handleAdminAITest(request, env) {
   const body = await readJSON(request).catch(() => ({}))
   const config = await loadEndpoints(env)
   const targetId = String(body.endpointId || '')
-  const targets = targetId
-    ? config.endpoints.filter((item) => item.id === targetId)
-    : config.endpoints
 
-  if (targets.length === 0) throw new HttpError(400, '没有可用的 AI 接口')
-
-  const messages = [{ role: 'user', content: '用一句话介绍你自己。' }]
-  const results = []
-  for (const endpoint of targets) {
-    try {
-      const result = await callEndpoint(env, endpoint, messages, 0.4)
-      results.push({
-        id: endpoint.id,
-        name: endpoint.name,
-        model: result.model,
-        ms: result.ms,
-        ok: true,
-        sample: result.text.slice(0, 120),
-      })
-    } catch (error) {
-      results.push({
-        id: endpoint.id,
-        name: endpoint.name,
-        model: endpoint.model,
-        ms: 0,
-        ok: false,
-        error: error.message,
-      })
+  // 管理面板保存的是站点 id，实际入口 id 是「站点 id::模型」。
+  // 两种写法都要能测，否则单选一个接口会提示「没有可用的 AI 接口」。
+  let targets = config.endpoints
+  if (targetId) {
+    targets = config.endpoints.filter((item) => item.id === targetId || item.baseId === targetId)
+    if (targets.length === 0) {
+      const base = config.all.find((item) => item.id === targetId)
+      if (base) {
+        targets = endpointModels(base)
+          .map((model) => ({ ...base, id: `${base.id}::${model}`, baseId: base.id, model }))
+          .filter((item) => (item.type === 'workers' ? Boolean(env.AI) : Boolean(item.key)))
+      }
     }
   }
+
+  if (targets.length === 0) {
+    throw new HttpError(400, targetId ? '该接口未启用或缺少密钥' : '没有可用的 AI 接口')
+  }
+
+  const messages = [{ role: 'user', content: '只回复四个字：接口正常' }]
+  // 并行测，避免多个接口串行时超过前端等待时间
+  const results = await Promise.all(
+    targets.map(async (endpoint) => {
+      try {
+        const result = await callEndpoint(env, endpoint, messages, 0.2)
+        return {
+          id: endpoint.id,
+          name: endpoint.name,
+          model: result.model,
+          ms: result.ms,
+          ok: true,
+          sample: result.text.slice(0, 120),
+        }
+      } catch (error) {
+        return {
+          id: endpoint.id,
+          name: endpoint.name,
+          model: endpoint.model,
+          ms: 0,
+          ok: false,
+          error: error.message,
+        }
+      }
+    }),
+  )
   return json({ ok: results.some((item) => item.ok), results }, 200, env, request)
 }
 
@@ -922,7 +938,11 @@ async function handleAdminAITest(request, env) {
 async function handleAdminAIModels(request, env, url) {
   await requireAdmin(request, env)
   const config = await loadEndpoints(env)
-  const endpoint = config.endpoints.find((item) => item.id === url.searchParams.get('endpointId'))
+  const targetId = url.searchParams.get('endpointId') || ''
+  // 兼容站点 id 与「站点 id::模型」两种写法；停用的接口也允许拉取模型
+  const endpoint =
+    config.endpoints.find((item) => item.id === targetId || item.baseId === targetId) ||
+    config.all.find((item) => item.id === targetId)
   if (!endpoint) throw new HttpError(404, '接口不存在')
 
   if (endpoint.type === 'workers') {
@@ -941,11 +961,17 @@ async function handleAdminAIModels(request, env, url) {
     )
   }
 
+  if (!endpoint.key) throw new HttpError(400, '缺少密钥，先填写并保存接口密钥')
+
   const base = (endpoint.base || 'https://api.openai.com/v1').replace(/\/$/, '')
   const response = await fetch(`${base}/models`, {
     headers: { authorization: `Bearer ${endpoint.key}` },
+    signal: AbortSignal.timeout(30_000),
   })
-  if (!response.ok) throw new HttpError(502, `拉取模型失败：${response.status}`)
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new HttpError(502, `拉取模型失败：${response.status}${text ? ` ${text.slice(0, 120)}` : ''}`)
+  }
   const data = await response.json()
   const models = (data.data || [])
     .map((item) => item.id)
@@ -1817,11 +1843,20 @@ function pickEndpoint(endpoints) {
 async function callEndpoint(env, endpoint, messages, temperature) {
   const started = Date.now()
 
+  const emptyError = (finishReason) =>
+    new Error(
+      finishReason === 'length'
+        ? '输出被截断，请缩短提示词或换一个模型'
+        : '接口返回了空内容，请检查模型是否可用',
+    )
+
   if (endpoint.type === 'workers') {
     if (!env.AI) throw new Error('Workers AI 未绑定')
     const output = await env.AI.run(endpoint.model, { messages, temperature })
+    const text = (output.response || '').trim()
+    if (!text) throw emptyError(output.finish_reason)
     return {
-      text: (output.response || '').trim(),
+      text,
       model: endpoint.model,
       endpoint: endpoint.name,
       ms: Date.now() - started,
@@ -1838,14 +1873,18 @@ async function callEndpoint(env, endpoint, messages, temperature) {
       temperature,
       max_tokens: 800,
     }),
+    signal: AbortSignal.timeout(45_000),
   })
   if (!response.ok) {
     const text = await response.text()
     throw new Error(`${endpoint.name || 'OpenAI'} 返回 ${response.status}：${text.slice(0, 160)}`)
   }
   const data = await response.json()
+  const choice = data.choices?.[0]
+  const text = (choice?.message?.content || '').trim()
+  if (!text) throw emptyError(choice?.finish_reason)
   return {
-    text: data.choices?.[0]?.message?.content?.trim() || '',
+    text,
     model: endpoint.model,
     endpoint: endpoint.name,
     ms: Date.now() - started,
