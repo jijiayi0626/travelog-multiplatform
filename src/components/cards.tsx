@@ -327,11 +327,9 @@ export function ChecklistRow({
 
 export function FootprintRow({
   footprint,
-  onOpenMap,
   onDelete,
 }: {
   footprint: Footprint
-  onOpenMap: () => void
   onDelete?: () => void
 }) {
   const { tr } = useI18n()
@@ -356,24 +354,14 @@ export function FootprintRow({
       {hasCoord ? (
         <button
           type="button"
-          aria-label={tr('导航到这里')}
+          aria-label={tr('高德导航')}
           onClick={() =>
             openAmapNav(footprint.latitude, footprint.longitude, footprint.placeName)
           }
           className="press flex h-9 shrink-0 items-center gap-1 rounded-full bg-accent-soft px-2.5 text-caption font-medium text-accent"
         >
           <NavigationArrow size={13} />
-          {tr('导航')}
-        </button>
-      ) : null}
-      {hasCoord ? (
-        <button
-          type="button"
-          aria-label={tr('在地图中查看')}
-          onClick={onOpenMap}
-          className="press flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line text-ink-2"
-        >
-          <NavigationArrow size={15} />
+          {tr('高德导航')}
         </button>
       ) : null}
       {onDelete ? (

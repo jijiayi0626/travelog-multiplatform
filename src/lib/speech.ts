@@ -1,10 +1,17 @@
 import { isNative } from './native'
 import { isVoskModelReady } from './offline-speech'
+import {
+  LegacySpeechError,
+  availableLegacySpeech,
+  recognizeLegacySpeech,
+} from './legacy-speech'
 
 /** 最近一次语音错误写入的 key，语音诊断面板据此展示 */
 export const VOICE_LAST_ERROR_KEY = 'travelog.voiceLastError'
 /** 系统语音启动后多久没有结果就判定服务不可用 */
 export const SYSTEM_VOICE_TIMEOUT_MS = 12_000
+/** 系统语音启动后 10 秒仍没有结果，就改试兼容语音通道 */
+export const LEGACY_FALLBACK_TIMEOUT_MS = 10_000
 
 export function logVoiceError(message: string): void {
   console.warn('[travelog:voice]', message)
@@ -89,6 +96,49 @@ export type SystemVoiceStartResult =
   | { ok: true; stop: () => void }
   | { ok: false; kind: 'unavailable' | 'permission' | 'unsupported' | 'error'; message: string }
 
+/**
+ * 兼容语音回退：直接调起系统 RecognizerIntent。
+ * 成功时通过 onPartial/onEnd 把文字交回调用方，失败时写入 recent error。
+ */
+function startLegacyVoiceFallback(
+  handlers: SystemVoiceHandlers,
+  reason: string,
+): SystemVoiceStartResult {
+  let active = true
+  console.warn('[travelog:voice]', `native: ${reason}，尝试兼容语音通道`)
+
+  void (async () => {
+    try {
+      if (!(await availableLegacySpeech())) {
+        throw new LegacySpeechError('unavailable', '系统没有可用的语音识别服务')
+      }
+      const result = await recognizeLegacySpeech()
+      if (!active) return
+      if (result.cancelled) {
+        logVoiceError('legacy: 语音输入已取消')
+        handlers.onError('语音输入已取消')
+        return
+      }
+      handlers.onPartial(result.text)
+      handlers.onEnd?.()
+    } catch (error) {
+      if (!active) return
+      const kind = error instanceof LegacySpeechError ? error.kind : 'error'
+      const message = errorText(error)
+      logVoiceError(`legacy: ${message}`)
+      if (kind === 'unavailable') handlers.onUnavailable(message)
+      else handlers.onError(message)
+    }
+  })()
+
+  return {
+    ok: true,
+    stop: () => {
+      active = false
+    },
+  }
+}
+
 async function startNativeVoice(handlers: SystemVoiceHandlers): Promise<SystemVoiceStartResult> {
   let SpeechRecognition: typeof import('@capacitor-community/speech-recognition').SpeechRecognition
   try {
@@ -97,14 +147,14 @@ async function startNativeVoice(handlers: SystemVoiceHandlers): Promise<SystemVo
   } catch (error) {
     const message = errorText(error)
     logVoiceError(`native: 插件加载失败 ${message}`)
-    return { ok: false, kind: 'error', message }
+    return startLegacyVoiceFallback(handlers, `语音插件加载失败：${message}`)
   }
 
   try {
     const available = await SpeechRecognition.available()
     if (!available.available) {
       logVoiceError('native: 系统没有可用的语音识别服务')
-      return { ok: false, kind: 'unavailable', message: '系统没有可用的语音识别服务' }
+      return startLegacyVoiceFallback(handlers, '系统没有可用的语音识别服务')
     }
     let permission = (await SpeechRecognition.checkPermissions()).speechRecognition
     if (permission !== 'granted') {
@@ -117,27 +167,39 @@ async function startNativeVoice(handlers: SystemVoiceHandlers): Promise<SystemVo
   } catch (error) {
     const message = errorText(error)
     logVoiceError(`native: ${message}`)
-    return { ok: false, kind: 'error', message }
+    return startLegacyVoiceFallback(handlers, `系统语音检查失败：${message}`)
   }
 
   let stopped = false
   let gotResult = false
-  let verifyTimer = 0
+  let fallbackTimer = 0
+  let legacyStop: (() => void) | null = null
   const listeners: Array<{ remove: () => Promise<void> }> = []
 
   const removeListeners = async () => {
     const current = listeners.splice(0)
     await Promise.all(current.map((listener) => listener.remove().catch(() => undefined)))
   }
-  const stop = () => {
+  const stopSystem = () => {
     if (stopped) return
     stopped = true
-    window.clearTimeout(verifyTimer)
+    window.clearTimeout(fallbackTimer)
     void SpeechRecognition.stop().catch(() => undefined)
     // 插件 stop 不会立刻 resolve，留一点时间收最终结果再移除监听
     window.setTimeout(() => {
       void removeListeners()
     }, 1200)
+  }
+  const stop = () => {
+    stopSystem()
+    legacyStop?.()
+    legacyStop = null
+  }
+  const useLegacy = (reason: string) => {
+    stopSystem()
+    void removeListeners()
+    const legacy = startLegacyVoiceFallback(handlers, reason)
+    legacyStop = legacy.ok ? legacy.stop : null
   }
 
   try {
@@ -145,13 +207,13 @@ async function startNativeVoice(handlers: SystemVoiceHandlers): Promise<SystemVo
       const text = (data.matches?.[0] ?? '').trim()
       if (!text) return
       gotResult = true
-      window.clearTimeout(verifyTimer)
+      window.clearTimeout(fallbackTimer)
       handlers.onPartial(text)
     })
     const state = await SpeechRecognition.addListener('listeningState', (data) => {
       if (data.status !== 'stopped' || stopped) return
       stopped = true
-      window.clearTimeout(verifyTimer)
+      window.clearTimeout(fallbackTimer)
       void removeListeners()
       handlers.onEnd?.()
     })
@@ -167,34 +229,26 @@ async function startNativeVoice(handlers: SystemVoiceHandlers): Promise<SystemVo
       const message = errorText(error)
       logVoiceError(`native start: ${message}`)
       if (stopped) return
-      stopped = true
-      window.clearTimeout(verifyTimer)
-      void removeListeners()
-      handlers.onError(message)
+      if (/权限|permission|denied/i.test(message)) {
+        stopSystem()
+        void removeListeners()
+        handlers.onError(message)
+        return
+      }
+      useLegacy(`系统语音启动失败：${message}`)
     })
   } catch (error) {
     const message = errorText(error)
     logVoiceError(`native: ${message}`)
     await removeListeners()
-    return { ok: false, kind: 'error', message }
+    return startLegacyVoiceFallback(handlers, `系统语音监听失败：${message}`)
   }
 
-  // 12 秒仍没有 partial/result 且系统已不在监听：明确视为服务不可用
-  verifyTimer = window.setTimeout(() => {
+  // 10 秒仍没有识别结果：停掉系统语音，改试兼容语音通道
+  fallbackTimer = window.setTimeout(() => {
     if (stopped || gotResult) return
-    void SpeechRecognition.isListening()
-      .then(({ listening }) => {
-        if (stopped || gotResult || listening) return
-        stopped = true
-        void removeListeners()
-        void SpeechRecognition.stop().catch(() => undefined)
-        logVoiceError('native: 启动后未进入监听状态，系统语音服务不可用')
-        handlers.onUnavailable('系统语音服务不可用，请下载离线语音模型')
-      })
-      .catch(() => {
-        /* 旧版本插件没有 isListening 时忽略 */
-      })
-  }, SYSTEM_VOICE_TIMEOUT_MS)
+    useLegacy('系统语音启动后 10 秒没有识别结果')
+  }, LEGACY_FALLBACK_TIMEOUT_MS)
 
   return { ok: true, stop }
 }
@@ -295,6 +349,9 @@ export interface VoiceDiagnostics {
   systemDetail: string
   permission: string
   permissionDetail: string
+  /** 兼容语音通道（系统 RecognizerIntent）是否可用 */
+  legacyAvailable: boolean
+  legacyDetail: string
   voskReady: boolean
   lastError: string
 }
@@ -342,6 +399,17 @@ export async function collectVoiceDiagnostics(): Promise<VoiceDiagnostics> {
     permission = await queryWebMicrophonePermission()
   }
 
+  let legacyAvailable = false
+  let legacyDetail = ''
+  if (native) {
+    legacyAvailable = await availableLegacySpeech()
+    if (!legacyAvailable) {
+      legacyDetail = '没有找到能处理系统语音输入的应用，或当前安装包未包含兼容语音插件'
+    }
+  } else {
+    legacyDetail = '兼容语音通道仅在原生 App 内可用'
+  }
+
   const voskReady = await isVoskModelReady()
   return {
     native,
@@ -349,6 +417,8 @@ export async function collectVoiceDiagnostics(): Promise<VoiceDiagnostics> {
     systemDetail,
     permission,
     permissionDetail,
+    legacyAvailable,
+    legacyDetail,
     voskReady,
     lastError: getLastVoiceError(),
   }
@@ -422,4 +492,32 @@ export function testSystemSpeech(
         finish({ ok: false, text: '', error: errorText(error), unavailable: false })
       })
   })
+}
+
+export interface LegacySpeechTestResult {
+  ok: boolean
+  text: string
+  error: string
+}
+
+/** 测试兼容语音通道：直接调起系统 RecognizerIntent，最多等 20 秒 */
+export async function testLegacySpeech(): Promise<LegacySpeechTestResult> {
+  try {
+    if (!(await availableLegacySpeech())) {
+      const message = '系统没有可用的语音识别服务'
+      logVoiceError(`legacy: ${message}`)
+      return { ok: false, text: '', error: message }
+    }
+    const result = await recognizeLegacySpeech()
+    if (result.cancelled) {
+      const message = '语音输入已取消'
+      logVoiceError(`legacy: ${message}`)
+      return { ok: false, text: '', error: message }
+    }
+    return { ok: true, text: result.text, error: '' }
+  } catch (error) {
+    const message = errorText(error)
+    logVoiceError(`legacy: ${message}`)
+    return { ok: false, text: '', error: message }
+  }
 }

@@ -1,7 +1,7 @@
-import { assetUrl } from './utils'
+import { engineLoadError, voskEngineUrl } from './engine-url'
 
 /**
- * 离线语音：Vosk 引擎（public/vosk/vosk.js，随 APK 内置）+
+ * 离线语音：Vosk 引擎（网页端用 public/vosk，Android 首次使用时从 CDN 下载）+
  * 中文模型 vosk-cn.tar.gz（约 40MB），由用户按需下载后放入 Cache Storage。
  */
 const READY_KEY = 'travelog.voskModelReady'
@@ -89,7 +89,7 @@ function getVoskGlobal(): VoskGlobalLike | null {
   return (globalThis as unknown as { Vosk?: VoskGlobalLike }).Vosk ?? null
 }
 
-/** 动态注入 public/vosk/vosk.js（UMD 全局 Vosk），避免 npm 打包 worker 路径问题 */
+/** 动态注入 vosk.js（UMD 全局 Vosk），避免 npm 打包 worker 路径问题 */
 function loadVoskEngine(): Promise<VoskGlobalLike> {
   const existing = getVoskGlobal()
   if (existing) return Promise.resolve(existing)
@@ -104,13 +104,13 @@ function loadVoskEngine(): Promise<VoskGlobalLike> {
       if (global) resolve(global)
       else {
         scriptPromise = null
-        reject(new Error('离线语音引擎加载失败：脚本已执行但未找到 window.Vosk'))
+        reject(engineLoadError('离线语音引擎加载失败：脚本已执行但未找到 window.Vosk'))
       }
     }
     const fail = () => {
       scriptPromise = null
       document.getElementById(SCRIPT_ID)?.remove()
-      reject(new Error('离线语音引擎加载失败：引擎脚本无法加载，请检查安装包是否完整'))
+      reject(engineLoadError('离线语音引擎加载失败：引擎脚本无法加载，请检查安装包是否完整'))
     }
     const current = document.getElementById(SCRIPT_ID) as HTMLScriptElement | null
     if (current) {
@@ -120,8 +120,8 @@ function loadVoskEngine(): Promise<VoskGlobalLike> {
     }
     const script = document.createElement('script')
     script.id = SCRIPT_ID
-    // assetUrl 基于 import.meta.env.BASE_URL；再用文档地址解析成绝对地址，兼容 hash 路由
-    script.src = new URL(assetUrl('vosk/vosk.js'), window.location.href).href
+    // 网页端为 BASE_URL 相对路径，原生端为 CDN 绝对地址；统一用文档地址解析，兼容 hash 路由
+    script.src = new URL(voskEngineUrl(), window.location.href).href
     script.async = true
     script.addEventListener('load', done, { once: true })
     script.addEventListener('error', fail, { once: true })

@@ -13,8 +13,8 @@ android {
         applicationId "com.travellog.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 53
-        versionName "0.0.2.2"
+        versionCode 54
+        versionName "0.0.2.3-beta.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -33,9 +33,34 @@ android {
     buildTypes {
         release {
             signingConfig signingConfigs.release
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+    }
+}
+
+// 离线 OCR/语音引擎改为首次使用时从 CDN 下载：打包前删除 cap sync 复制到 assets 的副本，
+// 只影响 android 打包产物，不修改 dist 与 public（网页端仍使用本地引擎）。
+def bundledEngineDirs = [
+    file('src/main/assets/public/vosk'),
+    file('src/main/assets/public/tesseract'),
+]
+
+tasks.register('removeBundledEngines') {
+    doLast {
+        bundledEngineDirs.each { engineDir ->
+            if (engineDir.exists()) {
+                delete engineDir
+                logger.lifecycle("removeBundledEngines: removed ${engineDir}")
+            }
+        }
+    }
+}
+
+tasks.configureEach { task ->
+    if (task.name == 'preBuild') {
+        task.dependsOn 'removeBundledEngines'
     }
 }
 

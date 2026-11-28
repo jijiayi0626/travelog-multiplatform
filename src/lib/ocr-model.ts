@@ -1,9 +1,10 @@
 import { createWorker, type Worker } from 'tesseract.js'
-import { assetUrl } from './utils'
+import { engineLoadError, tesseractCoreUrl, tesseractWorkerUrl } from './engine-url'
 
 /**
- * 离线小票识别：引擎（worker + wasm）随 APK 内置在 public/tesseract，
- * 中文语言模型（约 1.7MB）不打包，由用户在此仓库的 models 目录手动下载。
+ * 离线小票识别：网页端引擎（worker + wasm）位于 public/tesseract，
+ * Android 端首次使用时从 CDN 下载；中文语言模型（约 1.7MB）不打包，
+ * 由用户在此仓库的 models 目录手动下载。
  */
 const READY_KEY = 'travelog.ocrModelReady'
 const MODEL_LANG = 'chi_sim'
@@ -21,8 +22,8 @@ export const OCR_MODEL_MIRRORS = [
 
 let lastError = ''
 
-const workerPath = assetUrl('tesseract/worker.min.js')
-const corePath = assetUrl('tesseract')
+const workerPath = tesseractWorkerUrl()
+const corePath = tesseractCoreUrl()
 
 function workerOptions(logger?: (progress: number) => void, langPath: string = OCR_MODEL_MIRRORS[0]) {
   return {
@@ -79,7 +80,7 @@ async function createOcrWorker(
     return await Promise.race([pending, failure, timeout])
   } catch (error) {
     aborted = true
-    throw error
+    throw engineLoadError(error instanceof Error ? error.message : String(error))
   } finally {
     window.clearTimeout(timer)
   }

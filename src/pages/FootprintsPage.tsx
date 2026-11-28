@@ -269,7 +269,6 @@ export function FootprintsPage() {
                   <FootprintRow
                     key={footprint.id}
                     footprint={footprint}
-                    onOpenMap={() => openMap(footprint)}
                     onDelete={() => setPendingDelete(footprint)}
                   />
                 ))}
@@ -303,7 +302,6 @@ export function FootprintsPage() {
             <FootprintRow
               key={footprint.id}
               footprint={footprint}
-              onOpenMap={() => openMap(footprint)}
               onDelete={() => setPendingDelete(footprint)}
             />
           ))}
@@ -344,7 +342,6 @@ export function FootprintsPage() {
                       <FootprintRow
                         key={footprint.id}
                         footprint={footprint}
-                        onOpenMap={() => openMap(footprint)}
                         onDelete={() => {
                           setSelected(null)
                           setPendingDelete(footprint)
@@ -358,7 +355,6 @@ export function FootprintsPage() {
                 <FootprintRow
                   key={footprint.id}
                   footprint={footprint}
-                  onOpenMap={() => openMap(footprint)}
                   onDelete={() => {
                     setSelected(null)
                     setPendingDelete(footprint)

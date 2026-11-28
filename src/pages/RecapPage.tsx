@@ -8,6 +8,7 @@ import { isNative, shareBinaryFile } from '../lib/native'
 import { summarizeYear } from '../lib/ai'
 import { summarizeVisits } from '../lib/province'
 import {
+  CATEGORY_COLOR,
   CATEGORY_LABEL,
   STATUS_LABEL,
   formatCny,
@@ -16,6 +17,7 @@ import {
   tripDayCount,
   tripStatusOf,
 } from '../lib/utils'
+import { getPosterTemplate, renderPoster, type PosterData } from '../lib/poster'
 import { cn } from '../lib/cn'
 import { CategoryLegend, DonutChart, MonthBars } from '../components/charts'
 import { EmptyState, IconButton, StatTile } from '../components/ui'
@@ -158,85 +160,38 @@ export function RecapPage() {
   }, [activeYear, heat])
 
   const exportPoster = async () => {
-    const width = 1080
-    const height = 1440
-    const canvas = document.createElement('canvas')
-    canvas.width = width
-    canvas.height = height
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    const font = "'PingFang SC', 'Noto Sans SC', system-ui, sans-serif"
-
-    ctx.fillStyle = '#f5f6fa'
-    ctx.fillRect(0, 0, width, height)
-    ctx.fillStyle = '#2563eb'
-    ctx.fillRect(0, 0, width, 14)
-
-    ctx.fillStyle = '#666d78'
-    ctx.font = `500 30px ${font}`
-    ctx.fillText('TRAVELOG · YEAR IN REVIEW', 80, 150)
-
-    ctx.fillStyle = '#1a1d26'
-    ctx.font = `700 170px ${font}`
-    ctx.fillText(String(activeYear), 80, 330)
-
-    ctx.strokeStyle = '#d8dce4'
-    ctx.lineWidth = 2
-    ctx.beginPath()
-    ctx.moveTo(80, 390)
-    ctx.lineTo(width - 80, 390)
-    ctx.stroke()
-
-    const tiles: Array<[string, string]> = [
-      ['旅行', `${yearTrips.length} 段`],
-      ['在路上', `${totalDays} 天`],
-      ['城市', `${cities} 座`],
-      ['照片', `${photos} 张`],
-    ]
-    tiles.forEach(([label, value], index) => {
-      const x = 80 + (index % 2) * 460
-      const y = 480 + Math.floor(index / 2) * 200
-      ctx.fillStyle = '#666d78'
-      ctx.font = `500 32px ${font}`
-      ctx.fillText(label, x, y)
-      ctx.fillStyle = '#1a1d26'
-      ctx.font = `700 78px ${font}`
-      ctx.fillText(value, x, y + 92)
-    })
-
-    ctx.fillStyle = '#666d78'
-    ctx.font = `500 32px ${font}`
-    ctx.fillText('全年花费', 80, 930)
-    ctx.fillStyle = '#1a1d26'
-    ctx.font = `700 92px ${font}`
-    ctx.fillText(formatCny(totalCny), 80, 1030)
-
-    ctx.fillStyle = '#4b5563'
-    ctx.font = `400 34px ${font}`
-    const top = stats[0]
-    ctx.fillText(
-      top
-        ? `花得最多：${CATEGORY_LABEL[top.category]} · ${formatCny(top.amount)}`
-        : '这一年还没有账目',
-      80,
-      1120,
-    )
-    ctx.fillText(`去过 ${provinces} 个省级行政区 · ${yearMoments.length} 条记录`, 80, 1180)
-    if (longest) {
-      ctx.fillText(`最长的一段「${longest.trip.title}」，${longest.days} 天`, 80, 1240)
+    const data: PosterData = {
+      kind: 'trip',
+      eyebrow: 'TRAVELOG · YEAR IN REVIEW',
+      title: tr('{year} 年度回顾', { year: activeYear }),
+      subtitle: tr('去过 {provinces} 个省级行政区 · {moments} 条记录', {
+        provinces,
+        moments: yearMoments.length,
+      }),
+      stats: [
+        { label: tr('旅行'), value: tr('{n} 段', { n: yearTrips.length }) },
+        { label: tr('在路上'), value: tr('{n} 天', { n: totalDays }) },
+        { label: tr('城市'), value: tr('{n} 座', { n: cities }) },
+        { label: tr('照片'), value: tr('{n} 张', { n: photos }) },
+      ],
+      categories: stats.slice(0, 5).map((item) => ({
+        label: CATEGORY_LABEL[item.category],
+        value: formatCny(item.amount),
+        ratio: totalCny > 0 ? item.amount / totalCny : 0,
+        color: CATEGORY_COLOR[item.category],
+      })),
+      money: { label: tr('全年花费'), value: formatCny(totalCny) },
+      cities: [...new Set(yearFootprints.map((item) => item.city).filter(Boolean))],
+      footnote: longest
+        ? tr('最长的一段「{title}」，{days} 天', {
+            title: longest.trip.title,
+            days: longest.days,
+          })
+        : '',
+      footer: tr('旅记 Travelog · 记录每一段旅程'),
     }
 
-    ctx.fillStyle = '#9aa1ac'
-    ctx.font = `400 28px ${font}`
-    ctx.fillText('Travelog · 记录每一段旅程', 80, height - 80)
-    ctx.fillStyle = '#2563eb'
-    ctx.fillRect(width - 240, height - 110, 160, 4)
-
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
-    if (!blob) {
-      toast(tr('导出失败，请重试'))
-      return
-    }
+    const blob = await renderPoster(data, getPosterTemplate())
     const filename = `travelog-${activeYear}.png`
     if (isNative()) {
       const bytes = new Uint8Array(await blob.arrayBuffer())

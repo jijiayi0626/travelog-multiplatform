@@ -14,10 +14,17 @@ import { listAllMoments, listFootprints, listTrips } from '../lib/repo'
 import { useI18n, useNav, useToast } from '../lib/app-context'
 import { provinceOfFootprint } from '../lib/province'
 import { openAmapNav } from '../lib/amap'
-import { canvasToPng, sharePngBlob } from '../lib/share-image'
+import { sharePngBlob } from '../lib/share-image'
+import {
+  getPosterTemplate,
+  renderPoster,
+  setPosterTemplate,
+  type PosterData,
+  type PosterTemplate,
+} from '../lib/poster'
 import { formatDate, formatDateCn, monthKey } from '../lib/utils'
 import { cn } from '../lib/cn'
-import { EmptyState, IconButton, StatTile } from '../components/ui'
+import { EmptyState, IconButton, PosterTemplatePicker, StatTile } from '../components/ui'
 import { EmptyArt } from '../components/EmptyArt'
 
 interface CityStamp {
@@ -29,9 +36,6 @@ interface CityStamp {
   photos: number
   items: Footprint[]
 }
-
-const FONT =
-  "'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif"
 
 function bareName(value: string): string {
   return value.trim().replace(/[市省区县]$/u, '')
@@ -48,6 +52,12 @@ export function PassportPage() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [thisYear] = useState(() => new Date().getFullYear())
+  const [template, setTemplate] = useState<PosterTemplate>(() => getPosterTemplate())
+
+  const chooseTemplate = (value: PosterTemplate) => {
+    setTemplate(value)
+    setPosterTemplate(value)
+  }
 
   const loader = useCallback(async () => {
     const [footprints, trips, moments] = await Promise.all([
@@ -155,96 +165,32 @@ export function PassportPage() {
     if (stamps.length === 0 || exporting) return
     setExporting(true)
     try {
-      const width = 1080
-      const height = 1440
-      const canvas = document.createElement('canvas')
-      canvas.width = width
-      canvas.height = height
-      const ctx = canvas.getContext('2d')
-      if (!ctx) throw new Error('canvas unavailable')
-
-      ctx.fillStyle = '#f7f3e8'
-      ctx.fillRect(0, 0, width, height)
-      ctx.fillStyle = '#0f766e'
-      ctx.fillRect(0, 0, width, 16)
-
-      ctx.fillStyle = '#8a8272'
-      ctx.font = `600 28px ${FONT}`
-      ctx.fillText('TRAVELOG · CITY PASSPORT', 88, 136)
-
-      ctx.fillStyle = '#1b1a16'
-      ctx.font = `700 84px ${FONT}`
-      ctx.fillText(tr('城市护照'), 88, 246)
-
-      ctx.fillStyle = '#5f594c'
-      ctx.font = `400 32px ${FONT}`
-      ctx.fillText(
-        tr('{cities} 座城市 · {provinces} 个省份 · 连续 {months} 个月', {
+      const data: PosterData = {
+        kind: 'passport',
+        eyebrow: 'TRAVELOG · CITY PASSPORT',
+        title: tr('城市护照'),
+        subtitle: tr('{cities} 座城市 · {provinces} 个省份 · 连续 {months} 个月', {
           cities: stamps.length,
           provinces: provinceCount,
           months: streakMonths,
         }),
-        88,
-        312,
-      )
-
-      ctx.strokeStyle = '#d8cfb9'
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.moveTo(88, 356)
-      ctx.lineTo(width - 88, 356)
-      ctx.stroke()
-
-      const columns = 4
-      const cellWidth = (width - 176) / columns
-      const cellHeight = 214
-      const radius = 82
-      const shown = stamps.slice(0, 20)
-      const colors = ['#0f766e', '#9a3412', '#1e40af', '#7c2d12', '#3f6212', '#6b21a8']
-      shown.forEach((stamp, index) => {
-        const column = index % columns
-        const row = Math.floor(index / columns)
-        const cx = 88 + cellWidth * column + cellWidth / 2
-        const cy = 356 + 60 + cellHeight * row + radius
-        const color = colors[index % colors.length]
-
-        ctx.save()
-        ctx.translate(cx, cy)
-        ctx.rotate(((index % 5) - 2) * 0.025)
-        ctx.strokeStyle = color
-        ctx.globalAlpha = 0.85
-        ctx.lineWidth = 4
-        ctx.beginPath()
-        ctx.arc(0, 0, radius, 0, Math.PI * 2)
-        ctx.stroke()
-        ctx.globalAlpha = 0.16
-        ctx.fillStyle = color
-        ctx.fill()
-        ctx.globalAlpha = 1
-        ctx.fillStyle = color
-        ctx.textAlign = 'center'
-        const name = stamp.city.length > 6 ? `${stamp.city.slice(0, 6)}…` : stamp.city
-        ctx.font = `700 ${name.length > 4 ? 26 : 32}px ${FONT}`
-        ctx.fillText(name, 0, 4)
-        ctx.font = `400 18px ${FONT}`
-        ctx.fillStyle = '#6b6456'
-        ctx.fillText(tr('首访 {month}', { month: formatDate(stamp.first).slice(0, 7) }), 0, 38)
-        ctx.fillText(tr('{n} 次', { n: stamp.visits }), 0, 64)
-        ctx.restore()
-      })
-
-      if (stamps.length > shown.length) {
-        ctx.fillStyle = '#8a8272'
-        ctx.font = `400 26px ${FONT}`
-        ctx.fillText(tr('另有 {n} 座城市', { n: stamps.length - shown.length }), 88, height - 150)
+        stats: [
+          { label: tr('城市'), value: String(stamps.length) },
+          { label: tr('省份'), value: String(provinceCount) },
+          { label: tr('连续打卡'), value: tr('{n} 月', { n: streakMonths }) },
+          { label: tr('今年新增'), value: String(newCitiesThisYear) },
+        ],
+        stamps: stamps.map((stamp) => ({
+          city: stamp.city,
+          visits: stamp.visits,
+          first: formatDate(stamp.first).slice(0, 7),
+          photos: stamp.photos,
+        })),
+        cities: stamps.map((stamp) => stamp.city),
+        footer: tr('旅记 Travelog · 记录每一座到过的城市'),
       }
 
-      ctx.textAlign = 'left'
-      ctx.fillStyle = '#8a8272'
-      ctx.font = `400 28px ${FONT}`
-      ctx.fillText(tr('旅记 Travelog · 记录每一座到过的城市'), 88, height - 74)
-
-      const blob = await canvasToPng(canvas)
+      const blob = await renderPoster(data, template)
       await sharePngBlob(blob, 'travelog-passport.png')
       toast(tr('护照长图已生成，可分享或保存'))
     } catch {
@@ -283,6 +229,13 @@ export function PassportPage() {
           {tr('本月月报')}
         </button>
       </header>
+
+      {!loading ? (
+        <div className="space-y-1.5">
+          <p className="text-caption font-medium tracking-wide text-ink-3">{tr('长图模板')}</p>
+          <PosterTemplatePicker value={template} onChange={chooseTemplate} />
+        </div>
+      ) : null}
 
       {loading ? (
         <div className="space-y-3">

@@ -20,7 +20,14 @@ import {
 } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
 import { useI18n, useNav, useToast } from '../lib/app-context'
-import { canvasToPng, sharePngBlob } from '../lib/share-image'
+import { sharePngBlob } from '../lib/share-image'
+import {
+  getPosterTemplate,
+  renderPoster,
+  setPosterTemplate,
+  type PosterData,
+  type PosterTemplate,
+} from '../lib/poster'
 import {
   CATEGORY_COLOR,
   CATEGORY_LABEL,
@@ -29,11 +36,8 @@ import {
   monthKey,
 } from '../lib/utils'
 import { cn } from '../lib/cn'
-import { EmptyState, IconButton, StatTile } from '../components/ui'
+import { EmptyState, IconButton, PosterTemplatePicker, StatTile } from '../components/ui'
 import { EmptyArt } from '../components/EmptyArt'
-
-const FONT =
-  "'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif"
 
 function formatMonthCursor(year: number, month: number): string {
   return `${year} 年 ${month + 1} 月`
@@ -49,6 +53,12 @@ export function MonthlyPage() {
   })
   const [exporting, setExporting] = useState(false)
   const [now] = useState(() => new Date())
+  const [template, setTemplate] = useState<PosterTemplate>(() => getPosterTemplate())
+
+  const chooseTemplate = (value: PosterTemplate) => {
+    setTemplate(value)
+    setPosterTemplate(value)
+  }
 
   const loader = useCallback(async () => {
     const [footprints, trips, moments, expenses] = await Promise.all([
@@ -131,105 +141,32 @@ export function MonthlyPage() {
     if (!hasData || exporting) return
     setExporting(true)
     try {
-      const width = 1080
-      const height = 1440
-      const canvas = document.createElement('canvas')
-      canvas.width = width
-      canvas.height = height
-      const ctx = canvas.getContext('2d')
-      if (!ctx) throw new Error('canvas unavailable')
-
-      ctx.fillStyle = '#f6f5f1'
-      ctx.fillRect(0, 0, width, height)
-      ctx.fillStyle = '#0f766e'
-      ctx.fillRect(0, 0, width, 14)
-
-      ctx.fillStyle = '#6b6f78'
-      ctx.font = `600 28px ${FONT}`
-      ctx.fillText('TRAVELOG · MONTHLY REPORT', 88, 136)
-
-      ctx.fillStyle = '#1a1d26'
-      ctx.font = `700 92px ${FONT}`
-      ctx.fillText(tr('{month} 旅行月报', { month: formatMonthCursor(cursor.year, cursor.month) }), 88, 252)
-
-      ctx.fillStyle = '#5f6570'
-      ctx.font = `400 30px ${FONT}`
-      ctx.fillText(
-        cities.length > 0
-          ? tr('走过 {n} 座城市', { n: cities.length })
-          : tr('这个月还没有出门'),
-        88,
-        310,
-      )
-
-      const tiles: Array<[string, string]> = [
-        [tr('城市'), String(cities.length)],
-        [tr('行程'), String(monthTrips.length)],
-        [tr('记录'), String(monthMoments.length)],
-        [tr('照片'), String(photos)],
-      ]
-      tiles.forEach(([label, value], index) => {
-        const x = 88 + (index % 4) * 226
-        ctx.fillStyle = '#8a8f99'
-        ctx.font = `500 28px ${FONT}`
-        ctx.fillText(label, x, 408)
-        ctx.fillStyle = '#1a1d26'
-        ctx.font = `700 64px ${FONT}`
-        ctx.fillText(value, x, 482)
-      })
-
-      ctx.strokeStyle = '#dcd9d0'
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.moveTo(88, 528)
-      ctx.lineTo(width - 88, 528)
-      ctx.stroke()
-
-      ctx.fillStyle = '#6b6f78'
-      ctx.font = `500 30px ${FONT}`
-      ctx.fillText(tr('本月花费'), 88, 596)
-      ctx.fillStyle = '#1a1d26'
-      ctx.font = `700 84px ${FONT}`
-      ctx.fillText(formatCny(spend), 88, 690)
-
-      const top = categories.slice(0, 5)
-      if (top.length > 0) {
-        ctx.fillStyle = '#6b6f78'
-        ctx.font = `500 28px ${FONT}`
-        ctx.fillText(tr('分类占比'), 88, 776)
-        top.forEach((item, index) => {
-          const y = 830 + index * 86
-          const ratio = spend > 0 ? item.amount / spend : 0
-          ctx.fillStyle = '#5f6570'
-          ctx.font = `500 28px ${FONT}`
-          ctx.fillText(CATEGORY_LABEL[item.category], 88, y)
-          ctx.fillStyle = '#e2ded4'
-          ctx.fillRect(260, y - 22, 560, 16)
-          ctx.fillStyle = CATEGORY_COLOR[item.category]
-          ctx.fillRect(260, y - 22, Math.max(560 * ratio, 6), 16)
-          ctx.fillStyle = '#8a8f99'
-          ctx.font = `400 26px ${FONT}`
-          ctx.textAlign = 'right'
-          ctx.fillText(
-            `${formatCny(item.amount)} · ${Math.round(ratio * 100)}%`,
-            width - 88,
-            y,
-          )
-          ctx.textAlign = 'left'
-        })
+      const data: PosterData = {
+        kind: 'monthly',
+        eyebrow: 'TRAVELOG · MONTHLY REPORT',
+        title: tr('{month} 旅行月报', { month: formatMonthCursor(cursor.year, cursor.month) }),
+        subtitle:
+          cities.length > 0
+            ? tr('走过 {n} 座城市', { n: cities.length })
+            : tr('这个月还没有出门'),
+        stats: [
+          { label: tr('城市'), value: String(cities.length) },
+          { label: tr('行程'), value: String(monthTrips.length) },
+          { label: tr('记录'), value: String(monthMoments.length) },
+          { label: tr('照片'), value: String(photos) },
+        ],
+        categories: categories.slice(0, 5).map((item) => ({
+          label: CATEGORY_LABEL[item.category],
+          value: `${formatCny(item.amount)} · ${Math.round((spend > 0 ? item.amount / spend : 0) * 100)}%`,
+          ratio: spend > 0 ? item.amount / spend : 0,
+          color: CATEGORY_COLOR[item.category],
+        })),
+        money: { label: tr('本月花费'), value: formatCny(spend) },
+        cities,
+        footer: tr('旅记 Travelog · 记录每一段旅程'),
       }
 
-      if (cities.length > 0) {
-        ctx.fillStyle = '#6b6f78'
-        ctx.font = `500 28px ${FONT}`
-        ctx.fillText(cities.slice(0, 8).join(' · '), 88, height - 170)
-      }
-
-      ctx.fillStyle = '#9a9faa'
-      ctx.font = `400 26px ${FONT}`
-      ctx.fillText(tr('旅记 Travelog · 记录每一段旅程'), 88, height - 82)
-
-      const blob = await canvasToPng(canvas)
+      const blob = await renderPoster(data, template)
       await sharePngBlob(blob, `travelog-monthly-${key}.png`)
       toast(tr('月报长图已生成，可分享或保存'))
     } catch {
@@ -269,6 +206,13 @@ export function MonthlyPage() {
           {tr('城市护照')}
         </button>
       </header>
+
+      {!loading ? (
+        <div className="space-y-1.5">
+          <p className="text-caption font-medium tracking-wide text-ink-3">{tr('长图模板')}</p>
+          <PosterTemplatePicker value={template} onChange={chooseTemplate} />
+        </div>
+      ) : null}
 
       <section className="flex items-center justify-between rounded-2xl border border-line bg-surface px-2 py-2.5">
         <button

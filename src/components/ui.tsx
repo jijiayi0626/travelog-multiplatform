@@ -5,6 +5,7 @@ import { X } from '@phosphor-icons/react'
 import { cn } from '../lib/cn'
 import { initials } from '../lib/utils'
 import { useI18n } from '../lib/app-context'
+import { POSTER_TEMPLATE_OPTIONS, type PosterTemplate } from '../lib/poster'
 
 export function Avatar({
   name,
@@ -179,6 +180,57 @@ export function SegmentedTabs<T extends string>({
           {option.label}
         </button>
       ))}
+    </div>
+  )
+}
+
+export function PosterTemplatePicker({
+  value,
+  onChange,
+}: {
+  value: PosterTemplate
+  onChange: (value: PosterTemplate) => void
+}) {
+  const { tr } = useI18n()
+  return (
+    <div className="flex items-stretch gap-2" role="radiogroup" aria-label={tr('长图模板')}>
+      {POSTER_TEMPLATE_OPTIONS.map((option) => {
+        const active = value === option.value
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(option.value)}
+            className={cn(
+              'press flex flex-1 items-center gap-2 rounded-2xl border p-2 text-left transition-colors',
+              active
+                ? 'border-accent bg-accent-soft'
+                : 'border-line bg-surface hover:border-accent/50',
+            )}
+          >
+            <span className="poster-thumb shrink-0" data-template={option.value} aria-hidden="true">
+              {option.value === 'magazine' ? (
+                <span className="poster-thumb-serif">Aa</span>
+              ) : null}
+              {option.value === 'boarding' ? <span className="poster-thumb-dash" /> : null}
+              {option.value === 'passport' ? <span className="poster-thumb-stamp" /> : null}
+            </span>
+            <span className="min-w-0">
+              <span
+                className={cn(
+                  'block truncate text-body-sm font-medium',
+                  active ? 'text-accent' : 'text-ink',
+                )}
+              >
+                {tr(option.label)}
+              </span>
+              <span className="block truncate text-caption text-ink-3">{tr(option.hint)}</span>
+            </span>
+          </button>
+        )
+      })}
     </div>
   )
 }

@@ -19,3 +19,10 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Capacitor 通过反射加载插件、桥接 @PluginMethod 调用，R8 需保留
+-keep class com.getcapacitor.** { *; }
+-keep @com.getcapacitor.annotation.CapacitorPlugin class * { *; }
+-keepclassmembers class * { @com.getcapacitor.PluginMethod public *; }
+-keep class com.capacitorjs.plugins.** { *; }
+-keep class com.getcapacitor.community.** { *; }

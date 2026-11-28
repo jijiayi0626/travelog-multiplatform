@@ -30,6 +30,7 @@ import {
 } from '../lib/offline-speech'
 import {
   collectVoiceDiagnostics,
+  testLegacySpeech,
   testSystemSpeech,
   type VoiceDiagnostics,
 } from '../lib/speech'
@@ -44,6 +45,8 @@ function formatDiagnostics(data: VoiceDiagnostics, tr: Tr): string {
     data.systemDetail ? tr('系统语音详情：{value}', { value: data.systemDetail }) : '',
     tr('麦克风权限：{value}', { value: data.permission }),
     data.permissionDetail ? tr('权限详情：{value}', { value: data.permissionDetail }) : '',
+    tr('兼容语音通道：{value}', { value: data.legacyAvailable ? tr('可用') : tr('不可用') }),
+    data.legacyDetail ? tr('兼容语音详情：{value}', { value: data.legacyDetail }) : '',
     tr('离线语音模型：{value}', { value: data.voskReady ? tr('已下载') : tr('未下载') }),
     tr('最近一次语音错误：{value}', { value: data.lastError || tr('无') }),
     tr('检测时间：{value}', { value: new Date().toLocaleString() }),
@@ -79,6 +82,11 @@ export function OcrModelPage() {
     ok: boolean
     message: string
     needDownload: boolean
+  } | null>(null)
+  const [legacyTestBusy, setLegacyTestBusy] = useState(false)
+  const [legacyTest, setLegacyTest] = useState<{
+    ok: boolean
+    message: string
   } | null>(null)
   const voiceSectionRef = useRef<HTMLElement>(null)
 
@@ -153,6 +161,29 @@ export function OcrModelPage() {
       }
     } finally {
       setDiagTestBusy(false)
+      void refreshDiagnostics()
+    }
+  }
+
+  const testLegacyChannel = async () => {
+    if (legacyTestBusy) return
+    setLegacyTestBusy(true)
+    setLegacyTest(null)
+    try {
+      const result = await testLegacySpeech()
+      if (result.ok) {
+        setLegacyTest({
+          ok: true,
+          message: tr('收到兼容语音：{text}', { text: result.text }),
+        })
+      } else {
+        setLegacyTest({
+          ok: false,
+          message: tr('兼容语音测试失败：{msg}', { msg: result.error }),
+        })
+      }
+    } finally {
+      setLegacyTestBusy(false)
       void refreshDiagnostics()
     }
   }
@@ -503,6 +534,33 @@ export function OcrModelPage() {
               </button>
             ) : null}
           </div>
+        ) : null}
+
+        <button
+          type="button"
+          className="btn-ghost mt-2 h-10 w-full text-note"
+          disabled={legacyTestBusy || diagTestBusy}
+          onClick={() => void testLegacyChannel()}
+        >
+          <Microphone size={15} />
+          {legacyTestBusy ? tr('兼容语音测试中，请说话…') : tr('测试兼容语音')}
+        </button>
+
+        {legacyTest ? (
+          <p
+            className={
+              legacyTest.ok
+                ? 'mt-3 flex items-start gap-1.5 break-all text-caption leading-5 text-accent'
+                : 'mt-3 flex items-start gap-1.5 break-all text-caption leading-5 text-warn'
+            }
+          >
+            {legacyTest.ok ? (
+              <CheckCircle size={14} className="mt-0.5 shrink-0" />
+            ) : (
+              <WarningCircle size={14} className="mt-0.5 shrink-0" />
+            )}
+            {legacyTest.message}
+          </p>
         ) : null}
       </section>
     </div>
