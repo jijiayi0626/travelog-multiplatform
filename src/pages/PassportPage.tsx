@@ -14,7 +14,7 @@ import { listAllMoments, listFootprints, listTrips } from '../lib/repo'
 import { useI18n, useNav, useToast } from '../lib/app-context'
 import { provinceOfFootprint } from '../lib/province'
 import { openAmapNav } from '../lib/amap'
-import { sharePngBlob } from '../lib/share-image'
+import { exportErrorText, sharePngBlob } from '../lib/share-image'
 import {
   getPosterTemplate,
   renderPoster,
@@ -193,8 +193,8 @@ export function PassportPage() {
       const blob = await renderPoster(data, template)
       await sharePngBlob(blob, 'travelog-passport.png')
       toast(tr('护照长图已生成，可分享或保存'))
-    } catch {
-      toast(tr('生成失败，请重试'))
+    } catch (error) {
+      toast(exportErrorText(error))
     } finally {
       setExporting(false)
     }

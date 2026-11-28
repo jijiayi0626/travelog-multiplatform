@@ -7,13 +7,38 @@ import { registerPlugin } from '@capacitor/core'
  * 背后的 SpeechRecognizer 通常不可用；该通道尝试交给系统语音输入应用处理。
  */
 
+/** 一个能处理语音识别 Intent 的候选服务 */
+export interface LegacySpeechService {
+  package: string
+  label: string
+}
+
+export interface LegacySpeechAvailability {
+  available: boolean
+  /** 原生按 华为/荣耀 > Google > 第一个 选出的实际服务 */
+  package: string
+  label: string
+  /** 全部候选服务，便于诊断区分华为/谷歌 */
+  services: LegacySpeechService[]
+  detail?: string
+}
+
 interface LegacySpeechResult {
   text?: string
   cancelled?: boolean
+  package?: string
+  label?: string
 }
 
 interface LegacySpeechPlugin {
-  available(): Promise<{ available: boolean; detail?: string }>
+  available(): Promise<{
+    available: boolean
+    package?: string
+    label?: string
+    services?: LegacySpeechService[]
+    detail?: string
+  }>
+  services(): Promise<{ services?: LegacySpeechService[]; detail?: string }>
   recognize(): Promise<LegacySpeechResult>
 }
 
@@ -87,19 +112,52 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   })
 }
 
-/** 查询系统里是否有应用能处理语音识别 Intent；查询失败按不可用处理 */
-export async function availableLegacySpeech(): Promise<boolean> {
+/** 查询兼容语音通道详情：是否可用、首选服务和全部候选服务 */
+export async function getLegacySpeechAvailability(): Promise<LegacySpeechAvailability> {
   try {
     const result = await withTimeout(LegacySpeech.available(), 5_000)
-    return Boolean(result?.available)
+    return {
+      available: Boolean(result?.available),
+      package: result?.package ?? '',
+      label: result?.label ?? '',
+      services: Array.isArray(result?.services) ? result.services : [],
+      detail: result?.detail,
+    }
   } catch (error) {
     console.warn('[travelog:voice] legacy available:', errorText(error))
-    return false
+    return {
+      available: false,
+      package: '',
+      label: '',
+      services: [],
+      detail: errorText(error),
+    }
+  }
+}
+
+/** 查询系统里是否有应用能处理语音识别 Intent；查询失败按不可用处理 */
+export async function availableLegacySpeech(): Promise<boolean> {
+  return (await getLegacySpeechAvailability()).available
+}
+
+/** 只列出候选语音服务（不发起识别） */
+export async function listLegacySpeechServices(): Promise<LegacySpeechService[]> {
+  try {
+    const result = await withTimeout(LegacySpeech.services(), 5_000)
+    return Array.isArray(result?.services) ? result.services : []
+  } catch (error) {
+    console.warn('[travelog:voice] legacy services:', errorText(error))
+    return []
   }
 }
 
 /** 调起系统语音输入：成功返回文字，用户返回时返回 cancelled，失败抛中文错误 */
-export async function recognizeLegacySpeech(): Promise<{ text: string; cancelled: boolean }> {
+export async function recognizeLegacySpeech(): Promise<{
+  text: string
+  cancelled: boolean
+  package: string
+  label: string
+}> {
   let result: LegacySpeechResult
   try {
     result = await withTimeout(LegacySpeech.recognize(), LEGACY_SPEECH_TIMEOUT_MS)
@@ -108,11 +166,12 @@ export async function recognizeLegacySpeech(): Promise<{ text: string; cancelled
     throw classifyLegacyError(errorText(error))
   }
 
-  if (result?.cancelled) return { text: '', cancelled: true }
+  const engine = { package: result?.package ?? '', label: result?.label ?? '' }
+  if (result?.cancelled) return { text: '', cancelled: true, ...engine }
 
   const text = (result?.text ?? '').trim()
   if (!text) {
     throw new LegacySpeechError('unavailable', '系统语音没有返回可用的文字')
   }
-  return { text, cancelled: false }
+  return { text, cancelled: false, ...engine }
 }

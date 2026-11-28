@@ -26,7 +26,7 @@ export function InstallBanner() {
   if (!eventPresent(promptEvent) || hidden) return null
 
   return (
-    <div className="fade-in fixed inset-x-3 bottom-[calc(84px+env(safe-area-inset-bottom))] z-40 flex items-center gap-3 rounded-2xl border border-line bg-surface/95 p-3 lg:bottom-4 lg:left-auto lg:right-4 lg:w-[340px]">
+    <div className="fade-in fixed inset-x-3 bottom-[calc(152px+env(safe-area-inset-bottom))] z-40 flex items-center gap-3 rounded-2xl border border-line bg-surface/95 p-3 lg:bottom-[84px] lg:left-auto lg:right-4 lg:w-[340px]">
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
         <DownloadSimple size={17} />
       </span>

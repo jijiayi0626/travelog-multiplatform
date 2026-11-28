@@ -20,7 +20,7 @@ import {
 } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
 import { useI18n, useNav, useToast } from '../lib/app-context'
-import { sharePngBlob } from '../lib/share-image'
+import { exportErrorText, sharePngBlob } from '../lib/share-image'
 import {
   getPosterTemplate,
   renderPoster,
@@ -169,8 +169,8 @@ export function MonthlyPage() {
       const blob = await renderPoster(data, template)
       await sharePngBlob(blob, `travelog-monthly-${key}.png`)
       toast(tr('月报长图已生成，可分享或保存'))
-    } catch {
-      toast(tr('生成失败，请重试'))
+    } catch (error) {
+      toast(exportErrorText(error))
     } finally {
       setExporting(false)
     }

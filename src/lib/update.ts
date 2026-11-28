@@ -242,6 +242,34 @@ export async function downloadApk(
   return picked
 }
 
+/* ---------------- 更新日志待展示 ---------------- */
+
+export const PENDING_RELEASE_KEY = 'travelog.pendingRelease'
+
+/** 弹窗点「更新日志」时先存一份，日志页优先展示，离线也能看到刚推送的版本 */
+export function stashPendingRelease(release: AppRelease | null): void {
+  try {
+    if (!release) {
+      sessionStorage.removeItem(PENDING_RELEASE_KEY)
+      return
+    }
+    sessionStorage.setItem(PENDING_RELEASE_KEY, JSON.stringify(release))
+  } catch {
+    /* 隐私模式下忽略 */
+  }
+}
+
+export function readPendingRelease(): AppRelease | null {
+  try {
+    const raw = sessionStorage.getItem(PENDING_RELEASE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as AppRelease
+    return parsed && (parsed.tag || parsed.version) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
 /* ---------------- 更新弹窗 ---------------- */
 
 export function skippedVersion(): string {

@@ -4,7 +4,8 @@ import type { Expense, Footprint, Moment, TripView } from '../lib/types'
 import { listAllMoments, listExpenses, listFootprints, listTrips } from '../lib/repo'
 import { useLoader } from '../lib/hooks'
 import { useI18n, useNav, useToast } from '../lib/app-context'
-import { isNative, shareBinaryFile } from '../lib/native'
+import { isNative, getLastShareError, shareBinaryFile } from '../lib/native'
+import { exportErrorText } from '../lib/share-image'
 import { summarizeYear } from '../lib/ai'
 import { summarizeVisits } from '../lib/province'
 import {
@@ -65,6 +66,7 @@ export function RecapPage() {
   const [year, setYear] = useState<number>(() => new Date().getFullYear())
   const [aiSummary, setAiSummary] = useState('')
   const [aiBusy, setAiBusy] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const activeYear = years.includes(year) ? year : years[0]
 
   const yearTrips = useMemo(
@@ -160,59 +162,70 @@ export function RecapPage() {
   }, [activeYear, heat])
 
   const exportPoster = async () => {
-    const data: PosterData = {
-      kind: 'trip',
-      eyebrow: 'TRAVELOG · YEAR IN REVIEW',
-      title: tr('{year} 年度回顾', { year: activeYear }),
-      subtitle: tr('去过 {provinces} 个省级行政区 · {moments} 条记录', {
-        provinces,
-        moments: yearMoments.length,
-      }),
-      stats: [
-        { label: tr('旅行'), value: tr('{n} 段', { n: yearTrips.length }) },
-        { label: tr('在路上'), value: tr('{n} 天', { n: totalDays }) },
-        { label: tr('城市'), value: tr('{n} 座', { n: cities }) },
-        { label: tr('照片'), value: tr('{n} 张', { n: photos }) },
-      ],
-      categories: stats.slice(0, 5).map((item) => ({
-        label: CATEGORY_LABEL[item.category],
-        value: formatCny(item.amount),
-        ratio: totalCny > 0 ? item.amount / totalCny : 0,
-        color: CATEGORY_COLOR[item.category],
-      })),
-      money: { label: tr('全年花费'), value: formatCny(totalCny) },
-      cities: [...new Set(yearFootprints.map((item) => item.city).filter(Boolean))],
-      footnote: longest
-        ? tr('最长的一段「{title}」，{days} 天', {
-            title: longest.trip.title,
-            days: longest.days,
-          })
-        : '',
-      footer: tr('旅记 Travelog · 记录每一段旅程'),
-    }
-
-    const blob = await renderPoster(data, getPosterTemplate())
-    const filename = `travelog-${activeYear}.png`
-    if (isNative()) {
-      const bytes = new Uint8Array(await blob.arrayBuffer())
-      let binary = ''
-      const chunk = 0x8000
-      for (let i = 0; i < bytes.length; i += chunk) {
-        binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+    if (exporting) return
+    setExporting(true)
+    try {
+      const data: PosterData = {
+        kind: 'trip',
+        eyebrow: 'TRAVELOG · YEAR IN REVIEW',
+        title: tr('{year} 年度回顾', { year: activeYear }),
+        subtitle: tr('去过 {provinces} 个省级行政区 · {moments} 条记录', {
+          provinces,
+          moments: yearMoments.length,
+        }),
+        stats: [
+          { label: tr('旅行'), value: tr('{n} 段', { n: yearTrips.length }) },
+          { label: tr('在路上'), value: tr('{n} 天', { n: totalDays }) },
+          { label: tr('城市'), value: tr('{n} 座', { n: cities }) },
+          { label: tr('照片'), value: tr('{n} 张', { n: photos }) },
+        ],
+        categories: stats.slice(0, 5).map((item) => ({
+          label: CATEGORY_LABEL[item.category],
+          value: formatCny(item.amount),
+          ratio: totalCny > 0 ? item.amount / totalCny : 0,
+          color: CATEGORY_COLOR[item.category],
+        })),
+        money: { label: tr('全年花费'), value: formatCny(totalCny) },
+        cities: [...new Set(yearFootprints.map((item) => item.city).filter(Boolean))],
+        footnote: longest
+          ? tr('最长的一段「{title}」，{days} 天', {
+              title: longest.trip.title,
+              days: longest.days,
+            })
+          : '',
+        footer: tr('旅记 Travelog · 记录每一段旅程'),
       }
-      if (await shareBinaryFile(filename, btoa(binary))) {
-        toast(tr('年度海报已生成，可分享或保存'))
+
+      const blob = await renderPoster(data, getPosterTemplate())
+      const filename = `travelog-${activeYear}.png`
+      if (isNative()) {
+        const bytes = new Uint8Array(await blob.arrayBuffer())
+        let binary = ''
+        const chunk = 0x8000
+        for (let i = 0; i < bytes.length; i += chunk) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+        }
+        if (await shareBinaryFile(filename, btoa(binary))) {
+          toast(tr('年度海报已生成，可分享或保存'))
+        } else {
+          const reason = getLastShareError()
+          toast(reason ? tr('分享失败：{reason}', { reason }) : tr('系统分享面板打开失败'))
+        }
         return
       }
-    }
 
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = filename
-    link.click()
-    window.setTimeout(() => URL.revokeObjectURL(url), 2000)
-    toast(tr('年度海报已导出'))
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      link.click()
+      window.setTimeout(() => URL.revokeObjectURL(url), 2000)
+      toast(tr('年度海报已导出'))
+    } catch (error) {
+      toast(exportErrorText(error))
+    } finally {
+      setExporting(false)
+    }
   }
 
   const hasData = yearTrips.length > 0 || yearExpenses.length > 0 || yearMoments.length > 0
@@ -238,11 +251,12 @@ export function RecapPage() {
         <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
+            disabled={exporting}
             onClick={() => void exportPoster()}
-            className="press mr-1 inline-flex h-8 items-center gap-1 rounded-full border border-line px-2.5 text-caption text-ink-2 hover:text-accent"
+            className="press mr-1 inline-flex h-8 items-center gap-1 rounded-full border border-line px-2.5 text-caption text-ink-2 hover:text-accent disabled:opacity-60"
           >
             <DownloadSimple size={13} />
-            {tr('导出海报')}
+            {exporting ? tr('正在导出…') : tr('导出海报')}
           </button>
           <button
             type="button"

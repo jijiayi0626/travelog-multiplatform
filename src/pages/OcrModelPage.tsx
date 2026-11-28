@@ -37,6 +37,23 @@ import {
 
 type Tr = (zh: string, vars?: Record<string, string | number>) => string
 
+/** 把语音服务归成「华为 xxx / Google xxx / 其他」，便于一眼看出实际引擎 */
+function engineName(
+  service: { package?: string; label?: string } | null | undefined,
+  tr: Tr,
+): string {
+  const pkg = service?.package?.trim() ?? ''
+  if (!pkg) return tr('未找到')
+  const name = service?.label?.trim() || pkg
+  if (pkg.startsWith('com.huawei') || pkg.startsWith('com.hihonor')) {
+    return tr('华为 {name}', { name })
+  }
+  if (pkg.startsWith('com.google')) {
+    return tr('Google {name}', { name })
+  }
+  return name
+}
+
 /** 诊断结果拼成可复制的多行文本 */
 function formatDiagnostics(data: VoiceDiagnostics, tr: Tr): string {
   return [
@@ -47,6 +64,23 @@ function formatDiagnostics(data: VoiceDiagnostics, tr: Tr): string {
     data.permissionDetail ? tr('权限详情：{value}', { value: data.permissionDetail }) : '',
     tr('兼容语音通道：{value}', { value: data.legacyAvailable ? tr('可用') : tr('不可用') }),
     data.legacyDetail ? tr('兼容语音详情：{value}', { value: data.legacyDetail }) : '',
+    tr('实际语音服务：{value}', {
+      value: data.legacyAvailable
+        ? engineName({ package: data.legacyPackage, label: data.legacyLabel }, tr)
+        : tr('未找到'),
+    }),
+    data.lastEngine
+      ? tr('上次实际使用：{value}', { value: engineName(data.lastEngine, tr) })
+      : '',
+    tr('候选语音服务：{value}', {
+      value: data.legacyServices.length
+        ? data.legacyServices
+            .map((service) =>
+              service.label ? `${service.package}（${service.label}）` : service.package,
+            )
+            .join('、')
+        : tr('无'),
+    }),
     tr('离线语音模型：{value}', { value: data.voskReady ? tr('已下载') : tr('未下载') }),
     tr('最近一次语音错误：{value}', { value: data.lastError || tr('无') }),
     tr('检测时间：{value}', { value: new Date().toLocaleString() }),
@@ -174,7 +208,13 @@ export function OcrModelPage() {
       if (result.ok) {
         setLegacyTest({
           ok: true,
-          message: tr('收到兼容语音：{text}', { text: result.text }),
+          message: result.package
+            ? tr('收到兼容语音：{text}（实际使用 {engine}，包名 {package}）', {
+                text: result.text,
+                engine: engineName(result, tr),
+                package: result.package,
+              })
+            : tr('收到兼容语音：{text}', { text: result.text }),
         })
       } else {
         setLegacyTest({

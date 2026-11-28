@@ -27,7 +27,9 @@ async function blobToBase64(blob: Blob): Promise<string> {
  */
 export async function sharePngBlob(blob: Blob, filename: string): Promise<'native' | 'download'> {
   if (isNative()) {
-    if (await shareBinaryFile(filename, await blobToBase64(blob))) return 'native'
+    const shared = await shareBinaryFile(filename, await blobToBase64(blob))
+    if (shared) return 'native'
+    throw new Error('系统分享面板打开失败')
   }
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
@@ -38,4 +40,12 @@ export async function sharePngBlob(blob: Blob, filename: string): Promise<'nativ
   link.remove()
   window.setTimeout(() => URL.revokeObjectURL(url), 2000)
   return 'download'
+}
+
+/** 把导出流程的异常转成可读中文提示 */
+export function exportErrorText(error: unknown): string {
+  const message = error instanceof Error ? error.message : ''
+  if (message === 'poster generation failed') return '长图生成失败，请重试'
+  if (message) return message
+  return '导出失败，请重试'
 }

@@ -63,8 +63,9 @@ import {
   shareBaseUrl,
 } from '../lib/cloud'
 import { runSync } from '../lib/sync-engine'
-import { isNative, shareBinaryFile, shareTextFile } from '../lib/native'
+import { isNative, getLastShareError, shareBinaryFile, shareTextFile } from '../lib/native'
 import { renderTripPoster } from '../lib/export-image'
+import { exportErrorText } from '../lib/share-image'
 import { useNav, useRefresh, useI18n, useToast } from '../lib/app-context'
 import {
   CATEGORY_COLOR,
@@ -506,7 +507,12 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
           binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
         }
         const ok = await shareBinaryFile(filename, btoa(binary))
-        toast(ok ? tr('行程图片已生成，可分享或保存') : tr('导出失败，请重试'))
+        if (ok) {
+          toast(tr('行程图片已生成，可分享或保存'))
+        } else {
+          const reason = getLastShareError()
+          toast(reason ? tr('分享失败：{reason}', { reason }) : tr('系统分享面板打开失败'))
+        }
         return
       }
       const url = URL.createObjectURL(blob)
@@ -516,8 +522,8 @@ export function TripDetailPage({ tripId, tab }: { tripId: string; tab: TabKey })
       link.click()
       window.setTimeout(() => URL.revokeObjectURL(url), 2000)
       toast(tr('行程图片已导出'))
-    } catch {
-      toast(tr('图片生成失败，请重试'))
+    } catch (error) {
+      toast(exportErrorText(error))
     } finally {
       setImageExportBusy(false)
       setExportOpen(false)

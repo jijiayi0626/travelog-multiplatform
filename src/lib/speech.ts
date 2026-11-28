@@ -3,15 +3,53 @@ import { isVoskModelReady } from './offline-speech'
 import {
   LegacySpeechError,
   availableLegacySpeech,
+  getLegacySpeechAvailability,
   recognizeLegacySpeech,
+  type LegacySpeechService,
 } from './legacy-speech'
 
 /** 最近一次语音错误写入的 key，语音诊断面板据此展示 */
 export const VOICE_LAST_ERROR_KEY = 'travelog.voiceLastError'
+/** 最近一次实际使用的语音服务，区分华为/谷歌 */
+export const VOICE_LAST_ENGINE_KEY = 'travelog.voiceLastEngine'
 /** 系统语音启动后多久没有结果就判定服务不可用 */
 export const SYSTEM_VOICE_TIMEOUT_MS = 12_000
 /** 系统语音启动后 10 秒仍没有结果，就改试兼容语音通道 */
 export const LEGACY_FALLBACK_TIMEOUT_MS = 10_000
+
+export interface VoiceEngine {
+  package: string
+  label: string
+}
+
+export function setLastVoiceEngine(engine: VoiceEngine | null | undefined): void {
+  const pkg = engine?.package?.trim() ?? ''
+  if (!pkg) return
+  try {
+    localStorage.setItem(
+      VOICE_LAST_ENGINE_KEY,
+      JSON.stringify({ package: pkg, label: engine?.label?.trim() ?? '' }),
+    )
+  } catch {
+    /* 隐私模式写不了就算了 */
+  }
+}
+
+export function getLastVoiceEngine(): VoiceEngine | null {
+  try {
+    const raw = localStorage.getItem(VOICE_LAST_ENGINE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { package?: unknown; label?: unknown }
+    const pkg = typeof parsed?.package === 'string' ? parsed.package.trim() : ''
+    if (!pkg) return null
+    return {
+      package: pkg,
+      label: typeof parsed?.label === 'string' ? parsed.label.trim() : '',
+    }
+  } catch {
+    return null
+  }
+}
 
 export function logVoiceError(message: string): void {
   console.warn('[travelog:voice]', message)
@@ -114,6 +152,7 @@ function startLegacyVoiceFallback(
       }
       const result = await recognizeLegacySpeech()
       if (!active) return
+      setLastVoiceEngine(result)
       if (result.cancelled) {
         logVoiceError('legacy: 语音输入已取消')
         handlers.onError('语音输入已取消')
@@ -352,6 +391,13 @@ export interface VoiceDiagnostics {
   /** 兼容语音通道（系统 RecognizerIntent）是否可用 */
   legacyAvailable: boolean
   legacyDetail: string
+  /** 兼容语音实际首选服务（华为/荣耀 > Google > 第一个） */
+  legacyPackage: string
+  legacyLabel: string
+  /** 所有候选语音服务，便于区分华为/谷歌 */
+  legacyServices: LegacySpeechService[]
+  /** 最近一次实际使用的语音服务 */
+  lastEngine: VoiceEngine | null
   voskReady: boolean
   lastError: string
 }
@@ -401,14 +447,25 @@ export async function collectVoiceDiagnostics(): Promise<VoiceDiagnostics> {
 
   let legacyAvailable = false
   let legacyDetail = ''
+  let legacyPackage = ''
+  let legacyLabel = ''
+  let legacyServices: LegacySpeechService[] = []
   if (native) {
-    legacyAvailable = await availableLegacySpeech()
+    const info = await getLegacySpeechAvailability()
+    legacyAvailable = info.available
+    legacyPackage = info.package
+    legacyLabel = info.label
+    legacyServices = info.services
     if (!legacyAvailable) {
-      legacyDetail = '没有找到能处理系统语音输入的应用，或当前安装包未包含兼容语音插件'
+      legacyDetail = info.detail
+        ? `没有找到能处理系统语音输入的应用：${info.detail}`
+        : '没有找到能处理系统语音输入的应用，或当前安装包未包含兼容语音插件'
     }
   } else {
     legacyDetail = '兼容语音通道仅在原生 App 内可用'
   }
+
+  const lastEngine = native ? getLastVoiceEngine() : null
 
   const voskReady = await isVoskModelReady()
   return {
@@ -419,6 +476,10 @@ export async function collectVoiceDiagnostics(): Promise<VoiceDiagnostics> {
     permissionDetail,
     legacyAvailable,
     legacyDetail,
+    legacyPackage,
+    legacyLabel,
+    legacyServices,
+    lastEngine,
     voskReady,
     lastError: getLastVoiceError(),
   }
@@ -498,6 +559,9 @@ export interface LegacySpeechTestResult {
   ok: boolean
   text: string
   error: string
+  /** 实际调起的语音服务包名/名称 */
+  package: string
+  label: string
 }
 
 /** 测试兼容语音通道：直接调起系统 RecognizerIntent，最多等 20 秒 */
@@ -506,18 +570,25 @@ export async function testLegacySpeech(): Promise<LegacySpeechTestResult> {
     if (!(await availableLegacySpeech())) {
       const message = '系统没有可用的语音识别服务'
       logVoiceError(`legacy: ${message}`)
-      return { ok: false, text: '', error: message }
+      return { ok: false, text: '', error: message, package: '', label: '' }
     }
     const result = await recognizeLegacySpeech()
+    setLastVoiceEngine(result)
     if (result.cancelled) {
       const message = '语音输入已取消'
       logVoiceError(`legacy: ${message}`)
-      return { ok: false, text: '', error: message }
+      return { ok: false, text: '', error: message, package: result.package, label: result.label }
     }
-    return { ok: true, text: result.text, error: '' }
+    return {
+      ok: true,
+      text: result.text,
+      error: '',
+      package: result.package,
+      label: result.label,
+    }
   } catch (error) {
     const message = errorText(error)
     logVoiceError(`legacy: ${message}`)
-    return { ok: false, text: '', error: message }
+    return { ok: false, text: '', error: message, package: '', label: '' }
   }
 }

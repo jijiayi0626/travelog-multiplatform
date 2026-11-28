@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { App as CapacitorApp } from '@capacitor/app'
 import { Clipboard } from '@capacitor/clipboard'
 import {
+  DeviceMobile,
   Images,
   Keyboard,
   MagnifyingGlass,
@@ -12,6 +13,7 @@ import {
   Sun,
   UserCircle,
   Wallet,
+  X,
 } from '@phosphor-icons/react'
 import type { View } from '../lib/types'
 import { cn } from '../lib/cn'
@@ -29,6 +31,13 @@ import { isSignedIn, joinTripByCode } from '../lib/cloud'
 import { getTrip } from '../lib/repo'
 import { runSync } from '../lib/sync-engine'
 import { isNative } from '../lib/native'
+import {
+  downloadApk,
+  loadLatestRelease,
+  pickApk,
+  readCustomBase,
+  readUpdateMode,
+} from '../lib/update'
 import { ConfirmDialog } from './ui'
 
 const TABS = [
@@ -80,6 +89,7 @@ function isRoot(view: View): boolean {
 }
 
 const LAST_CLIPBOARD_INVITE = 'travelog.lastClipboardInvite'
+const WEB_APP_BANNER_KEY = 'travelog.webAppBanner.dismissed'
 
 /** 剪贴板里可能是 6 位邀请码，也可能是带 #/share/CODE 的分享链接 */
 function inviteCodeFromClipboard(text: string): string | null {
@@ -110,6 +120,15 @@ export function AppShell({
   const active = rootOf(view)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => currentTheme())
   const [inviteCode, setInviteCode] = useState<string | null>(null)
+  const [appBannerOpen, setAppBannerOpen] = useState(() => {
+    if (isNative()) return false
+    try {
+      return localStorage.getItem(WEB_APP_BANNER_KEY) !== '1'
+    } catch {
+      return true
+    }
+  })
+  const [appBusy, setAppBusy] = useState(false)
   const viewRef = useRef(view)
   const clipboardBusy = useRef(false)
 
@@ -219,6 +238,34 @@ export function AppShell({
     setThemeMode(next)
     setTheme(next)
   }
+
+  const dismissAppBanner = () => {
+    setAppBannerOpen(false)
+    try {
+      localStorage.setItem(WEB_APP_BANNER_KEY, '1')
+    } catch {
+      /* 隐私模式忽略 */
+    }
+  }
+
+  // 网页端直接拉最新 APK 下载；拿不到安装包才回退到下载页
+  const downloadApp = async () => {
+    if (appBusy) return
+    setAppBusy(true)
+    try {
+      const data = await loadLatestRelease()
+      const apk = pickApk(data)
+      if (!apk) throw new Error('missing apk')
+      await downloadApk(apk.url, readUpdateMode(), readCustomBase())
+      toast(tr('已开始下载 {name}', { name: apk.name }))
+    } catch {
+      nav.navigate({ name: 'download' })
+    } finally {
+      setAppBusy(false)
+    }
+  }
+
+  const showAppBanner = appBannerOpen && !isNative() && view.name !== 'download'
 
   const ThemeGlyph = theme === 'dark' ? Moon : Sun
 
@@ -349,6 +396,37 @@ export function AppShell({
           </nav>
         ) : null}
       </div>
+
+      {showAppBanner ? (
+        <div
+          className="fade-in fixed inset-x-3 bottom-[calc(84px+env(safe-area-inset-bottom))] z-40 flex items-center gap-2.5 rounded-2xl border border-line bg-surface/95 p-2.5 backdrop-blur-xl lg:inset-x-auto lg:bottom-4 lg:left-auto lg:right-4 lg:w-[400px]"
+          style={{ boxShadow: 'var(--shadow-float)' }}
+        >
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
+            <DeviceMobile size={17} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-body-sm font-medium text-ink">{tr('在 App 里体验更好')}</p>
+            <p className="truncate text-caption text-ink-3">{tr('下载 Android 安装包，离线记录更顺手')}</p>
+          </div>
+          <button
+            type="button"
+            className="press shrink-0 rounded-full bg-accent px-3 py-1.5 text-note font-medium text-white disabled:opacity-60"
+            disabled={appBusy}
+            onClick={() => void downloadApp()}
+          >
+            {appBusy ? tr('准备中…') : tr('下载 APK')}
+          </button>
+          <button
+            type="button"
+            aria-label={tr('不再提示')}
+            className="press shrink-0 text-ink-3"
+            onClick={dismissAppBanner}
+          >
+            <X size={15} />
+          </button>
+        </div>
+      ) : null}
 
       <ConfirmDialog
         open={inviteCode !== null}

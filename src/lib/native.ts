@@ -117,43 +117,91 @@ export async function clearNativeWatch(_id: string): Promise<void> {
 
 /* ---------------- 文件导出 ---------------- */
 
+const SHARE_ERROR_KEY = 'travelog.lastShareError'
+
+/** 串行化系统分享面板，避免连续点击时并发调用导致后续分享不弹出 */
+let shareChain: Promise<void> = Promise.resolve()
+
+function serializedShare<T>(task: () => Promise<T>): Promise<T> {
+  const result = shareChain.then(task, task)
+  shareChain = result.then(
+    () => undefined,
+    () => undefined,
+  )
+  return result
+}
+
+/** 每次分享使用唯一文件名，避免缓存文件被上一次分享占用或覆盖 */
+function uniqueShareFilename(filename: string): string {
+  const dot = filename.lastIndexOf('.')
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  if (dot > 0) return `${filename.slice(0, dot)}-${suffix}${filename.slice(dot)}`
+  return `${filename}-${suffix}`
+}
+
+function recordShareError(error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error)
+  try {
+    localStorage.setItem(SHARE_ERROR_KEY, message || '分享失败')
+  } catch {
+    /* 无 localStorage 时忽略 */
+  }
+}
+
+/** 读取上一次原生分享失败的具体原因 */
+export function getLastShareError(): string {
+  try {
+    return localStorage.getItem(SHARE_ERROR_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
 /** 把 base64 文件写到缓存并打开系统分享面板（图片、PDF 等二进制文件） */
 export async function shareBinaryFile(filename: string, base64: string): Promise<boolean> {
   if (!Capacitor.isNativePlatform()) return false
-  try {
-    const result = await Filesystem.writeFile({
-      path: filename,
-      data: base64,
-      directory: Directory.Cache,
-    })
-    await Share.share({
-      title: filename,
-      url: result.uri,
-      dialogTitle: '分享或保存文件',
-    })
-    return true
-  } catch {
-    return false
-  }
+  return serializedShare(async () => {
+    try {
+      const result = await Filesystem.writeFile({
+        path: uniqueShareFilename(filename),
+        data: base64,
+        directory: Directory.Cache,
+      })
+      await Share.share({
+        title: filename,
+        url: result.uri,
+        files: [result.uri],
+        dialogTitle: '分享或保存文件',
+      })
+      return true
+    } catch (error) {
+      recordShareError(error)
+      return false
+    }
+  })
 }
 
 export async function shareTextFile(filename: string, content: string): Promise<boolean> {
   if (!Capacitor.isNativePlatform()) return false
-  try {
-    const result = await Filesystem.writeFile({
-      path: filename,
-      data: content,
-      directory: Directory.Cache,
-      encoding: Encoding.UTF8,
-    })
-    await Share.share({
-      title: filename,
-      text: `旅记备份 ${filename}`,
-      url: result.uri,
-      dialogTitle: '保存或分享备份',
-    })
-    return true
-  } catch {
-    return false
-  }
+  return serializedShare(async () => {
+    try {
+      const result = await Filesystem.writeFile({
+        path: uniqueShareFilename(filename),
+        data: content,
+        directory: Directory.Cache,
+        encoding: Encoding.UTF8,
+      })
+      await Share.share({
+        title: filename,
+        text: `旅记备份 ${filename}`,
+        url: result.uri,
+        files: [result.uri],
+        dialogTitle: '保存或分享备份',
+      })
+      return true
+    } catch (error) {
+      recordShareError(error)
+      return false
+    }
+  })
 }

@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowRight, DownloadSimple, MapTrifold, Sparkle } from '@phosphor-icons/react'
+import { Capacitor } from '@capacitor/core'
+import {
+  ArrowsClockwise,
+  ArrowRight,
+  DownloadSimple,
+  MapTrifold,
+  Sparkle,
+} from '@phosphor-icons/react'
 import { useI18n, useNav, useToast } from '../lib/app-context'
 import {
   downloadApk,
@@ -12,6 +19,7 @@ import {
   readUpdateMode,
   skipVersion,
   skippedVersion,
+  stashPendingRelease,
   type UpdateMode,
 } from '../lib/update'
 import type { AppRelease } from '../lib/cloud'
@@ -21,6 +29,7 @@ const CHECK_DELAY = 4000
 /**
  * 应用启动后自动检查 GitHub Release，有更新时主动弹窗。
  * 用户选「稍后」会记住该版本，不再重复打扰；下个版本仍会提示。
+ * 网页端不下载 APK，改为提示刷新页面。
  */
 export function UpdatePrompt() {
   const nav = useNav()
@@ -62,6 +71,8 @@ export function UpdatePrompt() {
   }
 
   const openChangelog = () => {
+    // 先存一份，日志页优先展示，离线也能看到刚推送的说明
+    stashPendingRelease(release)
     setOpen(false)
     nav.navigate({ name: 'changelog' })
   }
@@ -91,6 +102,97 @@ export function UpdatePrompt() {
     } finally {
       setBusy(false)
     }
+  }
+
+  const downloadApp = async () => {
+    if (busy) return
+    if (!apk) {
+      setOpen(false)
+      nav.navigate({ name: 'download' })
+      return
+    }
+    setBusy(true)
+    try {
+      await downloadApk(apk.url, readUpdateMode(), readCustomBase())
+      toast(tr('已开始下载 {name}', { name: apk.name }))
+      setOpen(false)
+    } catch {
+      setOpen(false)
+      nav.navigate({ name: 'download' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // 网页端：提示刷新网页，需要装 App 的用户直接下载 APK
+  if (!Capacitor.isNativePlatform()) {
+    return createPortal(
+      <div
+        className="fixed inset-0 z-[72] flex items-center justify-center px-5"
+        role="dialog"
+        aria-modal="true"
+        aria-label={tr('网页已更新')}
+      >
+        <button
+          type="button"
+          aria-label={tr('关闭')}
+          onClick={dismiss}
+          className="fade-in absolute inset-0 bg-[#0b0b0a]/40 backdrop-blur-[2px]"
+        />
+        <div
+          className="fade-in relative w-full max-w-[344px] overflow-hidden rounded-2xl border border-line bg-surface p-4"
+          style={{ boxShadow: 'var(--shadow-float)' }}
+        >
+          <div className="flex items-start gap-2.5">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
+              <ArrowsClockwise size={17} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-body font-medium text-ink">{tr('网页已更新')}</p>
+              <p className="mt-1 break-words text-caption leading-5 text-ink-3">
+                {tr('已发布 v{version}，刷新页面即可使用新版本。', { version: release.version })}
+              </p>
+            </div>
+          </div>
+          <div className="mt-3.5 flex gap-2">
+            <button
+              type="button"
+              className="btn-primary h-9 flex-1 text-note"
+              onClick={() => window.location.reload()}
+            >
+              <ArrowsClockwise size={14} />
+              {tr('刷新页面')}
+            </button>
+            <button
+              type="button"
+              className="btn-ghost h-9 flex-1 text-note"
+              disabled={busy}
+              onClick={() => void downloadApp()}
+            >
+              <DownloadSimple size={14} />
+              {tr('下载 App')}
+            </button>
+          </div>
+          <div className="mt-1 flex items-center justify-between">
+            <button
+              type="button"
+              className="press px-1 py-1 text-caption text-ink-3 hover:text-ink"
+              onClick={openChangelog}
+            >
+              {tr('查看更新日志')}
+            </button>
+            <button
+              type="button"
+              className="press px-1 py-1 text-caption text-ink-3 hover:text-ink"
+              onClick={dismiss}
+            >
+              {tr('稍后')}
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body,
+    )
   }
 
   return createPortal(
