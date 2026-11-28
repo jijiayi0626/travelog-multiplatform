@@ -11,6 +11,10 @@ export interface AIJob {
   error: string
   model: string
   endpoint: string
+  /** 服务端返回的原始输入，用于失败后重试 */
+  prompt?: string
+  system?: string
+  temperature?: number
   createdAt: number
   startedAt: number
   finishedAt: number

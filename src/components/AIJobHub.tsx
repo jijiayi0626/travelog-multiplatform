@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   BookmarkSimple,
+  ArrowClockwise,
   CheckCircle,
   CircleNotch,
   Copy,
@@ -76,7 +77,12 @@ function prettyResult(job: AIJob): string {
 }
 
 function jobTime(job: AIJob): string {
-  return `${formatDate(job.createdAt)} ${formatTime(job.createdAt)}`
+  const parts = [`${formatDate(job.createdAt)} ${formatTime(job.createdAt)}`]
+  if (job.model) parts.push(job.model.split('/').pop() || job.model)
+  if (job.startedAt && job.finishedAt) {
+    parts.push(`${Math.max(1, Math.round((job.finishedAt - job.startedAt) / 1000))}s`)
+  }
+  return parts.join(' · ')
 }
 
 function StatusIcon({ status }: { status: AIJob['status'] }) {
@@ -99,6 +105,7 @@ export function AIJobHub() {
   const [picked, setPicked] = useState<string[]>([])
   const [draft, setDraft] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [retrying, setRetrying] = useState<string | null>(null)
   const [applyingJob, setApplyingJob] = useState<AIJob | null>(null)
   const [applyTrips, setApplyTrips] = useState<Array<{ id: string; title: string; destination: string }>>([])
   const [applying, setApplying] = useState(false)
@@ -222,6 +229,29 @@ export function AIJobHub() {
   const openDrawer = () => {
     setOpen(true)
     markAIJobsRead(unread.map((item) => item.id))
+  }
+
+  const retryJob = async (job: AIJob) => {
+    if (!job.prompt) {
+      toast(tr('这条记录没有保存原始提示词，请重新发起'))
+      return
+    }
+    setRetrying(job.id)
+    try {
+      await submitAIJob({
+        kind: job.kind,
+        label: job.label || kindLabel(job.kind),
+        system: job.system || '',
+        prompt: job.prompt,
+        temperature: job.temperature ?? 0.6,
+        endpointId: job.endpoint || undefined,
+      })
+      toast(tr('已重新提交，完成后会提醒你'))
+    } catch (error) {
+      toast(error instanceof Error ? error.message : tr('重试失败'))
+    } finally {
+      setRetrying(null)
+    }
   }
 
   const copy = (job: AIJob) => {
@@ -400,9 +430,25 @@ export function AIJobHub() {
                             {tr('正在生成，完成后右上角会提醒；你可以先去别的页面。')}
                           </p>
                         ) : job.status === 'error' ? (
-                          <p className="rounded-xl bg-danger/10 px-3 py-2 text-body-sm leading-5 text-danger">
-                            {job.error || tr('生成失败，请稍后再试')}
-                          </p>
+                          <div className="space-y-2">
+                            <p className="rounded-xl bg-danger/10 px-3 py-2 text-body-sm leading-5 text-danger">
+                              {job.error || tr('生成失败，请稍后再试')}
+                            </p>
+                            {job.prompt ? (
+                              <button
+                                type="button"
+                                className="btn-ghost h-9 px-3 text-note"
+                                disabled={retrying === job.id}
+                                onClick={() => void retryJob(job)}
+                              >
+                                <ArrowClockwise
+                                  size={14}
+                                  className={retrying === job.id ? 'animate-spin' : undefined}
+                                />
+                                {retrying === job.id ? tr('重新提交中…') : tr('重试')}
+                              </button>
+                            ) : null}
+                          </div>
                         ) : (
                           <>
                             <pre className="max-h-[46dvh] overflow-y-auto whitespace-pre-wrap break-words rounded-xl bg-paper-2/70 px-3 py-2.5 font-sans text-body-sm leading-6 text-ink">

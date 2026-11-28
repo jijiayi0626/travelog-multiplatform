@@ -910,7 +910,10 @@ async function handleAdminAITest(request, env) {
   const results = await Promise.all(
     targets.map(async (endpoint) => {
       try {
-        const result = await callEndpoint(env, endpoint, messages, 0.2)
+        const result = await callEndpoint(env, endpoint, messages, 0.2, {
+          maxTokens: 800,
+          timeoutMs: 25_000,
+        })
         return {
           id: endpoint.id,
           name: endpoint.name,
@@ -966,6 +969,61 @@ async function handleAdminAIModels(request, env, url) {
   const base = (endpoint.base || 'https://api.openai.com/v1').replace(/\/$/, '')
   const response = await fetch(`${base}/models`, {
     headers: { authorization: `Bearer ${endpoint.key}` },
+    signal: AbortSignal.timeout(30_000),
+  })
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new HttpError(502, `拉取模型失败：${response.status}${text ? ` ${text.slice(0, 120)}` : ''}`)
+  }
+  const data = await response.json()
+  const models = (data.data || [])
+    .map((item) => item.id)
+    .filter(Boolean)
+    .sort()
+  return json({ models: models.slice(0, 200) }, 200, env, request)
+}
+
+/** POST /api/admin/ai/models：用表单里尚未保存的 base/key 直接拉模型，避免必须先保存 */
+async function handleAdminAIModelsDraft(request, env) {
+  await requireAdmin(request, env)
+  const body = await readJSON(request).catch(() => ({}))
+  const endpointId = String(body.endpointId || '')
+  const type = body.type === 'workers' ? 'workers' : 'openai'
+  let base = String(body.base || '').trim()
+  let key = String(body.key || '').trim()
+
+  if (type === 'workers') {
+    return json(
+      {
+        models: [
+          '@cf/meta/llama-3.1-8b-instruct-fp8',
+          '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+          '@cf/qwen/qwen1.5-14b-chat-awq',
+          '@cf/mistral/mistral-7b-instruct-v0.2',
+        ],
+      },
+      200,
+      env,
+      request,
+    )
+  }
+
+  // 密钥留空或仍是掩码时，回退到该接口已保存的密钥
+  if ((!key || key.includes('…')) && endpointId) {
+    const config = await loadEndpoints(env)
+    const saved =
+      config.all.find((item) => item.id === endpointId) ||
+      config.endpoints.find((item) => item.id === endpointId || item.baseId === endpointId)
+    if (saved) {
+      key = saved.key || key
+      base = saved.base || base
+    }
+  }
+  if (!key) throw new HttpError(400, '缺少密钥，先填写接口密钥')
+
+  const target = (base || 'https://api.openai.com/v1').replace(/\/$/, '')
+  const response = await fetch(`${target}/models`, {
+    headers: { authorization: `Bearer ${key}` },
     signal: AbortSignal.timeout(30_000),
   })
   if (!response.ok) {
@@ -1840,8 +1898,10 @@ function pickEndpoint(endpoints) {
   return pool[Math.floor(Math.random() * pool.length)]
 }
 
-async function callEndpoint(env, endpoint, messages, temperature) {
+async function callEndpoint(env, endpoint, messages, temperature, options = {}) {
   const started = Date.now()
+  const maxTokens = options.maxTokens ?? 2400
+  const timeoutMs = options.timeoutMs ?? 40_000
 
   const emptyError = (finishReason) =>
     new Error(
@@ -1864,17 +1924,32 @@ async function callEndpoint(env, endpoint, messages, temperature) {
   }
 
   const base = (endpoint.base || 'https://api.openai.com/v1').replace(/\/$/, '')
-  const response = await fetch(`${base}/chat/completions`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${endpoint.key}` },
-    body: JSON.stringify({
-      model: endpoint.model,
-      messages,
-      temperature,
-      max_tokens: 800,
-    }),
-    signal: AbortSignal.timeout(45_000),
-  })
+  const body = {
+    model: endpoint.model,
+    messages,
+    temperature,
+    max_tokens: maxTokens,
+    // 推理模型默认会先输出很长的思维链，容易把 max_tokens 吃光后返回空内容。
+    // 兼容 OpenAI 的推理强度参数，不支持的服务商会忽略它。
+    reasoning_effort: 'low',
+  }
+  const send = (payload) =>
+    fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${endpoint.key}` },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+
+  let response = await send(body)
+  if (response.status === 400) {
+    // 少数服务商不认识 reasoning_effort，去掉后重试一次
+    const detail = await response.clone().text().catch(() => '')
+    if (/reasoning_effort|unknown|unsupported|invalid/i.test(detail)) {
+      delete body.reasoning_effort
+      response = await send(body)
+    }
+  }
   if (!response.ok) {
     const text = await response.text()
     throw new Error(`${endpoint.name || 'OpenAI'} 返回 ${response.status}：${text.slice(0, 160)}`)
@@ -1882,6 +1957,13 @@ async function callEndpoint(env, endpoint, messages, temperature) {
   const data = await response.json()
   const choice = data.choices?.[0]
   const text = (choice?.message?.content || '').trim()
+  if ((!text || choice?.finish_reason === 'length') && maxTokens < 4800) {
+    // 输出被思维链吃光时，加一次预算重试
+    return callEndpoint(env, endpoint, messages, temperature, {
+      ...options,
+      maxTokens: Math.min(maxTokens * 2, 4800),
+    })
+  }
   if (!text) throw emptyError(choice?.finish_reason)
   return {
     text,
@@ -1892,7 +1974,7 @@ async function callEndpoint(env, endpoint, messages, temperature) {
 }
 
 /** 多个接口按权重随机，失败自动切换到下一个；指定 endpointId 时只跑该模型（用于多模型对比） */
-async function runAI(env, messages, temperature, endpointId = '') {
+async function runAI(env, messages, temperature, endpointId = '', options = {}) {
   const config = await loadEndpoints(env)
   if (!config.enabled) throw new HttpError(503, 'AI 已在管理面板中关闭')
   if (config.endpoints.length === 0) {
@@ -1904,7 +1986,7 @@ async function runAI(env, messages, temperature, endpointId = '') {
     const chosen = config.endpoints.find((item) => item.id === endpointId)
     if (!chosen) throw new HttpError(400, '所选模型不可用，请刷新后重试')
     try {
-      return await callEndpoint(env, chosen, messages, temp)
+      return await callEndpoint(env, chosen, messages, temp, options)
     } catch (error) {
       throw new HttpError(502, `${chosen.name || chosen.model} 生成失败：${error.message}`)
     }
@@ -1918,7 +2000,7 @@ async function runAI(env, messages, temperature, endpointId = '') {
     const endpoint = pickEndpoint(candidates)
     tried.add(endpoint.id)
     try {
-      return await callEndpoint(env, endpoint, messages, temp)
+      return await callEndpoint(env, endpoint, messages, temp, options)
     } catch (error) {
       lastError = error
       console.error(`ai endpoint failed: ${endpoint.name} ${error.message}`)
@@ -2027,7 +2109,7 @@ async function handleReceipt(request, env) {
 /* ---------------- AI 异步任务 ---------------- */
 
 const AI_JOB_MAX = 30
-const AI_JOB_STALE_MS = 15 * 60 * 1000
+const AI_JOB_STALE_MS = 2 * 60 * 1000
 
 /** AI 开关与会员门禁；所有 AI 入口共用 */
 async function requireAIAccess(env, user) {
@@ -2052,6 +2134,9 @@ function aiJobPayload(row) {
     error: row.error || '',
     model: row.model || '',
     endpoint: row.endpoint || '',
+    prompt: row.prompt || '',
+    system: row.system || '',
+    temperature: row.temperature ?? 0.6,
     createdAt: row.created_at,
     startedAt: row.started_at || 0,
     finishedAt: row.finished_at || 0,
@@ -2102,7 +2187,11 @@ async function runAIJob(env, jobId) {
   if (job.system) messages.push({ role: 'system', content: job.system })
   messages.push({ role: 'user', content: job.prompt })
   try {
-    const result = await runAI(env, messages, job.temperature, job.endpoint || '')
+    const result = await runAI(env, messages, job.temperature, job.endpoint || '', {
+      // 后台任务受 waitUntil 生命周期限制，单次请求必须尽快返回
+      timeoutMs: 25_000,
+      maxTokens: 2400,
+    })
     await env.DB.prepare(
       `UPDATE ai_jobs SET status = 'done', result = ?, model = ?, endpoint = ?, finished_at = ?
        WHERE id = ?`,
@@ -2878,6 +2967,7 @@ async function handleApi(request, env, url, ctx) {
   if (route === 'GET /api/admin/settings') return await handleAdminSettingsGet(request, env)
   if (route === 'PUT /api/admin/settings') return await handleAdminSettingsPut(request, env)
   if (route === 'POST /api/admin/ai/test') return await handleAdminAITest(request, env)
+  if (route === 'POST /api/admin/ai/models') return await handleAdminAIModelsDraft(request, env)
   if (route === 'GET /api/admin/ai/models') return await handleAdminAIModels(request, env, url)
   if (route === 'GET /api/admin/codes') return await handleAdminCodesList(request, env, url)
   if (route === 'POST /api/admin/codes') return await handleAdminCodesCreate(request, env)

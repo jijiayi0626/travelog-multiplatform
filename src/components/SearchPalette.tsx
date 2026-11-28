@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { CalendarCheck, MagnifyingGlass, MapPin, MapTrifold, Notebook, Wallet } from '@phosphor-icons/react'
+import { CalendarCheck, ChatCircleDots, CheckSquare, MagnifyingGlass, MapPin, MapTrifold, Notebook, Wallet } from '@phosphor-icons/react'
 import type { SearchResult } from '../lib/types'
 import { searchAll } from '../lib/repo'
 import { useNav, useI18n } from '../lib/app-context'
@@ -11,6 +11,8 @@ const KIND_LABEL: Record<SearchResult['kind'], string> = {
   expense: '账目',
   footprint: '足迹',
   plan: '计划',
+  comment: '评论',
+  poll: '投票',
 }
 
 function ResultIcon({ kind }: { kind: SearchResult['kind'] }) {
@@ -18,6 +20,8 @@ function ResultIcon({ kind }: { kind: SearchResult['kind'] }) {
   if (kind === 'moment') return <Notebook size={16} />
   if (kind === 'expense') return <Wallet size={16} />
   if (kind === 'plan') return <CalendarCheck size={16} />
+  if (kind === 'comment') return <ChatCircleDots size={16} />
+  if (kind === 'poll') return <CheckSquare size={16} />
   return <MapPin size={16} />
 }
 
@@ -67,6 +71,8 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
       nav.navigate({ name: 'trip', id: item.tripId, tab: 'ledger' })
     } else if (item.kind === 'plan' && item.tripId) {
       nav.navigate({ name: 'trip', id: item.tripId, tab: 'plan' })
+    } else if ((item.kind === 'comment' || item.kind === 'poll') && item.tripId) {
+      nav.navigate({ name: 'trip', id: item.tripId, tab: 'collab' })
     } else if (item.kind === 'expense') {
       nav.navigate({ name: 'expenses' })
     } else {

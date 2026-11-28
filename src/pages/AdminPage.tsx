@@ -1439,13 +1439,15 @@ function AISettings({
     }
   }
 
-  const loadModels = async (id: string) => {
-    setRowBusy({ id, kind: 'models' })
+  const loadModels = async (item: AdminEndpoint) => {
+    setRowBusy({ id: item.id, kind: 'models' })
     try {
-      // 用户常常填完密钥直接点拉取，这里先自动保存，避免服务端还在用旧密钥
-      if (!(await persist(true))) return
-      const result = await adminListModels(id)
-      setModelOptions((map) => ({ ...map, [id]: result.models }))
+      // 直接用表单里的地址和密钥拉取，不需要先保存
+      const result = await adminListModels(item)
+      setModelOptions((map) => ({ ...map, [item.id]: result.models }))
+      if (!item.model.trim() && result.models[0]) {
+        patchDraft(item.id, { model: result.models[0] })
+      }
       toast(tr('已拉取 {n} 个模型', { n: result.models.length }))
     } catch (error) {
       onError(error)
@@ -1643,7 +1645,7 @@ function AISettings({
                 type="button"
                 className="btn-ghost h-[42px] shrink-0 px-3 text-caption"
                 disabled={busy !== null || rowBusy !== null}
-                onClick={() => void loadModels(item.id)}
+                onClick={() => void loadModels(item)}
               >
                 {rowBusy?.id === item.id && rowBusy.kind === 'models' ? tr('拉取中…') : tr('拉取模型')}
               </button>

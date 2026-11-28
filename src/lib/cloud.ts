@@ -857,8 +857,20 @@ export function adminTestAI(endpointId?: string): Promise<{ ok: boolean; results
   })
 }
 
-export function adminListModels(endpointId: string): Promise<{ models: string[] }> {
-  return adminApi(`/admin/ai/models?endpointId=${encodeURIComponent(endpointId)}`, {
+export function adminListModels(endpoint: {
+  id: string
+  type?: string
+  base?: string
+  key?: string
+}): Promise<{ models: string[] }> {
+  return adminApi('/admin/ai/models', {
+    method: 'POST',
+    body: {
+      endpointId: endpoint.id,
+      type: endpoint.type,
+      base: endpoint.base,
+      key: endpoint.key,
+    },
     timeoutMs: 30_000,
   })
 }

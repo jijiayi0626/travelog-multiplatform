@@ -232,7 +232,7 @@ export type View =
   | { name: 'share'; code: string }
 
 export interface SearchResult {
-  kind: 'trip' | 'moment' | 'expense' | 'footprint' | 'plan'
+  kind: 'trip' | 'moment' | 'expense' | 'footprint' | 'plan' | 'comment' | 'poll'
   id: string
   tripId?: string
   title: string

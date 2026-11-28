@@ -975,12 +975,14 @@ function scoreOf(text: string, query: string): number {
 export async function searchAll(query: string): Promise<SearchResult[]> {
   const q = query.trim().toLowerCase()
   if (!q) return []
-  const [trips, moments, expenses, footprints, plans] = await Promise.all([
+  const [trips, moments, expenses, footprints, plans, comments, polls] = await Promise.all([
     listTrips(),
     listAllMoments(),
     listExpenses(),
     listFootprints(),
     getAll<Plan>('plans'),
+    getAll<Comment>('comments'),
+    getAll<Poll>('polls'),
   ])
   const tripTitle = new Map(trips.map((trip) => [trip.id, trip.title]))
   const results: SearchResult[] = []
@@ -1070,6 +1072,37 @@ export async function searchAll(query: string): Promise<SearchResult[]> {
         subtitle: `第 ${plan.dayIndex} 天${plan.time ? ` · ${plan.time}` : ''} · ${
           tripTitle.get(plan.tripId) ?? '计划'
         }`,
+        score,
+      })
+    }
+  }
+
+  for (const comment of comments) {
+    const score = scoreOf(comment.text, q)
+    if (score > 0) {
+      results.push({
+        kind: 'comment',
+        id: comment.id,
+        tripId: comment.tripId,
+        title: comment.text.slice(0, 32),
+        subtitle: `${tripTitle.get(comment.tripId) ?? '旅程'} · 旅伴评论`,
+        score,
+      })
+    }
+  }
+
+  for (const poll of polls) {
+    const score = Math.max(
+      scoreOf(poll.question, q),
+      scoreOf(poll.options.map((option) => option.text).join(' '), q),
+    )
+    if (score > 0) {
+      results.push({
+        kind: 'poll',
+        id: poll.id,
+        tripId: poll.tripId,
+        title: poll.question,
+        subtitle: `${tripTitle.get(poll.tripId) ?? '旅程'} · 投票`,
         score,
       })
     }
