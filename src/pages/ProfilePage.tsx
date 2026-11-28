@@ -16,7 +16,6 @@ import {
   Crown,
   Fingerprint,
   FirstAidKit,
-  Images,
   Info,
   Lock,
   Translate,
@@ -198,6 +197,7 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
   const [importing, setImporting] = useState(false)
   const [aiJobs, setAIJobs] = useState<AIJob[]>(() => getAIJobs())
   const [guestTools, setGuestTools] = useState(false)
+  const [moreSettings, setMoreSettings] = useState(false)
   const [dailyReminder, setDailyReminder] = useState(() => getDailyReminderEnabled())
   const [notifyBusy, setNotifyBusy] = useState(false)
   const [avatarBusy, setAvatarBusy] = useState(false)
@@ -1434,6 +1434,15 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
         `${group.title} ${group.keywords}`.toLowerCase().includes(normalizedQuery),
       )
     : settingGroups
+  // 常看的设置直接露出，其余收进「更多设置」，避免整页太长
+  const primarySettingKeys = ['sync', 'security', 'notify', 'appearance', 'data']
+  const shownGroups =
+    normalizedQuery || moreSettings
+      ? visibleGroups
+      : visibleGroups.filter((group) => primarySettingKeys.includes(group.key))
+  const hasMoreSettings = visibleGroups.some(
+    (group) => !primarySettingKeys.includes(group.key),
+  )
 
   if (!signedIn) {
     return (
@@ -1579,39 +1588,6 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
 
       <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <QuickAction
-          icon={<Images size={18} />}
-          title={lang === 'zh' ? '相册' : 'Album'}
-          value={`${data.stats.photoCount} 张`}
-          onClick={() => nav.navigate({ name: 'album' })}
-        />
-        <QuickAction
-          icon={<CloudSlash size={18} />}
-          title={t('profile.sync')}
-          value={pendingSync > 0 ? `${pendingSync} 条待同步` : '已连接'}
-          onClick={() => nav.navigate({ name: 'sync' })}
-        />
-        {aiJobs.length > 0 ? (
-          <QuickAction
-            icon={<Sparkle size={18} />}
-            title={tr('AI 任务')}
-            value={
-              aiActive.length > 0
-                ? tr('生成中 {n}', { n: aiActive.length })
-                : aiUnread.length > 0
-                  ? tr('{n} 条新结果', { n: aiUnread.length })
-                  : tr('{n} 条记录', { n: aiJobs.length })
-            }
-            onClick={() => window.dispatchEvent(new Event('travelog:ai-open'))}
-          />
-        ) : (
-          <QuickAction
-            icon={<Crown size={18} />}
-            title={tr('会员')}
-            value={memberActive ? '已开通' : '未开通'}
-            onClick={() => nav.navigate({ name: 'sync' })}
-          />
-        )}
-        <QuickAction
           icon={<BookOpen size={18} />}
           title={t('profile.recap')}
           value={tr('{n} 天', { n: data.stats.totalDays })}
@@ -1622,12 +1598,6 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
           title={tr('城市护照')}
           value={tr('{n} 座城市', { n: data.stats.cityCount })}
           onClick={() => nav.navigate({ name: 'passport' })}
-        />
-        <QuickAction
-          icon={<ClockCounterClockwise size={18} />}
-          title={tr('旅行月报')}
-          value={tr('本月汇总')}
-          onClick={() => nav.navigate({ name: 'monthly' })}
         />
         <QuickAction
           icon={<Fingerprint size={18} />}
@@ -1643,13 +1613,46 @@ export function ProfilePage({ embedded = false }: { embedded?: boolean }) {
         />
       </section>
 
+      {aiJobs.length > 0 ? (
+        <button
+          type="button"
+          onClick={() => window.dispatchEvent(new Event('travelog:ai-open'))}
+          className="press flex w-full items-center gap-2.5 rounded-xl border border-line bg-surface px-3.5 py-2.5 text-left"
+        >
+          <Sparkle size={16} className="shrink-0 text-accent" />
+          <span className="min-w-0 flex-1 truncate text-body-sm text-ink">{tr('AI 任务')}</span>
+          <span className="shrink-0 text-caption text-ink-3">
+            {aiActive.length > 0
+              ? tr('生成中 {n}', { n: aiActive.length })
+              : aiUnread.length > 0
+                ? tr('{n} 条新结果', { n: aiUnread.length })
+                : tr('{n} 条记录', { n: aiJobs.length })}
+          </span>
+          <CaretRight size={14} className="shrink-0 text-ink-3" />
+        </button>
+      ) : null}
+
       <section className="overflow-hidden rounded-2xl border border-line bg-surface">
         {settingsSearch}
-        {visibleGroups.map((group) => (
+        {shownGroups.map((group) => (
           <Fragment key={group.key}>{group.node}</Fragment>
         ))}
         {normalizedQuery && visibleGroups.length === 0 ? (
           <p className="px-4 py-6 text-center text-caption text-ink-3">没有匹配的设置</p>
+        ) : null}
+        {!normalizedQuery && hasMoreSettings ? (
+          <button
+            type="button"
+            onClick={() => setMoreSettings((open) => !open)}
+            aria-expanded={moreSettings}
+            className="press flex w-full items-center justify-center gap-1 border-t border-line px-4 py-3 text-caption text-ink-3 hover:text-ink"
+          >
+            {moreSettings ? tr('收起更多设置') : tr('更多设置（自动打卡、权限、关于）')}
+            <CaretDown
+              size={12}
+              className={cn('transition-transform', moreSettings && 'rotate-180')}
+            />
+          </button>
         ) : null}
       </section>
 

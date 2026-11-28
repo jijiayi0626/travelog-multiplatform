@@ -1,6 +1,4 @@
 import { useMemo, useRef, useState } from 'react'
-import { Browser } from '@capacitor/browser'
-import { Capacitor } from '@capacitor/core'
 import { ImageSquare, ListBullets, MagnifyingGlass, MapPin, MapTrifold, Plus } from '@phosphor-icons/react'
 import type { Footprint } from '../lib/types'
 import { deleteFootprint, listFootprints, saveFootprint } from '../lib/repo'
@@ -11,7 +9,6 @@ import { summarizeVisits, type ProvinceVisit } from '../lib/province'
 import { cn } from '../lib/cn'
 import { FootprintRow } from '../components/cards'
 import { ChinaMap } from '../components/ChinaMap'
-import { WorldMap } from '../components/WorldMap'
 import { ConfirmDialog, EmptyState, IconButton, Sheet, SkeletonList } from '../components/ui'
 import { EmptyArt } from '../components/EmptyArt'
 
@@ -52,7 +49,7 @@ export function FootprintsPage() {
   }
   const { data: footprints, loading } = useLoader(() => listFootprints(), [] as Footprint[], 'footprints')
   const [pendingDelete, setPendingDelete] = useState<Footprint | null>(null)
-  const [mode, setMode] = useState<'china' | 'map' | 'list'>('china')
+  const [mode, setMode] = useState<'china' | 'list'>('china')
   const [selected, setSelected] = useState<ProvinceVisit | null>(null)
 
   const visits = useMemo(() => summarizeVisits(footprints), [footprints])
@@ -79,15 +76,6 @@ export function FootprintsPage() {
     }
     return [...counter.entries()].sort((a, b) => b[1] - a[1])
   }, [footprints])
-
-  const openMap = async (footprint: Footprint) => {
-    const url = `https://www.openstreetmap.org/?mlat=${footprint.latitude}&mlon=${footprint.longitude}#map=14/${footprint.latitude}/${footprint.longitude}`
-    if (Capacitor.isNativePlatform()) {
-      await Browser.open({ url })
-      return
-    }
-    window.open(url, '_blank', 'noopener,noreferrer')
-  }
 
   return (
     <div className="space-y-5">
@@ -161,17 +149,6 @@ export function FootprintsPage() {
           >
             <MapPin size={14} />
             {t('footprints.china')}
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('map')}
-            className={cn(
-              'press flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-note',
-              mode === 'map' ? 'bg-surface text-ink shadow-sm' : 'text-ink-3',
-            )}
-          >
-            <MapTrifold size={14} />
-            {t('footprints.stars')}
           </button>
           <button
             type="button"
@@ -256,8 +233,6 @@ export function FootprintsPage() {
             </div>
           ) : null}
         </div>
-      ) : mode === 'map' ? (
-        <WorldMap footprints={footprints} onSelect={openMap} />
       ) : (
         <div className="grid gap-2.5 lg:grid-cols-2">
           {grouped.map(({ key, list }) => {
@@ -295,18 +270,6 @@ export function FootprintsPage() {
           })}
         </div>
       )}
-
-      {mode === 'map' && footprints.length > 0 ? (
-        <div className="grid gap-2.5 lg:grid-cols-2">
-          {footprints.slice(0, 6).map((footprint) => (
-            <FootprintRow
-              key={footprint.id}
-              footprint={footprint}
-              onDelete={() => setPendingDelete(footprint)}
-            />
-          ))}
-        </div>
-      ) : null}
 
       <Sheet
         open={selected !== null}

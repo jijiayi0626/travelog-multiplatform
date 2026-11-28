@@ -108,8 +108,6 @@ export const EN_TEXT: Record<string, string> = {
   'ESC 关闭': 'ESC to close',
 
   /* ---------- 世界地图 ---------- */
-  '足迹星图': 'Footprint map',
-  '打卡后，地点会落在星图上': 'Check in and places appear on the map',
 
   /* ---------- 中国地图 ---------- */
   '中国省份足迹地图': 'China province footprint map',

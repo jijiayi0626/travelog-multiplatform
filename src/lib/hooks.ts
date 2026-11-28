@@ -7,19 +7,28 @@ export function useLoader<T>(loader: () => Promise<T>, initial: T, key = ''): { 
   loaderRef.current = loader
   const [data, setData] = useState<T>(initial)
   const [loading, setLoading] = useState(true)
+  const keyRef = useRef(key)
+  const loadedRef = useRef(false)
 
   useEffect(() => {
     let alive = true
-    setLoading(true)
+    if (keyRef.current !== key) {
+      keyRef.current = key
+      loadedRef.current = false
+    }
+    // 只有首次加载或切换数据源时显示骨架屏；同步等后台刷新静默更新，避免整页闪一下
+    if (!loadedRef.current) setLoading(true)
     loaderRef.current()
       .then((value) => {
         if (alive) {
+          loadedRef.current = true
           setData(value)
           setLoading(false)
         }
       })
       .catch(() => {
         if (alive) {
+          loadedRef.current = true
           setLoading(false)
         }
       })
